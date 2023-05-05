@@ -1,0 +1,16 @@
+[package]
+name = "super_orchestrator"
+version = "0.0.0"
+edition = "2021"
+authors = ["Aaron Kutch <aaronkutch@att.net>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/AaronKutch/super_orchestrator"
+documentation = "https://docs.rs/super_orchestrator"
+description = "WIP container management"
+publish = false
+
+[dependencies]
+#clap = { version = "4.2", features = ["derive"] }
+#serde = { version = "1.0", default-features = false }
+tokio = { version = "1.28", features = ["full"] }
