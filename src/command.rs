@@ -1,205 +1,214 @@
 use core::fmt;
-use std::{
-    path::Path,
-    process::{ExitStatus, Stdio},
-};
+use std::process::{ExitStatus, Stdio};
 
 use tokio::{
     fs::File,
     io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
-    process::{Child, Command},
+    process::{self, Child},
     task,
 };
 
-#[derive(Debug)]
-pub struct ComplexCommand {
+use crate::{acquire_dir_path, acquire_file_path, Error, Result};
+
+#[derive(Debug, Clone)]
+pub struct Command {
     pub command: String,
     pub args: Vec<String>,
-    pub child: Option<Child>,
-    pub handles: Vec<tokio::task::JoinHandle<()>>,
+    /// Clears the environment variable map before applying `envs`
+    pub env_clear: bool,
+    /// Environment variable mappings
+    pub envs: Vec<(String, String)>,
+    /// Working directory for process
+    pub cwd: Option<String>,
+    pub stdout_file: Option<String>,
+    pub stderr_file: Option<String>,
+    /// Override to forward stdouts and stderrs to the current processes stdout
+    /// and stderr
     pub ci: bool,
+    /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
+    /// false should not be relied upon in normal program operation, `Commands`
+    /// should be properly consumed by a method taking `self` so that the child
+    /// process is cleaned up properly.
+    pub forget_on_drop: bool,
 }
 
-/// A more convenient command result that is returned in both failure and
-/// successful cases
 #[derive(Debug)]
-pub struct ComplexOutput {
-    /// This is nonempty when there was some failure of the command itself or
-    /// something else in the `ComplexCommand`
-    pub complex_err: String,
-    pub status: Option<ExitStatus>,
+pub struct Commander {
+    // do not make public, some functions assume this is available
+    child_process: Option<Child>,
+    pub handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+pub struct CommandResult {
+    pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
 }
 
-impl fmt::Display for ComplexOutput {
+impl fmt::Display for CommandResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
 
-impl ComplexCommand {
-    /// Spawns a command with piped stdout and stderr. If `wait` or
-    /// `wait_for_output` is not called this is left detached. Per
-    /// `ComplexCommand::new`, only one from each of the the `stdout_`,
-    /// `stderr_`, and `wait_` classes of functions should be called. `ci` makes
-    /// `stdout_` and `stderr_` functions pipe to the current process.
-    pub fn new(command: &str, args: &[&str], ci: bool) -> Result<Self, String> {
-        let child = Command::new(command)
-            .args(args)
+impl Command {
+    #[track_caller]
+    pub async fn run(&self) -> Result<Commander> {
+        let mut tmp = process::Command::new(self.command.to_owned());
+        if self.env_clear {
+            // must happen before the `envs` call
+            tmp.env_clear();
+        }
+        if let Some(ref cwd) = self.cwd {
+            // TODO when `track_caller` works on `async`, we might be able to remove some of
+            // these `locate`s
+            let cwd = match acquire_dir_path(cwd).await {
+                Ok(o) => o,
+                Err(e) => return Err(e.locate().generic_error(&format!("{self:?}.run() -> "))),
+            };
+            tmp.current_dir(cwd);
+        }
+        // do as much as possible before spawning the process
+        let stdout_file = if let Some(ref path) = self.stdout_file {
+            let path = match acquire_file_path(path).await {
+                Ok(o) => o,
+                Err(e) => return Err(e.locate().generic_error(&format!("{self:?}.run() -> "))),
+            };
+            Some(File::create(path).await?)
+        } else {
+            None
+        };
+        let child_res = tmp
+            .args(&self.args)
+            .envs(self.envs.iter().map(|x| (&x.0, &x.1)))
+            .kill_on_drop(!self.forget_on_drop)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("failed to spawn command {} {:?}: {}", command, args, e))?;
-        Ok(Self {
-            command: command.to_string(),
-            args: args.iter().map(|s| s.to_string()).collect(),
-            child: Some(child),
-            handles: vec![],
-            ci,
-        })
-    }
-
-    /// Spawns a task to continuously copy the stdout to a file
-    pub async fn stdout_to_file(mut self, path: &Path) -> Result<Self, String> {
-        let mut stdout = self.child.as_mut().unwrap().stdout.take().unwrap();
-        if self.ci {
-            // in CI mode print to stdout
-            let prefix = path.file_name().unwrap().to_str().unwrap().to_owned();
-            let mut lines = BufReader::new(stdout).lines();
-            let mut writer = BufWriter::new(tokio::io::stdout());
-            self.handles.push(task::spawn(async move {
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            let _ = writer
-                                .write(format!("{} | {}\n", prefix, line).as_bytes())
-                                .await
-                                .unwrap();
-                            writer.flush().await.unwrap();
+            .spawn();
+        match child_res {
+            Ok(mut child) => {
+                let child_id = child.id().unwrap_or(0);
+                let command = self.command.clone();
+                let mut res = Commander {
+                    child_process: None,
+                    handles: vec![],
+                };
+                // note: only one thing can take `child.stdout`
+                if self.ci {
+                    let stdout = child.stdout.take().unwrap();
+                    // in CI mode print to stdout
+                    let mut lines = BufReader::new(stdout).lines();
+                    let mut writer = BufWriter::new(tokio::io::stdout());
+                    res.handles.push(task::spawn(async move {
+                        loop {
+                            match lines.next_line().await {
+                                Ok(Some(line)) => {
+                                    let _ = writer
+                                        .write(
+                                            format!("{command} {child_id} stdout | {line}\n")
+                                                .as_bytes(),
+                                        )
+                                        .await
+                                        .unwrap();
+                                    writer.flush().await.unwrap();
+                                }
+                                Ok(None) => break,
+                                Err(e) => panic!("stdout line copier failed with {}", e),
+                            }
                         }
-                        Ok(None) => break,
-                        Err(e) => panic!("stdout line copier failed with {}", e),
-                    }
+                    }));
+                } else if let Some(mut stdout_file) = stdout_file {
+                    let mut stdout = child.stdout.take().unwrap();
+                    res.handles.push(task::spawn(async move {
+                        io::copy(&mut stdout, &mut stdout_file)
+                            .await
+                            .expect("stdout copier failed");
+                    }));
                 }
-            }));
-        } else {
-            let mut file = File::create(path)
-                .await
-                .map_err(|e| format!("failed to create stdout file: {}", e))?;
-            self.handles.push(task::spawn(async move {
-                io::copy(&mut stdout, &mut file).await.unwrap();
-            }));
+                res.child_process = Some(child);
+                Ok(res)
+            }
+            Err(e) => Err(Error::from(e)
+                .locate()
+                .generic_error(&format!("{self:?}.run() -> "))),
         }
-        Ok(self)
+    }
+}
+
+impl Commander {
+    /// Attempts to force the command to exit, but does not wait for the request
+    /// to take effect.
+    pub fn start_kill(&mut self) -> Result<()> {
+        self.child_process
+            .as_mut()
+            .unwrap()
+            .start_kill()
+            .map_err(From::from)
     }
 
-    /// Spawns a task to continuously copy the stderr to a file
-    pub async fn stderr_to_file(mut self, path: &Path) -> Result<Self, String> {
-        let mut stderr = self.child.as_mut().unwrap().stderr.take().unwrap();
-        if self.ci {
-            let prefix = path.file_name().unwrap().to_str().unwrap().to_owned();
-            let mut lines = BufReader::new(stderr).lines();
-            let mut writer = BufWriter::new(tokio::io::stderr());
-            self.handles.push(task::spawn(async move {
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            let _ = writer
-                                .write(format!("{} | {}\n", prefix, line).as_bytes())
-                                .await
-                                .unwrap();
-                            writer.flush().await.unwrap();
-                        }
-                        Ok(None) => break,
-                        Err(e) => panic!("stderr line copier failed with {}", e),
-                    }
-                }
-            }));
-        } else {
-            let mut file = File::create(path)
-                .await
-                .map_err(|e| format!("failed to create stderr file: {}", e))?;
-            self.handles.push(task::spawn(async move {
-                io::copy(&mut stderr, &mut file).await.unwrap();
-            }));
-        }
-        Ok(self)
+    /// Forces the command to exit
+    pub async fn kill(&mut self) -> Result<()> {
+        self.child_process
+            .as_mut()
+            .unwrap()
+            .kill()
+            .await
+            .map_err(From::from)
     }
 
-    /// On success the stdout is returned. The stderr is returned as the second
-    /// tuple element in both cases
-    pub async fn wait_for_output(mut self) -> Result<ComplexOutput, ComplexOutput> {
-        let output = match self.child.take().unwrap().wait_with_output().await {
+    #[track_caller]
+    pub async fn wait_with_output(mut self) -> Result<CommandResult> {
+        let output = match self.child_process.take().unwrap().wait_with_output().await {
             Ok(o) => o,
             Err(e) => {
-                return Err(ComplexOutput {
-                    complex_err: format!("failed when waiting on child: {}", e),
-                    status: None,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                })
+                return Err(Error::from(format!(
+                    "{self:?}.wait_with_output() -> failed when waiting on child: {}",
+                    e
+                )))
             }
         };
-        let mut complex_output = ComplexOutput {
-            complex_err: String::new(),
-            status: Some(output.status),
+        let mut complex_output = CommandResult {
+            status: output.status,
             stdout: String::new(),
             stderr: String::new(),
         };
         if let Ok(stderr) = String::from_utf8(output.stderr.clone()) {
             complex_output.stderr = stderr;
         } else {
-            complex_output.complex_err = format!("failed to parse stderr as utf8: {:?}", output);
-            return Err(complex_output)
+            return Err(Error::from(format!(
+                "{self:?}.wait_with_output() -> failed to parse stderr as utf8"
+            )))
         }
         if let Ok(stdout) = String::from_utf8(output.stdout.clone()) {
             complex_output.stdout = stdout;
         } else {
-            complex_output.complex_err = format!("failed to parse stdout as utf8: {:?}", output);
-            return Err(complex_output)
-        }
-        if !output.status.success() {
-            complex_output.complex_err = format!(
-                "`{} {:?}` command returned exit status {}",
-                self.command, self.args, output.status
-            );
-            return Err(complex_output)
+            return Err(Error::from(format!(
+                "{self:?}.wait_with_output() -> failed to parse stdout as utf8"
+            )))
         }
         while let Some(handle) = self.handles.pop() {
             match handle.await {
                 Ok(()) => (),
                 Err(e) => {
-                    complex_output.complex_err = format!("`ComplexCommand` task panicked: {}", e);
-                    return Err(complex_output)
+                    return Err(Error::from(format!(
+                        "{self:?}.wait_with_output() -> `Command` task panicked: {e}"
+                    )))
                 }
             }
         }
         Ok(complex_output)
     }
+}
 
-    /// Waits for successful completion, or returns an error
-    pub async fn wait(mut self) -> Result<(), String> {
-        let exit_status = self
-            .child
-            .take()
-            .unwrap()
-            .wait()
-            .await
-            .map_err(|e| format!("failed when waiting on child: {}", e))?;
-        let res = if exit_status.success() {
+impl CommandResult {
+    #[track_caller]
+    pub fn check_status(&self) -> Result<()> {
+        if self.status.success() {
             Ok(())
         } else {
-            Err(format!(
-                "`{} {:?}` command returned exit status {}",
-                self.command, self.args, exit_status
-            ))
-        };
-        while let Some(handle) = self.handles.pop() {
-            handle
-                .await
-                .map_err(|e| format!("`ComplexCommand` task panicked: {}", e))?;
+            Err(Error::from("{self:?}.check_status() -> unsuccessful"))
         }
-        res
     }
 }

@@ -1,7 +1,8 @@
-use std::{collections::BTreeMap, process::Command};
+use std::{collections::BTreeMap};
 
-use crate::{acquire_dir_path, acquire_file_path, ComplexCommand, Error};
+use crate::{acquire_dir_path, acquire_file_path, Command, Error};
 
+/*
 pub fn stop_containers(active_container_ids: &mut BTreeMap<String, String>) {
     for (name, id) in active_container_ids.iter() {
         let rm_output = Command::new("docker").args(["rm", id]).output().unwrap();
@@ -30,7 +31,7 @@ pub fn force_stop_containers(active_container_ids: &mut BTreeMap<String, String>
         }
     }
     active_container_ids.clear();
-}
+}*/
 
 pub struct Container {
     pub name: String,
@@ -42,12 +43,14 @@ pub struct Container {
 pub struct ContainerNetwork {
     pub network_name: String,
     pub containers: Vec<Container>,
+    /// is `--internal` by default
+    pub is_not_internal: bool,
     pub log_dir: String,
 }
 
 impl ContainerNetwork {
     pub async fn run(&mut self, ci_mode: bool) -> Result<(), Error> {
-        let ci = ci_mode;
+        let ci: bool = ci_mode;
         acquire_dir_path(&self.log_dir).await?;
         for container in &self.containers {
             acquire_file_path(&container.bin_path).await?;
@@ -57,12 +60,12 @@ impl ContainerNetwork {
         println!("creating docker network {}", self.network_name);
         // remove old network if it exists (there is no option to ignore nonexistent
         // networks, drop exit status errors)
-        let _ = ComplexCommand::new("docker", &["network", "rm", &self.network_name], ci)
+        let _ = Command::new("docker", &["network", "rm", &self.network_name], ci)
             .unwrap()
             .wait()
             .await;
         // create the network as `--internal`
-        ComplexCommand::new(
+        Command::new(
             "docker",
             &["network", "create", "--internal", &self.network_name],
             ci,
@@ -97,7 +100,7 @@ impl ContainerNetwork {
             if !container.extra_args.is_empty() {
                 args.push(&container.extra_args);
             }
-            match ComplexCommand::new("docker", &args, ci)
+            match Command::new("docker", &args, ci)
                 .unwrap()
                 .stderr_to_file(&log_dir.join("cmd_docker_create_err.log"))
                 .await
@@ -127,7 +130,7 @@ impl ContainerNetwork {
             let stderr = acquire_dir_path(&self.log_dir)
                 .await?
                 .join(format!("container_{}_err.log", container_name));
-            let cc = ComplexCommand::new("docker", &args, ci)
+            let cc = Command::new("docker", &args, ci)
                 .unwrap()
                 .stderr_to_file(&stderr)
                 .await
