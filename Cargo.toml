@@ -11,6 +11,7 @@ description = "WIP container management"
 publish = false
 
 [dependencies]
+thiserror = { version = "1.0" }
 #clap = { version = "4.2", features = ["derive"] }
 #serde = { version = "1.0", default-features = false }
 tokio = { version = "1.28", features = ["full"] }

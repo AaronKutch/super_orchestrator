@@ -1,10 +1,6 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{collections::BTreeMap, process::Command};
 
-use crate::{assert_dir_exists, assert_file_exists, ComplexCommand};
+use crate::{acquire_dir_path, acquire_file_path, ComplexCommand, Error};
 
 pub fn stop_containers(active_container_ids: &mut BTreeMap<String, String>) {
     for (name, id) in active_container_ids.iter() {
@@ -39,33 +35,22 @@ pub fn force_stop_containers(active_container_ids: &mut BTreeMap<String, String>
 pub struct Container {
     pub name: String,
     pub image: String,
-    pub bin_path: PathBuf,
+    pub bin_path: String,
     pub extra_args: String,
-}
-
-impl Container {
-    pub fn new(name: &str, image: &str, bin_path: &Path, extra_args: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            image: image.to_owned(),
-            bin_path: bin_path.to_owned(),
-            extra_args: extra_args.to_owned(),
-        }
-    }
 }
 
 pub struct ContainerNetwork {
     pub network_name: String,
     pub containers: Vec<Container>,
-    pub log_dir: PathBuf,
+    pub log_dir: String,
 }
 
 impl ContainerNetwork {
-    pub async fn run(&mut self, ci_mode: bool) -> Result<(), String> {
+    pub async fn run(&mut self, ci_mode: bool) -> Result<(), Error> {
         let ci = ci_mode;
-        assert_dir_exists(&self.log_dir)?;
+        acquire_dir_path(&self.log_dir).await?;
         for container in &self.containers {
-            assert_file_exists(&container.bin_path)?;
+            acquire_file_path(&container.bin_path).await?;
         }
 
         // create an `--internal` docker network
@@ -90,10 +75,11 @@ impl ContainerNetwork {
         // run all the creation first so that everything is pulled and prepared
         let mut active_container_ids: BTreeMap<String, String> = BTreeMap::new();
         for container in &self.containers {
-            let bin_path_s = container.bin_path.to_str().unwrap();
-            let bin_s = container.bin_path.file_name().unwrap().to_str().unwrap();
+            let bin_path = acquire_file_path(&container.bin_path).await?;
+            let log_dir = acquire_dir_path(&self.log_dir).await?;
+            let bin_s = bin_path.file_name().unwrap().to_str().unwrap();
             // just include the needed binary
-            let volume = format!("{}:/usr/bin/{}", bin_path_s, bin_s);
+            let volume = format!("{}:/usr/bin/{}", container.bin_path, bin_s);
             let mut args = vec![
                 "create",
                 "--rm",
@@ -113,7 +99,7 @@ impl ContainerNetwork {
             }
             match ComplexCommand::new("docker", &args, ci)
                 .unwrap()
-                .stderr_to_file(&self.log_dir.join("cmd_docker_create_err.log"))
+                .stderr_to_file(&log_dir.join("cmd_docker_create_err.log"))
                 .await
                 .unwrap()
                 .wait_for_output()
@@ -129,7 +115,7 @@ impl ContainerNetwork {
                 Err(e) => {
                     println!("force stopping all containers: {}\n", e);
                     force_stop_containers(&mut active_container_ids);
-                    return Err("failed when creating container".to_owned())
+                    return Err(Error::from("failed when creating container"))
                 }
             }
         }
@@ -138,8 +124,8 @@ impl ContainerNetwork {
         let mut ccs = vec![];
         for (container_name, id) in active_container_ids.clone().iter() {
             let args = vec!["start", "--attach", id];
-            let stderr = self
-                .log_dir
+            let stderr = acquire_dir_path(&self.log_dir)
+                .await?
                 .join(format!("container_{}_err.log", container_name));
             let cc = ComplexCommand::new("docker", &args, ci)
                 .unwrap()
@@ -159,7 +145,7 @@ impl ContainerNetwork {
             Err(e) => {
                 println!("force stopping all containers: {}\n", e);
                 force_stop_containers(&mut active_container_ids);
-                return Err("failed when waiting on last container".to_owned())
+                return Err(Error::from("failed when waiting on last container"))
             }
         }
 
