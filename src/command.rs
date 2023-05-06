@@ -33,14 +33,20 @@ pub struct Command {
 }
 
 #[derive(Debug)]
-pub struct Commander {
+#[must_use]
+pub struct CommandRunner {
+    // this information is kept around for failures
+    pub command: Command,
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
     pub handles: Vec<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
+#[must_use]
 pub struct CommandResult {
+    // this information is kept around for failures
+    pub command: Command,
     pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
@@ -53,8 +59,28 @@ impl fmt::Display for CommandResult {
 }
 
 impl Command {
+    /// Creates a `Command` that only sets the `command` and `args` and leaves other things as their default values.
+    pub fn new(command: &str, args: &[&str]) -> Self {
+        Self {
+            command: command.to_owned(),
+            args: args
+                .iter()
+                .fold(Vec::with_capacity(args.len()), |mut acc, e| {
+                    acc.push(e.to_string());
+                    acc
+                }),
+            env_clear: false,
+            envs: vec![],
+            cwd: None,
+            stdout_file: None,
+            stderr_file: None,
+            ci: false,
+            forget_on_drop: false,
+        }
+    }
+
     #[track_caller]
-    pub async fn run(&self) -> Result<Commander> {
+    pub async fn run(self) -> Result<CommandRunner> {
         let mut tmp = process::Command::new(self.command.to_owned());
         if self.env_clear {
             // must happen before the `envs` call
@@ -91,17 +117,14 @@ impl Command {
             Ok(mut child) => {
                 let child_id = child.id().unwrap_or(0);
                 let command = self.command.clone();
-                let mut res = Commander {
-                    child_process: None,
-                    handles: vec![],
-                };
+                let mut handles = vec![];
                 // note: only one thing can take `child.stdout`
                 if self.ci {
                     let stdout = child.stdout.take().unwrap();
                     // in CI mode print to stdout
                     let mut lines = BufReader::new(stdout).lines();
                     let mut writer = BufWriter::new(tokio::io::stdout());
-                    res.handles.push(task::spawn(async move {
+                    handles.push(task::spawn(async move {
                         loop {
                             match lines.next_line().await {
                                 Ok(Some(line)) => {
@@ -121,26 +144,38 @@ impl Command {
                     }));
                 } else if let Some(mut stdout_file) = stdout_file {
                     let mut stdout = child.stdout.take().unwrap();
-                    res.handles.push(task::spawn(async move {
+                    handles.push(task::spawn(async move {
                         io::copy(&mut stdout, &mut stdout_file)
                             .await
                             .expect("stdout copier failed");
                     }));
                 }
-                res.child_process = Some(child);
-                Ok(res)
+                Ok(CommandRunner {
+                    command: self,
+                    child_process: Some(child),
+                    handles,
+                })
             }
             Err(e) => Err(Error::from(e)
                 .locate()
                 .generic_error(&format!("{self:?}.run() -> "))),
         }
     }
+
+    #[track_caller]
+    pub async fn run_to_completion(self) -> Result<CommandResult> {
+        self.run()
+            .await
+            .map_err(|e| e.generic_error("Command::run_to_completion -> "))?
+            .wait_with_output()
+            .await
+    }
 }
 
-impl Commander {
+impl CommandRunner {
     /// Attempts to force the command to exit, but does not wait for the request
     /// to take effect.
-    pub fn start_kill(&mut self) -> Result<()> {
+    pub fn start_terminate(&mut self) -> Result<()> {
         self.child_process
             .as_mut()
             .unwrap()
@@ -149,7 +184,7 @@ impl Commander {
     }
 
     /// Forces the command to exit
-    pub async fn kill(&mut self) -> Result<()> {
+    pub async fn terminate(&mut self) -> Result<()> {
         self.child_process
             .as_mut()
             .unwrap()
@@ -158,6 +193,7 @@ impl Commander {
             .map_err(From::from)
     }
 
+    /// Note: If this function succeeds, it only means that the OS calls and parsing all succeeded, it does not mean that the command itself had a successful return status, use `assert_status` or check the `status` on the `CommandResult`.
     #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
         let output = match self.child_process.take().unwrap().wait_with_output().await {
@@ -169,25 +205,20 @@ impl Commander {
                 )))
             }
         };
-        let mut complex_output = CommandResult {
-            status: output.status,
-            stdout: String::new(),
-            stderr: String::new(),
-        };
-        if let Ok(stderr) = String::from_utf8(output.stderr.clone()) {
-            complex_output.stderr = stderr;
+        let stderr = if let Ok(stderr) = String::from_utf8(output.stderr.clone()) {
+            stderr
         } else {
             return Err(Error::from(format!(
                 "{self:?}.wait_with_output() -> failed to parse stderr as utf8"
-            )))
-        }
-        if let Ok(stdout) = String::from_utf8(output.stdout.clone()) {
-            complex_output.stdout = stdout;
+            )));
+        };
+        let stdout = if let Ok(stdout) = String::from_utf8(output.stdout.clone()) {
+            stdout
         } else {
             return Err(Error::from(format!(
                 "{self:?}.wait_with_output() -> failed to parse stdout as utf8"
-            )))
-        }
+            )));
+        };
         while let Some(handle) = self.handles.pop() {
             match handle.await {
                 Ok(()) => (),
@@ -198,13 +229,18 @@ impl Commander {
                 }
             }
         }
-        Ok(complex_output)
+        Ok(CommandResult {
+            command: self.command,
+            status: output.status,
+            stdout: String::new(),
+            stderr: String::new(),
+        })
     }
 }
 
 impl CommandResult {
     #[track_caller]
-    pub fn check_status(&self) -> Result<()> {
+    pub fn assert_success(&self) -> Result<()> {
         if self.status.success() {
             Ok(())
         } else {

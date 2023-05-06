@@ -8,6 +8,6 @@ mod error;
 mod paths;
 
 pub use command::*;
-//pub mod docker;
+pub mod docker;
 pub use error::*;
 pub use paths::*;
