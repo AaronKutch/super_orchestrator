@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::{acquire_dir_path, acquire_file_path, Command, Error, Result};
+use crate::{acquire_dir_path, acquire_file_path, Command, CommandRunner, Error, Result};
 
 pub struct Container {
     pub name: String,
     pub image: String,
-    // each string is passed in as `--build-arg "[String]"` (the quotations are added), so a string "ARG=val" would set the variable "ARG" for the docker file to use.
+    // each string is passed in as `--build-arg "[String]"` (the quotations are added), so a string
+    // "ARG=val" would set the variable "ARG" for the docker file to use.
     pub build_args: Vec<String>,
     // path to the entrypoint binary locally
     pub entrypoint_path: String,
@@ -21,6 +22,7 @@ pub struct ContainerNetwork {
     is_not_internal: bool,
     log_dir: String,
     active_container_ids: BTreeMap<String, String>,
+    container_runners: BTreeMap<String, CommandRunner>,
 }
 
 impl ContainerNetwork {
@@ -36,11 +38,12 @@ impl ContainerNetwork {
             is_not_internal,
             log_dir,
             active_container_ids: BTreeMap::new(),
+            container_runners: BTreeMap::new(),
         }
     }
 
     // just apply `rm -f` to all containers, ignoring errors
-    async fn unconditional_terminate(mut self) {
+    async fn unconditional_terminate(&mut self) {
         while let Some((_, id)) = self.active_container_ids.pop_first() {
             let _ = Command::new("docker", &["rm", "-f", &id])
                 .run_to_completion()
@@ -51,14 +54,15 @@ impl ContainerNetwork {
     /// Force removes all containers
     pub async fn terminate_all(mut self) -> Result<()> {
         while let Some(entry) = self.active_container_ids.first_entry() {
-            let comres = Command::new("docker", &["rm", "-f", &entry.get()])
+            let comres = Command::new("docker", &["rm", "-f", entry.get()])
                 .run_to_completion()
                 .await
                 .map_err(|e| e.generic_error("terminate_all -> "));
             if let Err(e) = comres {
-                // in case this is some weird one-off problem, we do not want to leave a whole network running
-                self.unconditional_terminate();
-                return Err(e);
+                // in case this is some weird one-off problem, we do not want to leave a whole
+                // network running
+                self.unconditional_terminate().await;
+                return Err(e)
             }
             // ignore status failures, because the container is probably already gone
             // TODO there is maybe some error message parsing we should do
@@ -71,29 +75,47 @@ impl ContainerNetwork {
 
     pub async fn run(&mut self) -> Result<()> {
         // preverification to prevent much more expensive later container creation undos
-        acquire_dir_path(&self.log_dir).await?;
+        let log_dir = acquire_dir_path(&self.log_dir)
+            .await?
+            .to_str()
+            .ok_or_else(|| {
+                Error::from(format!(
+                    "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
+                     String",
+                    self.log_dir
+                ))
+            })?
+            .to_owned();
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
         }
 
         // remove old network if it exists (there is no option to ignore nonexistent
-        // networks, drop exit status errors and let the creation command handle any higher order errors)
+        // networks, drop exit status errors and let the creation command handle any
+        // higher order errors)
         let _ = Command::new("docker", &["network", "rm", &self.network_name])
             .run_to_completion()
             .await;
-        let args: &[&str] = if self.is_not_internal {
-            &["network", "create", &self.network_name]
+        let comres = if self.is_not_internal {
+            Command::new("docker", &["network", "create", &self.network_name])
+                .run_to_completion()
+                .await?
         } else {
-            &["network", "create", "--internal", &self.network_name]
+            Command::new("docker", &[
+                "network",
+                "create",
+                "--internal",
+                &self.network_name,
+            ])
+            .run_to_completion()
+            .await?
         };
-        let comres = Command::new("docker", args).run_to_completion().await?;
         // TODO we can get the network id
         comres.assert_success()?;
 
         // run all the creation first so that everything is pulled and prepared
         for container in &self.containers {
             let bin_path = acquire_file_path(&container.entrypoint_path).await?;
-            let log_dir = acquire_dir_path(&self.log_dir).await?;
             let bin_s = bin_path.file_name().unwrap().to_str().unwrap();
             // just include the needed binary
             let volume = format!("{}:/usr/bin/{}", container.entrypoint_path, bin_s);
@@ -112,8 +134,12 @@ impl ContainerNetwork {
             args.push(&container.image);
             args.push(bin_s);
             // TODO
+            let mut tmp = vec![];
             for arg in &container.entrypoint_args {
-                args.push(&format!("\"{arg}\""));
+                tmp.push(format!("\"{arg}\""));
+            }
+            for s in &tmp {
+                args.push(s);
             }
             /*if !container.entrypoint_args.is_empty() {
                 let mut s = "[";
@@ -135,48 +161,34 @@ impl ContainerNetwork {
                             self.active_container_ids.insert(container.name.clone(), id);
                         }
                         Err(e) => {
-                            self.unconditional_terminate();
-                            return Err(e);
+                            self.unconditional_terminate().await;
+                            return Err(e)
                         }
                     }
                 }
                 Err(e) => {
-                    self.unconditional_terminate();
-                    return Err(e.generic_error("{self:?}.run() -> "));
+                    self.unconditional_terminate().await;
+                    return Err(e.generic_error("{self:?}.run() -> "))
                 }
             }
         }
 
         // start all containers
-        let mut ccs = vec![];
-        for (container_name, id) in active_container_ids.clone().iter() {
-            let args = vec!["start", "--attach", id];
-            let stderr = acquire_dir_path(&self.log_dir)
-                .await?
-                .join(format!("container_{}_err.log", container_name));
-            let cc = Command::new("docker", &args, ci)
-                .unwrap()
-                .stderr_to_file(&stderr)
-                .await
-                .unwrap();
-            ccs.push(cc);
-        }
-
-        let cc = ccs.pop().unwrap();
-        // wait on last container finishing
-        print!("waiting on last container... ",);
-        match cc.wait().await {
-            Ok(()) => {
-                println!("done");
-            }
-            Err(e) => {
-                println!("force stopping all containers: {}\n", e);
-                force_stop_containers(&mut active_container_ids);
-                return Err(Error::from("failed when waiting on last container"));
+        for (container_name, id) in self.active_container_ids.clone().iter() {
+            let mut command = Command::new("docker", &["start", "--attach", id]);
+            command.stderr_file = Some(format!("{}/container_{}_err.log", log_dir, container_name));
+            match command.run().await {
+                Ok(runner) => {
+                    self.container_runners
+                        .insert(container_name.clone(), runner);
+                }
+                Err(e) => {
+                    self.unconditional_terminate().await;
+                    return Err(e)
+                }
             }
         }
 
-        force_stop_containers(&mut active_container_ids);
         Ok(())
     }
 }

@@ -59,7 +59,8 @@ impl fmt::Display for CommandResult {
 }
 
 impl Command {
-    /// Creates a `Command` that only sets the `command` and `args` and leaves other things as their default values.
+    /// Creates a `Command` that only sets the `command` and `args` and leaves
+    /// other things as their default values.
     pub fn new(command: &str, args: &[&str]) -> Self {
         Self {
             command: command.to_owned(),
@@ -81,7 +82,7 @@ impl Command {
 
     #[track_caller]
     pub async fn run(self) -> Result<CommandRunner> {
-        let mut tmp = process::Command::new(self.command.to_owned());
+        let mut tmp = process::Command::new(&self.command);
         if self.env_clear {
             // must happen before the `envs` call
             tmp.env_clear();
@@ -193,7 +194,10 @@ impl CommandRunner {
             .map_err(From::from)
     }
 
-    /// Note: If this function succeeds, it only means that the OS calls and parsing all succeeded, it does not mean that the command itself had a successful return status, use `assert_status` or check the `status` on the `CommandResult`.
+    /// Note: If this function succeeds, it only means that the OS calls and
+    /// parsing all succeeded, it does not mean that the command itself had a
+    /// successful return status, use `assert_status` or check the `status` on
+    /// the `CommandResult`.
     #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
         let output = match self.child_process.take().unwrap().wait_with_output().await {
@@ -210,14 +214,14 @@ impl CommandRunner {
         } else {
             return Err(Error::from(format!(
                 "{self:?}.wait_with_output() -> failed to parse stderr as utf8"
-            )));
+            )))
         };
         let stdout = if let Ok(stdout) = String::from_utf8(output.stdout.clone()) {
             stdout
         } else {
             return Err(Error::from(format!(
                 "{self:?}.wait_with_output() -> failed to parse stdout as utf8"
-            )));
+            )))
         };
         while let Some(handle) = self.handles.pop() {
             match handle.await {
@@ -232,8 +236,8 @@ impl CommandRunner {
         Ok(CommandResult {
             command: self.command,
             status: output.status,
-            stdout: String::new(),
-            stderr: String::new(),
+            stdout,
+            stderr,
         })
     }
 }
