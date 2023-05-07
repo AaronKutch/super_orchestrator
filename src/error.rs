@@ -109,17 +109,17 @@ impl Error {
 pub trait MapAddError {
     type Output;
 
-    fn map_add_err<K: Into<ErrorKind>>(self, kind: K) -> Self::Output;
+    fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output;
 }
 
 impl<T> MapAddError for core::result::Result<T, Error> {
     type Output = core::result::Result<T, Error>;
 
     #[track_caller]
-    fn map_add_err<K: Into<ErrorKind>>(self, kind: K) -> Self::Output {
+    fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output {
         match self {
             Ok(o) => Ok(o),
-            Err(e) => Err(e.add_error(kind)),
+            Err(e) => Err(e.add_error(f())),
         }
     }
 }
@@ -128,10 +128,10 @@ impl<T> MapAddError for Option<T> {
     type Output = core::result::Result<T, Error>;
 
     #[track_caller]
-    fn map_add_err<K: Into<ErrorKind>>(self, kind: K) -> Self::Output {
+    fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output {
         match self {
             Some(o) => Ok(o),
-            None => Err(Error::from_kind(kind)),
+            None => Err(Error::from_kind(f())),
         }
     }
 }
@@ -140,13 +140,12 @@ impl<T, K0: Into<ErrorKind>> MapAddError for core::result::Result<T, K0> {
     type Output = core::result::Result<T, Error>;
 
     /// Transforms `Result<T, K0>` into `Result<T, Error>` while adding location
-    /// information and a second kind of error. The `second_kind` can just
-    /// be a unit struct if it is not needed
+    /// information and a second kind of error.
     #[track_caller]
-    fn map_add_err<K1: Into<ErrorKind>>(self, second_kind: K1) -> Self::Output {
+    fn map_add_err<K1: Into<ErrorKind>, F: FnOnce() -> K1>(self, f: F) -> Self::Output {
         match self {
             Ok(o) => Ok(o),
-            Err(kind) => Err(Error::from_kind(kind).add_error_no_location(second_kind)),
+            Err(kind) => Err(Error::from_kind(kind).add_error_no_location(f())),
         }
     }
 }
@@ -155,8 +154,8 @@ impl MapAddError for Error {
     type Output = core::result::Result<(), Error>;
 
     #[track_caller]
-    fn map_add_err<K: Into<ErrorKind>>(self, kind: K) -> Self::Output {
-        Err(self.add_error(kind))
+    fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output {
+        Err(self.add_error(f()))
     }
 }
 
@@ -164,8 +163,8 @@ impl<K0: Into<ErrorKind>> MapAddError for K0 {
     type Output = core::result::Result<(), Error>;
 
     #[track_caller]
-    fn map_add_err<K1: Into<ErrorKind>>(self, second_kind: K1) -> Self::Output {
-        Err(Error::from_kind(self).add_error(second_kind))
+    fn map_add_err<K1: Into<ErrorKind>, F: FnOnce() -> K1>(self, f: F) -> Self::Output {
+        Err(Error::from_kind(self).add_error(f()))
     }
 }
 

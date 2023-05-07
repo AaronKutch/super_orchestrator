@@ -97,14 +97,14 @@ impl Command {
             // these `locate`s
             let cwd = acquire_dir_path(cwd)
                 .await
-                .map_add_err(format!("{self:?}.run()"))?;
+                .map_add_err(|| format!("{self:?}.run()"))?;
             tmp.current_dir(cwd);
         }
         // do as much as possible before spawning the process
         let stdout_file = if let Some(ref path) = self.stdout_file {
             let path = acquire_file_path(path)
                 .await
-                .map_add_err(format!("{self:?}.run()"))?;
+                .map_add_err(|| format!("{self:?}.run()"))?;
             Some(File::create(path).await?)
         } else {
             None
@@ -117,7 +117,7 @@ impl Command {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_add_err(format!("{self:?}.run()"))?;
+            .map_add_err(|| format!("{self:?}.run()"))?;
         let child_id = child.id().unwrap_or(0);
         let command = self.command.clone();
         let mut handles = vec![];
@@ -161,7 +161,7 @@ impl Command {
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
-            .map_add_err("Command::run_to_completion")?
+            .map_add_err(|| "Command::run_to_completion")?
             .wait_with_output()
             .await
     }
@@ -175,7 +175,7 @@ impl CommandRunner {
             .as_mut()
             .unwrap()
             .start_kill()
-            .map_add_err(())
+            .map_add_err(|| ())
     }
 
     /// Forces the command to exit
@@ -185,7 +185,7 @@ impl CommandRunner {
             .unwrap()
             .kill()
             .await
-            .map_add_err(())
+            .map_add_err(|| ())
     }
 
     /// Note: If this function succeeds, it only means that the OS calls and
@@ -200,19 +200,19 @@ impl CommandRunner {
             .unwrap()
             .wait_with_output()
             .await
-            .map_add_err(format!(
-                "{self:?}.wait_with_output() -> failed when waiting on child",
-            ))?;
-        let stderr = String::from_utf8(output.stderr.clone()).map_add_err(format!(
-            "{self:?}.wait_with_output() -> failed to parse stderr as utf8"
-        ))?;
-        let stdout = String::from_utf8(output.stdout.clone()).map_add_err(format!(
-            "{self:?}.wait_with_output() -> failed to parse stdout as utf8"
-        ))?;
+            .map_add_err(|| {
+                format!("{self:?}.wait_with_output() -> failed when waiting on child",)
+            })?;
+        let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
+            format!("{self:?}.wait_with_output() -> failed to parse stderr as utf8")
+        })?;
+        let stdout = String::from_utf8(output.stdout.clone()).map_add_err(|| {
+            format!("{self:?}.wait_with_output() -> failed to parse stdout as utf8")
+        })?;
         while let Some(handle) = self.handles.pop() {
-            handle.await.map_add_err(format!(
-                "{self:?}.wait_with_output() -> `Command` task panicked"
-            ))?;
+            handle.await.map_add_err(|| {
+                format!("{self:?}.wait_with_output() -> `Command` task panicked")
+            })?;
         }
         Ok(CommandResult {
             command: self.command,

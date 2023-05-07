@@ -81,7 +81,7 @@ impl ContainerNetwork {
             let comres = Command::new("docker", &["rm", "-f", entry.get()])
                 .run_to_completion()
                 .await
-                .map_add_err("ContainerNetwork::terminate_all()");
+                .map_add_err(|| "ContainerNetwork::terminate_all()");
             if let Err(e) = comres {
                 // in case this is some weird one-off problem, we do not want to leave a whole
                 // network running
@@ -102,11 +102,13 @@ impl ContainerNetwork {
         let log_dir = acquire_dir_path(&self.log_dir)
             .await?
             .to_str()
-            .map_add_err(format!(
-                "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
-                 String",
-                self.log_dir
-            ))?
+            .map_add_err(|| {
+                format!(
+                    "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
+                     String",
+                    self.log_dir
+                )
+            })?
             .to_owned();
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
@@ -190,7 +192,7 @@ impl ContainerNetwork {
                 }
                 Err(e) => {
                     self.unconditional_terminate().await;
-                    return e.map_add_err("{self:?}.run()")
+                    return e.map_add_err(|| "{self:?}.run()")
                 }
             }
         }
