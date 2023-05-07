@@ -1,5 +1,8 @@
 use core::fmt;
-use std::process::{ExitStatus, Stdio};
+use std::{
+    fmt::{Debug, Display},
+    process::{ExitStatus, Stdio},
+};
 
 use tokio::{
     fs::File,
@@ -10,7 +13,7 @@ use tokio::{
 
 use crate::{acquire_dir_path, acquire_file_path, Error, MapAddError, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Command {
     pub command: String,
     pub args: Vec<String>,
@@ -30,6 +33,31 @@ pub struct Command {
     /// should be properly consumed by a method taking `self` so that the child
     /// process is cleaned up properly.
     pub forget_on_drop: bool,
+}
+
+impl Debug for Command {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut command = self.command.clone();
+        if !self.args.is_empty() {
+            command += " ";
+            for (i, arg) in self.args.iter().enumerate() {
+                command += arg;
+                if i != (self.args.len() - 1) {
+                    command += " ";
+                }
+            }
+        }
+        f.debug_struct("Command")
+            .field("command", &command)
+            .field("env_clear", &self.env_clear)
+            .field("envs", &self.envs)
+            .field("cwd", &self.cwd)
+            .field("stdout_file", &self.stdout_file)
+            .field("stderr_file", &self.stderr_file)
+            .field("ci", &self.ci)
+            .field("forget_on_drop", &self.forget_on_drop)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -52,7 +80,7 @@ pub struct CommandResult {
     pub stderr: String,
 }
 
-impl fmt::Display for CommandResult {
+impl Display for CommandResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
@@ -229,7 +257,9 @@ impl CommandResult {
         if self.status.success() {
             Ok(())
         } else {
-            Err(Error::from("{self:?}.check_status() -> unsuccessful"))
+            Err(Error::from(format!(
+                "{self:#?}.check_status() -> unsuccessful"
+            )))
         }
     }
 }

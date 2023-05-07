@@ -51,14 +51,22 @@ impl Debug for Error {
             f.write_fmt(format_args!("{location:?},\n"))?;
         }
         f.write_fmt(format_args!("], error_stack: [\n"))?;
-        for error in self.error_stack.iter().rev() {
+        for (i, error) in self.error_stack.iter().enumerate().rev() {
             match error {
                 ErrorKind::UnitError => (),
                 ErrorKind::StrError(s) => {
-                    f.write_fmt(format_args!("{s} ->\n"))?;
+                    if i == 0 {
+                        f.write_fmt(format_args!("{s}\n"))?;
+                    } else {
+                        f.write_fmt(format_args!("{s} ->\n"))?;
+                    }
                 }
                 ErrorKind::StringError(s) => {
-                    f.write_fmt(format_args!("{s} ->\n"))?;
+                    if i == 0 {
+                        f.write_fmt(format_args!("{s}\n"))?;
+                    } else {
+                        f.write_fmt(format_args!("{s} ->\n"))?;
+                    }
                 }
                 _ => {
                     f.write_fmt(format_args!("{error:?},\n"))?;

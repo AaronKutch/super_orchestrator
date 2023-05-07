@@ -112,6 +112,10 @@ impl ContainerNetwork {
             .to_owned();
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
+            // remove potentially previously existing container with same name
+            let _ = Command::new("docker", &["rm", &container.name])
+                .run_to_completion()
+                .await?;
         }
 
         // remove old network if it exists (there is no option to ignore nonexistent
