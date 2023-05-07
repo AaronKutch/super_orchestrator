@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::{acquire_dir_path, acquire_file_path, Command, CommandRunner, Error, Result};
+use crate::{
+    acquire_dir_path, acquire_file_path, Command, CommandRunner, Error, MapAddError, Result,
+};
 
 pub struct Container {
     pub name: String,
@@ -57,7 +59,7 @@ impl ContainerNetwork {
             let comres = Command::new("docker", &["rm", "-f", entry.get()])
                 .run_to_completion()
                 .await
-                .map_err(|e| e.generic_error("terminate_all -> "));
+                .map_add_err("terminate_all -> ");
             if let Err(e) = comres {
                 // in case this is some weird one-off problem, we do not want to leave a whole
                 // network running
@@ -168,7 +170,7 @@ impl ContainerNetwork {
                 }
                 Err(e) => {
                     self.unconditional_terminate().await;
-                    return Err(e.generic_error("{self:?}.run() -> "))
+                    return Err(e.add_error("{self:?}.run() -> "))
                 }
             }
         }

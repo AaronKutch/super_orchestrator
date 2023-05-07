@@ -15,8 +15,7 @@ pub async fn acquire_path(path_str: &str) -> Result<PathBuf> {
         Ok(path) => Ok(path),
         Err(e) => {
             // "No such file or directory" is garbage, add on path that caused it
-            Err(Error::from(e)
-                .generic_error(&format!("acquire_path(path_str: \"{path_str}\") -> ")))
+            Err(Error::from(e).add_error(format!("acquire_path(path_str: \"{path_str}\") -> ")))
         }
     }
 }
@@ -36,7 +35,7 @@ pub async fn acquire_file_path(file_path_str: &str) -> Result<PathBuf> {
                 )))
             }
         }
-        Err(e) => Err(Error::from(e).generic_error(&format!(
+        Err(e) => Err(Error::from(e).add_error(format!(
             "acquire_file_path(file_path_str: \"{file_path_str}\") -> "
         ))),
     }
@@ -57,7 +56,7 @@ pub async fn acquire_dir_path(dir_path_str: &str) -> Result<PathBuf> {
                 )))
             }
         }
-        Err(e) => Err(Error::from(e).generic_error(&format!(
+        Err(e) => Err(Error::from(e).add_error(format!(
             "acquire_dir_path(dir_path_str: \"{dir_path_str}\") -> "
         ))),
     }
