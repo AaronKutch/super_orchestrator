@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{
-    acquire_dir_path, acquire_file_path, Command, CommandRunner, Error, MapAddError, Result,
-};
+use crate::{acquire_dir_path, acquire_file_path, Command, CommandRunner, MapAddError, Result};
 
 pub struct Container {
     pub name: String,
@@ -14,6 +12,30 @@ pub struct Container {
     pub entrypoint_path: String,
     // passed in as ["arg1", "arg2", ...] with the bracket and quotations being added
     pub entrypoint_args: Vec<String>,
+}
+
+impl Container {
+    pub fn new(
+        name: &str,
+        image: &str,
+        build_args: &[&str],
+        entrypoint_path: &str,
+        entrypoint_args: &[&str],
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            image: image.to_owned(),
+            build_args: build_args.iter().fold(Vec::new(), |mut acc, e| {
+                acc.push(e.to_string());
+                acc
+            }),
+            entrypoint_path: entrypoint_path.to_owned(),
+            entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
+                acc.push(e.to_string());
+                acc
+            }),
+        }
+    }
 }
 
 #[must_use]
@@ -29,16 +51,16 @@ pub struct ContainerNetwork {
 
 impl ContainerNetwork {
     pub fn new(
-        network_name: String,
+        network_name: &str,
         containers: Vec<Container>,
         is_not_internal: bool,
-        log_dir: String,
+        log_dir: &str,
     ) -> Self {
         Self {
-            network_name,
+            network_name: network_name.to_owned(),
             containers,
             is_not_internal,
-            log_dir,
+            log_dir: log_dir.to_owned(),
             active_container_ids: BTreeMap::new(),
             container_runners: BTreeMap::new(),
         }
@@ -59,7 +81,7 @@ impl ContainerNetwork {
             let comres = Command::new("docker", &["rm", "-f", entry.get()])
                 .run_to_completion()
                 .await
-                .map_add_err("terminate_all -> ");
+                .map_add_err("ContainerNetwork::terminate_all()");
             if let Err(e) = comres {
                 // in case this is some weird one-off problem, we do not want to leave a whole
                 // network running
@@ -80,13 +102,11 @@ impl ContainerNetwork {
         let log_dir = acquire_dir_path(&self.log_dir)
             .await?
             .to_str()
-            .ok_or_else(|| {
-                Error::from(format!(
-                    "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
-                     String",
-                    self.log_dir
-                ))
-            })?
+            .map_add_err(format!(
+                "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
+                 String",
+                self.log_dir
+            ))?
             .to_owned();
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
@@ -170,7 +190,7 @@ impl ContainerNetwork {
                 }
                 Err(e) => {
                     self.unconditional_terminate().await;
-                    return Err(e.add_error("{self:?}.run() -> "))
+                    return e.map_add_err("{self:?}.run()")
                 }
             }
         }

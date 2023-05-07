@@ -1,6 +1,9 @@
 // https://github.com/dtolnay/thiserror/issues/142
 
-use std::panic::Location;
+use std::{
+    fmt::{self, Debug},
+    panic::Location,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
@@ -12,6 +15,14 @@ pub enum ErrorKind {
     StringError(String),
     #[error("StdIoError")]
     StdIoError(std::io::Error),
+    #[error("FromUtf8Error")]
+    FromUtf8Error(std::string::FromUtf8Error),
+    // this is more obscure but I think we should keep it because it deals with bad strings, and
+    // we don't want that in our generic string errors.
+    #[error("FromUtf16Error")]
+    FromUtf16Error(std::string::FromUtf16Error),
+    #[error("TokioJoinError")]
+    TokioJoinError(tokio::task::JoinError),
     //#[error("BorshDeserializeError")]
     //BorshDeserializeError(std::io::Error, Vec<u8>),
     //#[error("RonDeserializeError")]
@@ -26,10 +37,36 @@ pub enum ErrorKind {
 ///
 /// Import the `MapAddError` trait and use `.map_add_err` instead of `map_err`
 /// or other such functions.
-#[derive(Debug)]
 pub struct Error {
     pub error_stack: Vec<ErrorKind>,
     pub location_stack: Vec<&'static Location<'static>>,
+}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // in reverse order of a typical stack, I don't want to have to scroll up to see
+        // the more specific errors
+        f.write_fmt(format_args!("Error {{ location_stack: [\n"))?;
+        for location in self.location_stack.iter().rev() {
+            f.write_fmt(format_args!("{location:?},\n"))?;
+        }
+        f.write_fmt(format_args!("], error_stack: [\n"))?;
+        for error in self.error_stack.iter().rev() {
+            match error {
+                ErrorKind::UnitError => (),
+                ErrorKind::StrError(s) => {
+                    f.write_fmt(format_args!("{s} ->\n"))?;
+                }
+                ErrorKind::StringError(s) => {
+                    f.write_fmt(format_args!("{s} ->\n"))?;
+                }
+                _ => {
+                    f.write_fmt(format_args!("{error:?},\n"))?;
+                }
+            }
+        }
+        f.write_fmt(format_args!("] }}"))
+    }
 }
 
 impl Error {
@@ -114,6 +151,24 @@ impl<T, K0: Into<ErrorKind>> MapAddError for core::result::Result<T, K0> {
     }
 }
 
+impl MapAddError for Error {
+    type Output = core::result::Result<(), Error>;
+
+    #[track_caller]
+    fn map_add_err<K: Into<ErrorKind>>(self, kind: K) -> Self::Output {
+        Err(self.add_error(kind))
+    }
+}
+
+impl<K0: Into<ErrorKind>> MapAddError for K0 {
+    type Output = core::result::Result<(), Error>;
+
+    #[track_caller]
+    fn map_add_err<K1: Into<ErrorKind>>(self, second_kind: K1) -> Self::Output {
+        Err(Error::from_kind(self).add_error(second_kind))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 // Can't be automated by macro_rules because of mod paths and special cases.
@@ -168,6 +223,45 @@ impl From<std::io::Error> for ErrorKind {
 impl From<std::io::Error> for Error {
     #[track_caller]
     fn from(e: std::io::Error) -> Self {
+        Self::from_kind(e)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for ErrorKind {
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::FromUtf8Error(e)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    #[track_caller]
+    fn from(e: std::string::FromUtf8Error) -> Self {
+        Self::from_kind(e)
+    }
+}
+
+impl From<std::string::FromUtf16Error> for ErrorKind {
+    fn from(e: std::string::FromUtf16Error) -> Self {
+        Self::FromUtf16Error(e)
+    }
+}
+
+impl From<std::string::FromUtf16Error> for Error {
+    #[track_caller]
+    fn from(e: std::string::FromUtf16Error) -> Self {
+        Self::from_kind(e)
+    }
+}
+
+impl From<tokio::task::JoinError> for ErrorKind {
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::TokioJoinError(e)
+    }
+}
+
+impl From<tokio::task::JoinError> for Error {
+    #[track_caller]
+    fn from(e: tokio::task::JoinError) -> Self {
         Self::from_kind(e)
     }
 }
