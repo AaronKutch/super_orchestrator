@@ -2,13 +2,16 @@ use core::fmt;
 use std::{
     fmt::{Debug, Display},
     process::{ExitStatus, Stdio},
+    time::Duration,
 };
 
+use log::warn;
 use tokio::{
     fs::File,
     io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     process::{self, Child},
     task,
+    time::sleep,
 };
 
 use crate::{acquire_dir_path, acquire_file_path, Error, MapAddError, Result};
@@ -64,10 +67,25 @@ impl Debug for Command {
 #[must_use]
 pub struct CommandRunner {
     // this information is kept around for failures
-    pub command: Command,
+    command: Option<Command>,
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
-    pub handles: Vec<tokio::task::JoinHandle<()>>,
+    handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for CommandRunner {
+    fn drop(&mut self) {
+        // we could call `try_wait` and see if the process has actually exited or not,
+        // but the user should have called one of the consuming functions
+        if self.child_process.is_some() {
+            warn!(
+                "A `CommandRunner` was dropped and not properly consumed with a method that takes \
+                 `self`, if not consumed properly then the child process may continue using up \
+                 resources or be force stopped at any time. The `Command` to run was: {:#?}",
+                self.command
+            )
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -179,7 +197,7 @@ impl Command {
             }));
         }
         Ok(CommandRunner {
-            command: self,
+            command: Some(self),
             child_process: Some(child),
             handles,
         })
@@ -216,6 +234,10 @@ impl CommandRunner {
             .map_add_err(|| ())
     }
 
+    // TODO for ridiculous output sizes, we may want something that only looks at
+    // the exit status from `try_wait`, so keep the `_with_output` functions in case
+    // we want a plain `wait` function
+
     /// Note: If this function succeeds, it only means that the OS calls and
     /// parsing all succeeded, it does not mean that the command itself had a
     /// successful return status, use `assert_status` or check the `status` on
@@ -243,11 +265,48 @@ impl CommandRunner {
             })?;
         }
         Ok(CommandResult {
-            command: self.command,
+            command: self.command.take().unwrap(),
             status: output.status,
             stdout,
             stderr,
         })
+    }
+
+    /// The same as `wait_with_output` but it has a timeout. Returns `Err(self)`
+    /// on timeout. Returns `Ok(Err(...))` if there was an error with the
+    /// command. Returns `Ok(Ok(result))` for command success (but remember that
+    /// the `CommandResult` status might be unsuccessful).
+    pub async fn wait_with_output_timeout(
+        mut self,
+        duration: Duration,
+    ) -> std::result::Result<Result<CommandResult>, Self> {
+        // backoff control
+        let mut interval = Duration::from_millis(1);
+        let mut elapsed = Duration::ZERO;
+        loop {
+            match self.child_process.as_mut().unwrap().try_wait() {
+                Ok(o) => {
+                    if o.is_some() {
+                        return Ok(self.wait_with_output().await)
+                    }
+                }
+                Err(e) => {
+                    return Ok(Err(Error::from(e).add_err(
+                        "CommandRunner::wait_with_output_timeout failed at `try_wait` before \
+                         reaching timeout or completed command",
+                    )))
+                }
+            }
+            if elapsed > duration {
+                return Err(self)
+            }
+            sleep(interval).await;
+            elapsed = elapsed.checked_add(interval).unwrap();
+            // TODO is this a good default maximum interval?
+            if interval < Duration::from_millis(128) {
+                interval = interval.checked_mul(2).unwrap();
+            }
+        }
     }
 }
 

@@ -87,9 +87,9 @@ impl Error {
         }
     }
 
-    /// The same as [add_error] but without pushing location to stack
+    /// The same as [add_err] but without pushing location to stack
     #[track_caller]
-    pub fn add_error_no_location<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
+    pub fn add_err_no_location<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
         self.error_stack.push(kind.into());
         self.location_stack.push(Location::caller());
         self
@@ -100,7 +100,7 @@ impl Error {
     /// otherwise. If `extra` is nonempty, also prefixes the error string with
     /// it. Adds `track_caller` location to the stack
     #[track_caller]
-    pub fn add_error<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
+    pub fn add_err<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
         self.error_stack.push(kind.into());
         self.location_stack.push(Location::caller());
         self
@@ -127,7 +127,7 @@ impl<T> MapAddError for core::result::Result<T, Error> {
     fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output {
         match self {
             Ok(o) => Ok(o),
-            Err(e) => Err(e.add_error(f())),
+            Err(e) => Err(e.add_err(f())),
         }
     }
 }
@@ -153,7 +153,7 @@ impl<T, K0: Into<ErrorKind>> MapAddError for core::result::Result<T, K0> {
     fn map_add_err<K1: Into<ErrorKind>, F: FnOnce() -> K1>(self, f: F) -> Self::Output {
         match self {
             Ok(o) => Ok(o),
-            Err(kind) => Err(Error::from_kind(kind).add_error_no_location(f())),
+            Err(kind) => Err(Error::from_kind(kind).add_err_no_location(f())),
         }
     }
 }
@@ -163,7 +163,7 @@ impl MapAddError for Error {
 
     #[track_caller]
     fn map_add_err<K: Into<ErrorKind>, F: FnOnce() -> K>(self, f: F) -> Self::Output {
-        Err(self.add_error(f()))
+        Err(self.add_err(f()))
     }
 }
 
@@ -172,7 +172,7 @@ impl<K0: Into<ErrorKind>> MapAddError for K0 {
 
     #[track_caller]
     fn map_add_err<K1: Into<ErrorKind>, F: FnOnce() -> K1>(self, f: F) -> Self::Output {
-        Err(Error::from_kind(self).add_error(f()))
+        Err(Error::from_kind(self).add_err(f()))
     }
 }
 
