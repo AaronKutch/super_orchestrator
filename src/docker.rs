@@ -1,6 +1,11 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
-use crate::{acquire_dir_path, acquire_file_path, Command, CommandRunner, MapAddError, Result};
+use log::warn;
+use tokio::time::Instant;
+
+use crate::{
+    acquire_dir_path, acquire_file_path, Command, CommandResult, CommandRunner, MapAddError, Result,
+};
 
 pub struct Container {
     pub name: String,
@@ -47,6 +52,20 @@ pub struct ContainerNetwork {
     log_dir: String,
     active_container_ids: BTreeMap<String, String>,
     container_runners: BTreeMap<String, CommandRunner>,
+    container_results: BTreeMap<String, CommandResult>,
+}
+
+impl Drop for ContainerNetwork {
+    fn drop(&mut self) {
+        if !self.container_runners.is_empty() {
+            warn!(
+                "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
+                 running. If not consumed properly then the internal commands may continue using \
+                 up resources or be force stopped at any time",
+                self.network_name
+            )
+        }
+    }
 }
 
 impl ContainerNetwork {
@@ -63,7 +82,12 @@ impl ContainerNetwork {
             log_dir: log_dir.to_owned(),
             active_container_ids: BTreeMap::new(),
             container_runners: BTreeMap::new(),
+            container_results: BTreeMap::new(),
         }
+    }
+
+    pub fn get_ids(&self) -> Vec<String> {
+        self.active_container_ids.keys().cloned().collect()
     }
 
     // just apply `rm -f` to all containers, ignoring errors
@@ -218,5 +242,49 @@ impl ContainerNetwork {
         }
 
         Ok(())
+    }
+
+    /// Returns `Err(timed_out_id)` on timeout, `Ok(Err(..))` on internal error,
+    /// `Ok(Ok(()))` on success in waiting for all containers to stop
+    pub async fn wait_timeout(
+        &mut self,
+        mut ids_to_wait_on: Vec<String>,
+        duration: Duration,
+    ) -> std::result::Result<Result<()>, String> {
+        let start = Instant::now();
+        let mut current = start;
+        while let Some(id) = ids_to_wait_on.pop() {
+            let runner = match self.container_runners.remove(&id).map_add_err(|| {
+                "ContainerNetwork::wait_timeout -> id \"{id}\" not found in the network"
+            }) {
+                Ok(o) => o,
+                Err(e) => {
+                    return Ok(Err(e))
+                }
+            };
+            let elapsed = current.saturating_duration_since(start);
+            match runner
+                .wait_with_output_timeout(duration.checked_sub(elapsed).unwrap_or(Duration::ZERO))
+                .await
+            {
+                Ok(Ok(command_result)) => {
+                    self.active_container_ids.remove(&id).unwrap();
+                    self.container_results.insert(id, command_result);
+                }
+                Ok(Err(e)) => {
+                    self.active_container_ids.remove(&id).unwrap();
+                    return Ok(e.map_add_err(|| {
+                        "ContainerNetwork::wait_timeout encountered error in command runner"
+                    }))
+                }
+                Err(runner) => {
+                    // reinsert
+                    self.container_runners.insert(id.clone(), runner);
+                    return Err(id)
+                }
+            }
+            current = Instant::now();
+        }
+        Ok(Ok(()))
     }
 }
