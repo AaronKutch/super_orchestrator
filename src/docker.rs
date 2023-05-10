@@ -10,6 +10,9 @@ use crate::{
 #[derive(Debug)]
 pub struct Container {
     pub name: String,
+    pub dockerfile: Option<String>,
+    // if `dockerfile` is not set, this should be an existing image name, otherwise this becomes
+    // the name of the build image
     pub image: String,
     // each string is passed in as `--build-arg "[String]"` (the quotations are added), so a string
     // "ARG=val" would set the variable "ARG" for the docker file to use.
@@ -23,6 +26,7 @@ pub struct Container {
 impl Container {
     pub fn new(
         name: &str,
+        dockerfile: Option<&str>,
         image: &str,
         build_args: &[&str],
         entrypoint_path: &str,
@@ -30,6 +34,7 @@ impl Container {
     ) -> Self {
         Self {
             name: name.to_owned(),
+            dockerfile: dockerfile.map(|s| s.to_owned()),
             image: image.to_owned(),
             build_args: build_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
@@ -138,20 +143,27 @@ impl ContainerNetwork {
             .to_owned();
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
+            if let Some(ref dockerfile) = container.dockerfile {
+                acquire_file_path(dockerfile).await?;
+            }
             // remove potentially previously existing container with same name
             let _ = Command::new("docker", &["rm", &container.name])
+                .ci_mode(ci_mode)
                 .run_to_completion()
                 .await?;
         }
+        //let debug_log = format!("container_network_{}.log", self.)
 
         // remove old network if it exists (there is no option to ignore nonexistent
         // networks, drop exit status errors and let the creation command handle any
         // higher order errors)
         let _ = Command::new("docker", &["network", "rm", &self.network_name])
+            .ci_mode(ci_mode)
             .run_to_completion()
             .await;
         let comres = if self.is_not_internal {
             Command::new("docker", &["network", "create", &self.network_name])
+                .ci_mode(ci_mode)
                 .run_to_completion()
                 .await?
         } else {
@@ -161,6 +173,7 @@ impl ContainerNetwork {
                 "--internal",
                 &self.network_name,
             ])
+            .ci_mode(ci_mode)
             .run_to_completion()
             .await?
         };
@@ -169,6 +182,28 @@ impl ContainerNetwork {
 
         // run all the creation first so that everything is pulled and prepared
         for container in &self.containers {
+            if let Some(ref dockerfile) = container.dockerfile {
+                let mut dockerfile = acquire_file_path(dockerfile).await?;
+                // yes we do need to do this because of the weird way docker build works
+                let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
+                let mut args = vec!["build", "-t", &container.image, "--file", &dockerfile_full];
+                dockerfile.pop();
+                let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
+                // TODO
+                let mut tmp = vec![];
+                for arg in &container.build_args {
+                    tmp.push(format!("\"{arg}\""));
+                }
+                for s in &tmp {
+                    args.push(s);
+                }
+                args.push(&dockerfile_dir);
+                Command::new("docker", &args)
+                    .ci_mode(ci_mode)
+                    .run_to_completion()
+                    .await?.assert_success()?;
+            }
+
             let bin_path = acquire_file_path(&container.entrypoint_path).await?;
             let bin_s = bin_path.file_name().unwrap().to_str().unwrap();
             // just include the needed binary
@@ -184,8 +219,9 @@ impl ContainerNetwork {
                 &container.name,
                 "--volume",
                 &volume,
+                "-t",
+                &container.image,
             ];
-            args.push(&container.image);
             args.push(bin_s);
             // TODO
             let mut tmp = vec![];
@@ -205,7 +241,11 @@ impl ContainerNetwork {
                 args.push(&container.entrypoint_args);
                 s += "]";
             }*/
-            match Command::new("docker", &args).run_to_completion().await {
+            match Command::new("docker", &args)
+                .ci_mode(ci_mode)
+                .run_to_completion()
+                .await
+            {
                 Ok(output) => {
                     match output.assert_success() {
                         Ok(_) => {
