@@ -201,7 +201,8 @@ impl ContainerNetwork {
                 Command::new("docker", &args)
                     .ci_mode(ci_mode)
                     .run_to_completion()
-                    .await?.assert_success()?;
+                    .await?
+                    .assert_success()?;
             }
 
             let bin_path = acquire_file_path(&container.entrypoint_path).await?;
