@@ -71,6 +71,7 @@ pub struct CommandRunner {
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
     handles: Vec<tokio::task::JoinHandle<()>>,
+    result: Option<CommandResult>,
 }
 
 impl Drop for CommandRunner {
@@ -79,9 +80,9 @@ impl Drop for CommandRunner {
         // but the user should have called one of the consuming functions
         if self.child_process.is_some() {
             warn!(
-                "A `CommandRunner` was dropped and not properly consumed with a method that takes \
-                 `self`, if not consumed properly then the child process may continue using up \
-                 resources or be force stopped at any time. The `Command` to run was: {:#?}",
+                "A `CommandRunner` was dropped and not properly finished, if not finished then \
+                 the child process may continue using up resources or be force stopped at any \
+                 time. The `Command` to run was: {:#?}",
                 self.command
             )
         }
@@ -200,6 +201,7 @@ impl Command {
             command: Some(self),
             child_process: Some(child),
             handles,
+            result: None,
         })
     }
 
@@ -238,12 +240,8 @@ impl CommandRunner {
     // the exit status from `try_wait`, so keep the `_with_output` functions in case
     // we want a plain `wait` function
 
-    /// Note: If this function succeeds, it only means that the OS calls and
-    /// parsing all succeeded, it does not mean that the command itself had a
-    /// successful return status, use `assert_status` or check the `status` on
-    /// the `CommandResult`.
     #[track_caller]
-    pub async fn wait_with_output(mut self) -> Result<CommandResult> {
+    async fn wait_with_output_internal(&mut self) -> Result<()> {
         let output = self
             .child_process
             .take()
@@ -264,22 +262,26 @@ impl CommandRunner {
                 format!("{self:?}.wait_with_output() -> `Command` task panicked")
             })?;
         }
-        Ok(CommandResult {
+        self.result = Some(CommandResult {
             command: self.command.take().unwrap(),
             status: output.status,
             stdout,
             stderr,
-        })
+        });
+        Ok(())
     }
 
-    /// The same as `wait_with_output` but it has a timeout. Returns `Err(self)`
-    /// on timeout. Returns `Ok(Err(...))` if there was an error with the
-    /// command. Returns `Ok(Ok(result))` for command success (but remember that
-    /// the `CommandResult` status might be unsuccessful).
-    pub async fn wait_with_output_timeout(
-        mut self,
-        duration: Duration,
-    ) -> std::result::Result<Result<CommandResult>, Self> {
+    /// Note: If this function succeeds, it only means that the OS calls and
+    /// parsing all succeeded, it does not mean that the command itself had a
+    /// successful return status, use `assert_status` or check the `status` on
+    /// the `CommandResult`.
+    #[track_caller]
+    pub async fn wait_with_output(mut self) -> Result<CommandResult> {
+        self.wait_with_output_internal().await?;
+        Ok(self.result.take().unwrap())
+    }
+
+    pub async fn wait_with_timeout(&mut self, duration: Duration) -> Result<()> {
         // backoff control
         let mut interval = Duration::from_millis(1);
         let mut elapsed = Duration::ZERO;
@@ -287,18 +289,18 @@ impl CommandRunner {
             match self.child_process.as_mut().unwrap().try_wait() {
                 Ok(o) => {
                     if o.is_some() {
-                        return Ok(self.wait_with_output().await)
+                        break
                     }
                 }
                 Err(e) => {
-                    return Ok(Err(Error::from(e).add_err(
+                    return e.map_add_err(|| {
                         "CommandRunner::wait_with_output_timeout failed at `try_wait` before \
-                         reaching timeout or completed command",
-                    )))
+                         reaching timeout or completed command"
+                    })
                 }
             }
             if elapsed > duration {
-                return Err(self)
+                return Err(Error::timeout())
             }
             sleep(interval).await;
             elapsed = elapsed.checked_add(interval).unwrap();
@@ -307,6 +309,12 @@ impl CommandRunner {
                 interval = interval.checked_mul(2).unwrap();
             }
         }
+        self.wait_with_output_internal().await?;
+        Ok(())
+    }
+
+    pub fn get_command_result(&mut self) -> Option<CommandResult> {
+        self.result.take()
     }
 }
 

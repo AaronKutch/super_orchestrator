@@ -5,10 +5,16 @@ use std::{
     panic::Location,
 };
 
+// The intention with `TimeoutError` is that if it is in the error stack, a
+// timeout occured. When other timeout structs are used, this should be added
+// on.
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
+    // used for special cases where we need something
     #[error("UnitError")]
     UnitError,
+    #[error("TimeoutError")]
+    TimeoutError,
     #[error("StrError")]
     StrError(&'static str),
     #[error("StringError")]
@@ -87,6 +93,12 @@ impl Error {
         }
     }
 
+    /// Returns a base timeout error
+    #[track_caller]
+    pub fn timeout() -> Self {
+        Self::from_kind(ErrorKind::TimeoutError)
+    }
+
     /// The same as [add_err] but without pushing location to stack
     #[track_caller]
     pub fn add_err_no_location<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
@@ -111,6 +123,16 @@ impl Error {
     pub fn add_location(mut self) -> Self {
         self.location_stack.push(Location::caller());
         self
+    }
+
+    /// Returns if a `TimeoutError` is in the error stack
+    pub fn is_timeout(&self) -> bool {
+        for error in &self.error_stack {
+            if matches!(error, ErrorKind::TimeoutError) {
+                return true
+            }
+        }
+        false
     }
 }
 

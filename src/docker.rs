@@ -7,6 +7,7 @@ use crate::{
     acquire_dir_path, acquire_file_path, Command, CommandResult, CommandRunner, MapAddError, Result,
 };
 
+#[derive(Debug)]
 pub struct Container {
     pub name: String,
     pub image: String,
@@ -44,6 +45,7 @@ impl Container {
 }
 
 #[must_use]
+#[derive(Debug)]
 pub struct ContainerNetwork {
     network_name: String,
     containers: Vec<Container>,
@@ -246,45 +248,45 @@ impl ContainerNetwork {
 
     /// Returns `Err(timed_out_id)` on timeout, `Ok(Err(..))` on internal error,
     /// `Ok(Ok(()))` on success in waiting for all containers to stop
-    pub async fn wait_timeout(
+    pub async fn wait_with_timeout(
         &mut self,
         mut ids_to_wait_on: Vec<String>,
         duration: Duration,
-    ) -> std::result::Result<Result<()>, String> {
+    ) -> Result<()> {
         let start = Instant::now();
         let mut current = start;
         while let Some(id) = ids_to_wait_on.pop() {
-            let runner = match self.container_runners.remove(&id).map_add_err(|| {
+            let runner = self.container_runners.get_mut(&id).map_add_err(|| {
                 "ContainerNetwork::wait_timeout -> id \"{id}\" not found in the network"
-            }) {
-                Ok(o) => o,
-                Err(e) => {
-                    return Ok(Err(e))
-                }
-            };
+            })?;
             let elapsed = current.saturating_duration_since(start);
-            match runner
-                .wait_with_output_timeout(duration.checked_sub(elapsed).unwrap_or(Duration::ZERO))
+            if let Err(e) = runner
+                .wait_with_timeout(duration.checked_sub(elapsed).unwrap_or(Duration::ZERO))
                 .await
             {
-                Ok(Ok(command_result)) => {
+                if e.is_timeout() {
+                    return e.map_add_err(|| {
+                        format!(
+                            "ContainerNetwork::wait_timeout() timeout waiting for container id \
+                             \"{id}\" to complete"
+                        )
+                    })
+                } else {
                     self.active_container_ids.remove(&id).unwrap();
-                    self.container_results.insert(id, command_result);
-                }
-                Ok(Err(e)) => {
-                    self.active_container_ids.remove(&id).unwrap();
-                    return Ok(e.map_add_err(|| {
-                        "ContainerNetwork::wait_timeout encountered error in command runner"
-                    }))
-                }
-                Err(runner) => {
-                    // reinsert
-                    self.container_runners.insert(id.clone(), runner);
-                    return Err(id)
+                    return e.map_add_err(|| {
+                        format!(
+                            "ContainerNetwork::wait_timeout() command runner error with container \
+                             id \"{id}\""
+                        )
+                    })
                 }
             }
+            self.active_container_ids.remove(&id).unwrap();
+            self.container_results
+                .insert(id.clone(), runner.get_command_result().unwrap());
+            self.container_runners.remove(&id);
             current = Instant::now();
         }
-        Ok(Ok(()))
+        Ok(())
     }
 }
