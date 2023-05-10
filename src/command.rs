@@ -14,7 +14,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, acquire_file_path, Error, MapAddError, Result};
+use crate::{acquire_dir_path, Error, MapAddError, Result};
 
 #[derive(Clone)]
 pub struct Command {
@@ -26,8 +26,8 @@ pub struct Command {
     pub envs: Vec<(String, String)>,
     /// Working directory for process
     pub cwd: Option<String>,
-    pub stdout_file: Option<String>,
-    pub stderr_file: Option<String>,
+    pub stdout_dir_file: Option<(String, String)>,
+    pub stderr_dir_file: Option<(String, String)>,
     /// Override to forward stdouts and stderrs to the current processes stdout
     /// and stderr
     pub ci: bool,
@@ -55,8 +55,8 @@ impl Debug for Command {
             .field("env_clear", &self.env_clear)
             .field("envs", &self.envs)
             .field("cwd", &self.cwd)
-            .field("stdout_file", &self.stdout_file)
-            .field("stderr_file", &self.stderr_file)
+            .field("stdout_dir_file", &self.stdout_dir_file)
+            .field("stderr_dir_file", &self.stderr_dir_file)
             .field("ci", &self.ci)
             .field("forget_on_drop", &self.forget_on_drop)
             .finish()
@@ -120,8 +120,8 @@ impl Command {
             env_clear: false,
             envs: vec![],
             cwd: None,
-            stdout_file: None,
-            stderr_file: None,
+            stdout_dir_file: None,
+            stderr_dir_file: None,
             ci: false,
             forget_on_drop: false,
         }
@@ -148,10 +148,20 @@ impl Command {
             tmp.current_dir(cwd);
         }
         // do as much as possible before spawning the process
-        let stdout_file = if let Some(ref path) = self.stdout_file {
-            let path = acquire_file_path(path)
+        let stdout_file = if let Some((ref dir, ref file)) = self.stdout_dir_file {
+            let mut path = acquire_dir_path(dir)
                 .await
                 .map_add_err(|| format!("{self:?}.run()"))?;
+            path.push(file);
+            Some(File::create(path).await?)
+        } else {
+            None
+        };
+        let stderr_file = if let Some((ref dir, ref file)) = self.stderr_dir_file {
+            let mut path = acquire_dir_path(dir)
+                .await
+                .map_add_err(|| format!("{self:?}.run()"))?;
+            path.push(file);
             Some(File::create(path).await?)
         } else {
             None
@@ -166,7 +176,6 @@ impl Command {
             .spawn()
             .map_add_err(|| format!("{self:?}.run()"))?;
         let child_id = child.id().unwrap_or(0);
-        let command = self.command.clone();
         let mut handles = vec![];
         // note: only one thing can take `child.stdout`
         if self.ci {
@@ -174,6 +183,7 @@ impl Command {
             // in CI mode print to stdout
             let mut lines = BufReader::new(stdout).lines();
             let mut writer = BufWriter::new(tokio::io::stdout());
+            let command = self.command.clone();
             handles.push(task::spawn(async move {
                 loop {
                     match lines.next_line().await {
@@ -189,13 +199,42 @@ impl Command {
                     }
                 }
             }));
-        } else if let Some(mut stdout_file) = stdout_file {
-            let mut stdout = child.stdout.take().unwrap();
+            let stderr = child.stderr.take().unwrap();
+            let mut lines = BufReader::new(stderr).lines();
+            let mut writer = BufWriter::new(tokio::io::stdout());
+            let command = self.command.clone();
             handles.push(task::spawn(async move {
-                io::copy(&mut stdout, &mut stdout_file)
-                    .await
-                    .expect("stdout copier failed");
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            let _ = writer
+                                .write(format!("{command} {child_id} stderr | {line}\n").as_bytes())
+                                .await
+                                .unwrap();
+                            writer.flush().await.unwrap();
+                        }
+                        Ok(None) => break,
+                        Err(e) => panic!("stderr line copier failed with {}", e),
+                    }
+                }
             }));
+        } else {
+            if let Some(mut stdout_file) = stdout_file {
+                let mut stdout = child.stdout.take().unwrap();
+                handles.push(task::spawn(async move {
+                    io::copy(&mut stdout, &mut stdout_file)
+                        .await
+                        .expect("stdout copier failed");
+                }));
+            }
+            if let Some(mut stderr_file) = stderr_file {
+                let mut stderr = child.stderr.take().unwrap();
+                handles.push(task::spawn(async move {
+                    io::copy(&mut stderr, &mut stderr_file)
+                        .await
+                        .expect("stderr copier failed");
+                }));
+            }
         }
         Ok(CommandRunner {
             command: Some(self),

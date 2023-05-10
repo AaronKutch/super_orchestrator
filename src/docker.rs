@@ -123,7 +123,7 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self, ci_mode: bool) -> Result<()> {
         // preverification to prevent much more expensive later container creation undos
         let log_dir = acquire_dir_path(&self.log_dir)
             .await?
@@ -230,8 +230,15 @@ impl ContainerNetwork {
         // start all containers
         for (container_name, id) in self.active_container_ids.clone().iter() {
             let mut command = Command::new("docker", &["start", "--attach", id]);
-            command.stderr_file = Some(format!("{}/container_{}_err.log", log_dir, container_name));
-            match command.run().await {
+            command.stdout_dir_file = Some((
+                log_dir.clone(),
+                format!("container_{}_stdout.log", container_name),
+            ));
+            command.stderr_dir_file = Some((
+                log_dir.clone(),
+                format!("container_{}_stderr.log", container_name),
+            ));
+            match command.ci_mode(ci_mode).run().await {
                 Ok(runner) => {
                     self.container_runners
                         .insert(container_name.clone(), runner);
