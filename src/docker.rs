@@ -4,7 +4,8 @@ use log::warn;
 use tokio::time::Instant;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, Command, CommandResult, CommandRunner, MapAddError, Result,
+    acquire_dir_path, acquire_file_path, Command, CommandResult, CommandRunner, LogFileOptions,
+    MapAddError, Result,
 };
 
 #[derive(Debug)]
@@ -141,6 +142,18 @@ impl ContainerNetwork {
                 )
             })?
             .to_owned();
+        let mut debug_log = LogFileOptions {
+            directory: log_dir.clone(),
+            file_name: format!("container_network_{}.log", self.network_name),
+            create: true,
+            overwrite: true,
+        };
+        // precheck and overwrite
+        let _ = debug_log.acquire_file().await?;
+        // settings we will use for the rest
+        debug_log.create = false;
+        debug_log.overwrite = false;
+        let debug_log = Some(debug_log);
         for container in &self.containers {
             acquire_file_path(&container.entrypoint_path).await?;
             if let Some(ref dockerfile) = container.dockerfile {
@@ -148,22 +161,27 @@ impl ContainerNetwork {
             }
             // remove potentially previously existing container with same name
             let _ = Command::new("docker", &["rm", &container.name])
-                .ci_mode(ci_mode)
+                // never put in CI mode or put in debug file, error on nonexistent container is
+                // confusing, actual errors will be returned
+                .ci_mode(false)
                 .run_to_completion()
                 .await?;
         }
-        //let debug_log = format!("container_network_{}.log", self.)
 
         // remove old network if it exists (there is no option to ignore nonexistent
         // networks, drop exit status errors and let the creation command handle any
         // higher order errors)
         let _ = Command::new("docker", &["network", "rm", &self.network_name])
             .ci_mode(ci_mode)
+            .stdout_log(&debug_log)
+            .stderr_log(&debug_log)
             .run_to_completion()
             .await;
         let comres = if self.is_not_internal {
             Command::new("docker", &["network", "create", &self.network_name])
                 .ci_mode(ci_mode)
+                .stdout_log(&debug_log)
+                .stderr_log(&debug_log)
                 .run_to_completion()
                 .await?
         } else {
@@ -174,6 +192,8 @@ impl ContainerNetwork {
                 &self.network_name,
             ])
             .ci_mode(ci_mode)
+            .stdout_log(&debug_log)
+            .stderr_log(&debug_log)
             .run_to_completion()
             .await?
         };
@@ -200,6 +220,8 @@ impl ContainerNetwork {
                 args.push(&dockerfile_dir);
                 Command::new("docker", &args)
                     .ci_mode(ci_mode)
+                    .stdout_log(&debug_log)
+                    .stderr_log(&debug_log)
                     .run_to_completion()
                     .await?
                     .assert_success()?;
@@ -244,6 +266,8 @@ impl ContainerNetwork {
             }*/
             match Command::new("docker", &args)
                 .ci_mode(ci_mode)
+                .stdout_log(&debug_log)
+                .stderr_log(&debug_log)
                 .run_to_completion()
                 .await
             {
@@ -271,14 +295,18 @@ impl ContainerNetwork {
         // start all containers
         for (container_name, id) in self.active_container_ids.clone().iter() {
             let mut command = Command::new("docker", &["start", "--attach", id]);
-            command.stdout_dir_file = Some((
-                log_dir.clone(),
-                format!("container_{}_stdout.log", container_name),
-            ));
-            command.stderr_dir_file = Some((
-                log_dir.clone(),
-                format!("container_{}_stderr.log", container_name),
-            ));
+            command.stdout_log = Some(LogFileOptions {
+                directory: log_dir.clone(),
+                file_name: format!("container_{}_stdout.log", container_name),
+                create: true,
+                overwrite: true,
+            });
+            command.stderr_log = Some(LogFileOptions {
+                directory: log_dir.clone(),
+                file_name: format!("container_{}_stderr.log", container_name),
+                create: true,
+                overwrite: true,
+            });
             match command.ci_mode(ci_mode).run().await {
                 Ok(runner) => {
                     self.container_runners

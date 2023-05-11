@@ -2,19 +2,20 @@ use core::fmt;
 use std::{
     fmt::{Debug, Display},
     process::{ExitStatus, Stdio},
+    sync::Arc,
     time::Duration,
 };
 
 use log::warn;
 use tokio::{
-    fs::File,
-    io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{self, Child},
-    task,
+    sync::Mutex,
+    task::{self, JoinHandle},
     time::sleep,
 };
 
-use crate::{acquire_dir_path, Error, MapAddError, Result};
+use crate::{acquire_dir_path, Error, LogFileOptions, MapAddError, Result};
 
 #[derive(Clone)]
 pub struct Command {
@@ -26,10 +27,9 @@ pub struct Command {
     pub envs: Vec<(String, String)>,
     /// Working directory for process
     pub cwd: Option<String>,
-    pub stdout_dir_file: Option<(String, String)>,
-    pub stderr_dir_file: Option<(String, String)>,
-    /// Override to forward stdouts and stderrs to the current processes stdout
-    /// and stderr
+    pub stdout_log: Option<LogFileOptions>,
+    pub stderr_log: Option<LogFileOptions>,
+    /// Forward stdouts and stderrs to the current processes stdout and stderr
     pub ci: bool,
     /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
     /// false should not be relied upon in normal program operation, `Commands`
@@ -55,8 +55,8 @@ impl Debug for Command {
             .field("env_clear", &self.env_clear)
             .field("envs", &self.envs)
             .field("cwd", &self.cwd)
-            .field("stdout_dir_file", &self.stdout_dir_file)
-            .field("stderr_dir_file", &self.stderr_dir_file)
+            .field("stdout_log", &self.stdout_log)
+            .field("stderr_log", &self.stderr_log)
             .field("ci", &self.ci)
             .field("forget_on_drop", &self.forget_on_drop)
             .finish()
@@ -71,6 +71,11 @@ pub struct CommandRunner {
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
     handles: Vec<tokio::task::JoinHandle<()>>,
+    // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
+    // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
+    // copying it to here in order to not lose the data.
+    stdout: Arc<Mutex<String>>,
+    stderr: Arc<Mutex<String>>,
     result: Option<CommandResult>,
 }
 
@@ -120,8 +125,8 @@ impl Command {
             env_clear: false,
             envs: vec![],
             cwd: None,
-            stdout_dir_file: None,
-            stderr_dir_file: None,
+            stdout_log: None,
+            stderr_log: None,
             ci: false,
             forget_on_drop: false,
         }
@@ -129,6 +134,16 @@ impl Command {
 
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
+        self
+    }
+
+    pub fn stdout_log(mut self, log_file_options: &Option<LogFileOptions>) -> Self {
+        self.stdout_log = log_file_options.clone();
+        self
+    }
+
+    pub fn stderr_log(mut self, log_file_options: &Option<LogFileOptions>) -> Self {
+        self.stderr_log = log_file_options.clone();
         self
     }
 
@@ -148,21 +163,13 @@ impl Command {
             tmp.current_dir(cwd);
         }
         // do as much as possible before spawning the process
-        let stdout_file = if let Some((ref dir, ref file)) = self.stdout_dir_file {
-            let mut path = acquire_dir_path(dir)
-                .await
-                .map_add_err(|| format!("{self:?}.run()"))?;
-            path.push(file);
-            Some(File::create(path).await?)
+        let mut stdout_file = if let Some(ref log_file_options) = self.stdout_log {
+            Some(log_file_options.acquire_file().await?)
         } else {
             None
         };
-        let stderr_file = if let Some((ref dir, ref file)) = self.stderr_dir_file {
-            let mut path = acquire_dir_path(dir)
-                .await
-                .map_add_err(|| format!("{self:?}.run()"))?;
-            path.push(file);
-            Some(File::create(path).await?)
+        let mut stderr_file = if let Some(ref log_file_options) = self.stderr_log {
+            Some(log_file_options.acquire_file().await?)
         } else {
             None
         };
@@ -175,11 +182,89 @@ impl Command {
             .stderr(Stdio::piped())
             .spawn()
             .map_add_err(|| format!("{self:?}.run()"))?;
-        let child_id = child.id().unwrap_or(0);
-        let mut handles = vec![];
-        // note: only one thing can take `child.stdout`
-        if self.ci {
-            let stdout = child.stdout.take().unwrap();
+        // TODO if we are going to do this we should allow getting active stdout from
+        // the mutex
+        let stdout = Arc::new(Mutex::new(String::new()));
+        let stdout_arc_copy = Arc::clone(&stdout);
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let stderr_arc_copy = Arc::clone(&stderr);
+        let mut stdout_forward0 = if self.ci {
+            Some(tokio::io::stdout())
+        } else {
+            None
+        };
+        let mut stdout_forward1 = if self.ci {
+            Some(tokio::io::stdout())
+        } else {
+            None
+        };
+        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).lines();
+        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).lines();
+        let command_name = self.command.clone();
+        let child_id = child.id().unwrap();
+        let mut handles: Vec<JoinHandle<()>> = vec![];
+        handles.push(task::spawn(async move {
+            loop {
+                match stdout_read.next_line().await {
+                    Ok(Some(mut line)) => {
+                        line.push('\n');
+                        // copying for the `CommandResult`
+                        stdout_arc_copy.lock().await.push_str(&line);
+                        // copying to file
+                        if let Some(ref mut stdout_file) = stdout_file {
+                            stdout_file
+                                .write_all(line.as_bytes())
+                                .await
+                                .expect("command stdout to file copier failed");
+                        }
+                        // forward stdout to stdout
+                        if let Some(ref mut stdout_forward) = stdout_forward0 {
+                            let _ = stdout_forward
+                                .write(
+                                    format!("{command_name} {child_id} stdout | {line}").as_bytes(),
+                                )
+                                .await
+                                .expect("command stdout to stdout copier failed");
+                            stdout_forward.flush().await.unwrap();
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => panic!("command stdout line copier failed with {}", e),
+                }
+            }
+        }));
+        let command_name = self.command.clone();
+        handles.push(task::spawn(async move {
+            loop {
+                match stderr_read.next_line().await {
+                    Ok(Some(mut line)) => {
+                        line.push('\n');
+                        // copying for the `CommandResult`
+                        stderr_arc_copy.lock().await.push_str(&line);
+                        // copying to file
+                        if let Some(ref mut stdout_file) = stderr_file {
+                            stdout_file
+                                .write_all(line.as_bytes())
+                                .await
+                                .expect("command stderr to file copier failed");
+                        }
+                        // forward stderr to stdout
+                        if let Some(ref mut stdout_forward) = stdout_forward1 {
+                            let _ = stdout_forward
+                                .write(
+                                    format!("{command_name} {child_id} stderr | {line}").as_bytes(),
+                                )
+                                .await
+                                .expect("command stderr to stdout copier failed");
+                            stdout_forward.flush().await.unwrap();
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => panic!("command stderr line copier failed with {}", e),
+                }
+            }
+        }));
+        /*if self.ci {
             // in CI mode print to stdout
             let mut lines = BufReader::new(stdout).lines();
             let mut writer = BufWriter::new(tokio::io::stdout());
@@ -235,11 +320,13 @@ impl Command {
                         .expect("stderr copier failed");
                 }));
             }
-        }
+        }*/
         Ok(CommandRunner {
             command: Some(self),
             child_process: Some(child),
             handles,
+            stdout,
+            stderr,
             result: None,
         })
     }
@@ -290,17 +377,21 @@ impl CommandRunner {
             .map_add_err(|| {
                 format!("{self:?}.wait_with_output() -> failed when waiting on child",)
             })?;
-        let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
+        /*let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
             format!("{self:?}.wait_with_output() -> failed to parse stderr as utf8")
         })?;
         let stdout = String::from_utf8(output.stdout.clone()).map_add_err(|| {
             format!("{self:?}.wait_with_output() -> failed to parse stdout as utf8")
-        })?;
+        })?;*/
         while let Some(handle) = self.handles.pop() {
             handle.await.map_add_err(|| {
                 format!("{self:?}.wait_with_output() -> `Command` task panicked")
             })?;
         }
+        // note: the handles should be cleaned up first to make sure copies are finished
+        // and no locks are being held
+        let stdout = self.stdout.lock().await.clone();
+        let stderr = self.stderr.lock().await.clone();
         self.result = Some(CommandResult {
             command: self.command.take().unwrap(),
             status: output.status,

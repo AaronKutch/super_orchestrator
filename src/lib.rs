@@ -5,14 +5,14 @@
 
 mod command;
 mod error;
+mod log_file;
 mod paths;
-mod rw_stream;
 
 pub use command::*;
 pub mod docker;
 pub use error::*;
+pub use log_file::*;
 pub use paths::*;
-pub use rw_stream::*;
 
 // Equivalent to calling `Command::new(cmd,
 // &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;
