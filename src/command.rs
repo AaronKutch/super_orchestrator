@@ -17,6 +17,15 @@ use tokio::{
 
 use crate::{acquire_dir_path, Error, LogFileOptions, MapAddError, Result};
 
+/// For implementing `Debug`, this wrapper makes strings use their `Display`
+/// impl rather than `Debug` impl
+pub struct DisplayStr<'a>(&'a str);
+impl<'a> Debug for DisplayStr<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
 #[derive(Clone)]
@@ -55,7 +64,7 @@ impl Debug for Command {
             }
         }
         f.debug_struct("Command")
-            .field("command", &command)
+            .field("command", &DisplayStr(&command))
             .field("env_clear", &self.env_clear)
             .field("envs", &self.envs)
             .field("cwd", &self.cwd)
@@ -67,7 +76,6 @@ impl Debug for Command {
     }
 }
 
-#[derive(Debug)]
 #[must_use]
 pub struct CommandRunner {
     // this information is kept around for failures
@@ -82,6 +90,18 @@ pub struct CommandRunner {
     stdout: Arc<Mutex<String>>,
     stderr: Arc<Mutex<String>>,
     result: Option<CommandResult>,
+}
+
+impl Debug for CommandRunner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // don't try to display `stdout` and `stderr`, leave that for the result
+        f.debug_struct("CommandRunner")
+            .field("command", &self.command)
+            .field("child_process", &self.child_process)
+            .field("handles", &self.handles)
+            .field("result", &self.result)
+            .finish()
+    }
 }
 
 impl Drop for CommandRunner {
@@ -99,7 +119,6 @@ impl Drop for CommandRunner {
     }
 }
 
-#[derive(Debug)]
 #[must_use]
 pub struct CommandResult {
     // this information is kept around for failures
@@ -107,6 +126,17 @@ pub struct CommandResult {
     pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
+}
+
+impl Debug for CommandResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandResult")
+            .field("command", &self.command)
+            .field("status", &self.status)
+            .field("stdout", &DisplayStr(&self.stdout))
+            .field("stderr", &DisplayStr(&self.stderr))
+            .finish()
+    }
 }
 
 impl Display for CommandResult {
