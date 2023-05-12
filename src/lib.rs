@@ -14,10 +14,10 @@ pub use error::*;
 pub use log_file::*;
 pub use paths::*;
 
-/// Equivalent to calling `Command::new(cmd,
+/// Equivalent to calling `Command::new(cmd_with_args,
 /// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;`
-pub async fn sh(cmd: &str, args: &[&str]) -> Result<()> {
-    Command::new(cmd, args)
+pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<()> {
+    Command::new(cmd_with_args, args)
         .ci_mode(true)
         .run_to_completion()
         .await?

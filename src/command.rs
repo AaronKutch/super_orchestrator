@@ -117,16 +117,25 @@ impl Display for CommandResult {
 
 impl Command {
     /// Creates a `Command` that only sets the `command` and `args` and leaves
-    /// other things as their default values.
-    pub fn new(command: &str, args: &[&str]) -> Self {
+    /// other things as their default values. `cmd_with_args` is separated by
+    /// whitespace, and the first part becomes the command the the others are
+    /// extra prefixed args.
+    pub fn new(cmd_with_args: &str, args: &[&str]) -> Self {
+        let mut true_args = vec![];
+        let mut command = String::new();
+        for (i, part) in cmd_with_args.split_whitespace().enumerate() {
+            if i == 0 {
+                command = part.to_owned();
+            } else {
+                true_args.push(part.to_owned());
+            }
+        }
+        for remaining_arg in args {
+            true_args.push((*remaining_arg).to_owned());
+        }
         Self {
-            command: command.to_owned(),
-            args: args
-                .iter()
-                .fold(Vec::with_capacity(args.len()), |mut acc, e| {
-                    acc.push(e.to_string());
-                    acc
-                }),
+            command,
+            args: true_args,
             env_clear: false,
             envs: vec![],
             cwd: None,

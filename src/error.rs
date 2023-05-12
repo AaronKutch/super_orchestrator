@@ -6,7 +6,8 @@ use std::{
 };
 
 /// In the future we plan on having almost every kind of error here under
-/// different feature gates. Please file an issue if you would like to include something.
+/// different feature gates. Please file an issue if you would like to include
+/// something.
 ///
 /// The intention with `TimeoutError` is that if it is in the error stack, a
 /// timeout occured. When other timeout structs are used, this should be added
