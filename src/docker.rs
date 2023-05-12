@@ -113,7 +113,7 @@ impl ContainerNetwork {
     /// Force removes all containers
     pub async fn terminate_all(mut self) -> Result<()> {
         while let Some(entry) = self.active_container_ids.first_entry() {
-            let comres = Command::new("docker", &["rm", "-f", entry.get()])
+            let comres = Command::new("docker rm -f", &[entry.get()])
                 .run_to_completion()
                 .await
                 .map_add_err(|| "ContainerNetwork::terminate_all()");
@@ -163,7 +163,7 @@ impl ContainerNetwork {
                 acquire_file_path(dockerfile).await?;
             }
             // remove potentially previously existing container with same name
-            let _ = Command::new("docker", &["rm", &container.name])
+            let _ = Command::new("docker rm", &[&container.name])
                 // never put in CI mode or put in debug file, error on nonexistent container is
                 // confusing, actual errors will be returned
                 .ci_mode(false)
@@ -174,31 +174,26 @@ impl ContainerNetwork {
         // remove old network if it exists (there is no option to ignore nonexistent
         // networks, drop exit status errors and let the creation command handle any
         // higher order errors)
-        let _ = Command::new("docker", &["network", "rm", &self.network_name])
+        let _ = Command::new("docker network rm", &[&self.network_name])
             .ci_mode(ci_mode)
             .stdout_log(&debug_log)
             .stderr_log(&debug_log)
             .run_to_completion()
             .await;
         let comres = if self.is_not_internal {
-            Command::new("docker", &["network", "create", &self.network_name])
+            Command::new("docker network create", &[&self.network_name])
                 .ci_mode(ci_mode)
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log)
                 .run_to_completion()
                 .await?
         } else {
-            Command::new("docker", &[
-                "network",
-                "create",
-                "--internal",
-                &self.network_name,
-            ])
-            .ci_mode(ci_mode)
-            .stdout_log(&debug_log)
-            .stderr_log(&debug_log)
-            .run_to_completion()
-            .await?
+            Command::new("docker network create --internal", &[&self.network_name])
+                .ci_mode(ci_mode)
+                .stdout_log(&debug_log)
+                .stderr_log(&debug_log)
+                .run_to_completion()
+                .await?
         };
         // TODO we can get the network id
         comres.assert_success()?;
@@ -297,7 +292,7 @@ impl ContainerNetwork {
 
         // start all containers
         for (container_name, id) in self.active_container_ids.clone().iter() {
-            let mut command = Command::new("docker", &["start", "--attach", id]);
+            let mut command = Command::new("docker start --attach", &[id]);
             command.stdout_log = Some(LogFileOptions {
                 directory: log_dir.clone(),
                 file_name: format!("container_{}_stdout.log", container_name),
