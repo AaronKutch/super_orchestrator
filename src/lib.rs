@@ -14,8 +14,8 @@ pub use error::*;
 pub use log_file::*;
 pub use paths::*;
 
-// Equivalent to calling `Command::new(cmd,
-// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;
+/// Equivalent to calling `Command::new(cmd,
+/// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;`
 pub async fn sh(cmd: &str, args: &[&str]) -> Result<()> {
     Command::new(cmd, args)
         .ci_mode(true)

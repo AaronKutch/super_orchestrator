@@ -17,6 +17,8 @@ use tokio::{
 
 use crate::{acquire_dir_path, Error, LogFileOptions, MapAddError, Result};
 
+/// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
+/// helping functionality.
 #[derive(Clone)]
 pub struct Command {
     pub command: String,
@@ -27,13 +29,15 @@ pub struct Command {
     pub envs: Vec<(String, String)>,
     /// Working directory for process
     pub cwd: Option<String>,
+    /// If set, the command will copy the `stdout` to a file
     pub stdout_log: Option<LogFileOptions>,
+    /// If set, the command will copy the `stderr` to a file
     pub stderr_log: Option<LogFileOptions>,
     /// Forward stdouts and stderrs to the current processes stdout and stderr
     pub ci: bool,
     /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
-    /// false should not be relied upon in normal program operation, `Commands`
-    /// should be properly consumed by a method taking `self` so that the child
+    /// false should not be relied upon in normal program operation,
+    /// `CommandRunner`s should be properly finished so that the child
     /// process is cleaned up properly.
     pub forget_on_drop: bool,
 }
@@ -67,6 +71,7 @@ impl Debug for Command {
 #[must_use]
 pub struct CommandRunner {
     // this information is kept around for failures
+    /// The command this runner was started with
     command: Option<Command>,
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
@@ -264,63 +269,6 @@ impl Command {
                 }
             }
         }));
-        /*if self.ci {
-            // in CI mode print to stdout
-            let mut lines = BufReader::new(stdout).lines();
-            let mut writer = BufWriter::new(tokio::io::stdout());
-            let command = self.command.clone();
-            handles.push(task::spawn(async move {
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            let _ = writer
-                                .write(format!("{command} {child_id} stdout | {line}\n").as_bytes())
-                                .await
-                                .unwrap();
-                            writer.flush().await.unwrap();
-                        }
-                        Ok(None) => break,
-                        Err(e) => panic!("stdout line copier failed with {}", e),
-                    }
-                }
-            }));
-            let stderr = child.stderr.take().unwrap();
-            let mut lines = BufReader::new(stderr).lines();
-            let mut writer = BufWriter::new(tokio::io::stdout());
-            let command = self.command.clone();
-            handles.push(task::spawn(async move {
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            let _ = writer
-                                .write(format!("{command} {child_id} stderr | {line}\n").as_bytes())
-                                .await
-                                .unwrap();
-                            writer.flush().await.unwrap();
-                        }
-                        Ok(None) => break,
-                        Err(e) => panic!("stderr line copier failed with {}", e),
-                    }
-                }
-            }));
-        } else {
-            if let Some(mut stdout_file) = stdout_file {
-                let mut stdout = child.stdout.take().unwrap();
-                handles.push(task::spawn(async move {
-                    io::copy(&mut stdout, &mut stdout_file)
-                        .await
-                        .expect("stdout copier failed");
-                }));
-            }
-            if let Some(mut stderr_file) = stderr_file {
-                let mut stderr = child.stderr.take().unwrap();
-                handles.push(task::spawn(async move {
-                    io::copy(&mut stderr, &mut stderr_file)
-                        .await
-                        .expect("stderr copier failed");
-                }));
-            }
-        }*/
         Ok(CommandRunner {
             command: Some(self),
             child_process: Some(child),
@@ -401,9 +349,11 @@ impl CommandRunner {
         Ok(())
     }
 
-    /// Note: If this function succeeds, it only means that the OS calls and
-    /// parsing all succeeded, it does not mean that the command itself had a
-    /// successful return status, use `assert_status` or check the `status` on
+    /// Finishes the `CommandResult` (or stalls forever if the OS command does,
+    /// use `wait_with_timeout` for a timeout). Note: If this function
+    /// succeeds, it only means that the OS calls and parsing all succeeded,
+    /// it does not mean that the command itself had a successful return
+    /// status, use `assert_status` or check the `status` on
     /// the `CommandResult`.
     #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
@@ -411,6 +361,10 @@ impl CommandRunner {
         Ok(self.result.take().unwrap())
     }
 
+    /// If the command does not complete after `duration`, returns a timeout
+    /// error. After `Ok(())` is returned, the `CommandRunner` is finished and
+    /// you can call `get_command_result`. Call [Error::is_timeout()] on the
+    /// error to see if it was a timeout or another kind of error.
     pub async fn wait_with_timeout(&mut self, duration: Duration) -> Result<()> {
         // backoff control
         let mut interval = Duration::from_millis(1);
@@ -443,7 +397,9 @@ impl CommandRunner {
         Ok(())
     }
 
-    pub fn get_command_result(&mut self) -> Option<CommandResult> {
+    /// Assuming that `self` is finished after
+    /// [CommandRunner::wait_with_timeout], this can be called
+    pub fn get_command_result(mut self) -> Option<CommandResult> {
         self.result.take()
     }
 }

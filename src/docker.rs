@@ -8,6 +8,7 @@ use crate::{
     MapAddError, Result,
 };
 
+/// Container running information, put this into a `ContainerNetwork`
 #[derive(Debug)]
 pub struct Container {
     pub name: String,
@@ -50,6 +51,8 @@ impl Container {
     }
 }
 
+/// A complete network of one or more containers, a more programmable
+/// alternative to `docker-compose`
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
@@ -358,9 +361,9 @@ impl ContainerNetwork {
                 }
             }
             self.active_container_ids.remove(&id).unwrap();
+            let runner = self.container_runners.remove(&id).unwrap();
             self.container_results
                 .insert(id.clone(), runner.get_command_result().unwrap());
-            self.container_runners.remove(&id);
             current = Instant::now();
         }
         Ok(())

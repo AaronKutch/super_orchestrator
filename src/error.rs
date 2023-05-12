@@ -5,9 +5,12 @@ use std::{
     panic::Location,
 };
 
-// The intention with `TimeoutError` is that if it is in the error stack, a
-// timeout occured. When other timeout structs are used, this should be added
-// on.
+/// In the future we plan on having almost every kind of error here under
+/// different feature gates
+///
+/// The intention with `TimeoutError` is that if it is in the error stack, a
+/// timeout occured. When other timeout structs are used, this should be added
+/// on.
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
     // used for special cases where we need something
@@ -37,7 +40,9 @@ pub enum ErrorKind {
     //SerdeDeserializeError(serde_json::Error, Vec<u8>),
 }
 
-/// Error struct for `super_orchestrator`
+/// An experimental error struct that has an internal stack for different kinds
+/// of errors and a stack for locations. This is a replacement for the bad
+/// information you get from backtraces within `tokio` tasks.
 ///
 /// # Note
 ///
@@ -99,7 +104,7 @@ impl Error {
         Self::from_kind(ErrorKind::TimeoutError)
     }
 
-    /// The same as [add_err] but without pushing location to stack
+    /// The same as [Error::add_err] but without pushing location to stack
     #[track_caller]
     pub fn add_err_no_location<K: Into<ErrorKind>>(mut self, kind: K) -> Self {
         self.error_stack.push(kind.into());
@@ -136,6 +141,12 @@ impl Error {
     }
 }
 
+/// The intention of this trait is to convert `Option<T>`s, `Result<T, Error>`s,
+/// and `Result<T, impl Into<ErrorKind>>`s into `Result<T, Error>`s with the
+/// error having an `ErrorKind` and a location pushed onto its stacks
+/// (`map_add_err` should have `#[track_caller]` on it and push on the
+/// `Location::caller()`). You can also call `map_add_err` on plain `Error`s and
+/// `impl Into<ErrorKind>`s to get a `Result<(), Error>`.
 pub trait MapAddError {
     type Output;
 
