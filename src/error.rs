@@ -6,7 +6,7 @@ use std::{
 };
 
 /// In the future we plan on having almost every kind of error here under
-/// different feature gates
+/// different feature gates. Please file an issue if you would like to include something.
 ///
 /// The intention with `TimeoutError` is that if it is in the error stack, a
 /// timeout occured. When other timeout structs are used, this should be added
@@ -32,12 +32,13 @@ pub enum ErrorKind {
     FromUtf16Error(std::string::FromUtf16Error),
     #[error("TokioJoinError")]
     TokioJoinError(tokio::task::JoinError),
-    //#[error("BorshDeserializeError")]
-    //BorshDeserializeError(std::io::Error, Vec<u8>),
-    //#[error("RonDeserializeError")]
-    //RonDeserializeError(ron::Error, Vec<u8>),
-    //#[error("SerdeDeserializeError")]
-    //SerdeDeserializeError(serde_json::Error, Vec<u8>),
+    // Borsh effecively uses `std::io::Error`
+    #[cfg(feature = "ron_support")]
+    #[error("RonError")]
+    RonError(ron::error::Error),
+    #[cfg(feature = "serde_json_support")]
+    #[error("SerdeJsonError")]
+    SerdeJsonError(serde_json::Error),
 }
 
 /// An experimental error struct that has an internal stack for different kinds
@@ -211,97 +212,64 @@ impl<K0: Into<ErrorKind>> MapAddError for K0 {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-// Can't be automated by macro_rules because of mod paths and special cases.
-// Collisions from multiple ways and lack of specialization are preventing me
-// from implementing over stuff like `AsRef<T>`
+macro_rules! unit_x {
+    ($kind:ident $x:ty) => {
+        impl From<$x> for ErrorKind {
+            fn from(_e: $x) -> Self {
+                Self::$kind
+            }
+        }
 
-impl From<()> for ErrorKind {
-    fn from(_e: ()) -> Self {
-        Self::UnitError
-    }
+        impl From<$x> for Error {
+            #[track_caller]
+            fn from(e: $x) -> Self {
+                Self::from_kind(e)
+            }
+        }
+    };
 }
 
-impl From<()> for Error {
-    #[track_caller]
-    fn from(e: ()) -> Self {
-        Self::from_kind(e)
-    }
+macro_rules! x {
+    ($kind:ident $x:ty) => {
+        impl From<$x> for ErrorKind {
+            fn from(e: $x) -> Self {
+                Self::$kind(e)
+            }
+        }
+
+        impl From<$x> for Error {
+            #[track_caller]
+            fn from(e: $x) -> Self {
+                Self::from_kind(e)
+            }
+        }
+    };
 }
 
-impl From<&'static str> for ErrorKind {
-    fn from(e: &'static str) -> Self {
-        Self::StrError(e)
-    }
-}
+type X0 = ();
+unit_x!(UnitError X0);
+type X1 = &'static str;
+x!(StrError X1);
+type X2 = String;
+x!(StringError X2);
+type X3 = std::io::Error;
+x!(StdIoError X3);
+type X4 = std::string::FromUtf8Error;
+x!(FromUtf8Error X4);
+type X5 = std::string::FromUtf16Error;
+x!(FromUtf16Error X5);
+type X6 = tokio::task::JoinError;
+x!(TokioJoinError X6);
+#[cfg(feature = "serde_json_support")]
+type X7 = serde_json::Error;
+#[cfg(feature = "serde_json_support")]
+x!(SerdeJsonError X7);
+#[cfg(feature = "ron_support")]
+type X8 = ron::error::Error;
+#[cfg(feature = "ron_support")]
+x!(RonError X8);
 
-impl From<&'static str> for Error {
-    #[track_caller]
-    fn from(e: &'static str) -> Self {
-        Self::from_kind(e)
-    }
-}
-
-impl From<String> for ErrorKind {
-    fn from(e: String) -> Self {
-        Self::StringError(e)
-    }
-}
-
-impl From<String> for Error {
-    #[track_caller]
-    fn from(e: String) -> Self {
-        Self::from_kind(e)
-    }
-}
-
-impl From<std::io::Error> for ErrorKind {
-    fn from(e: std::io::Error) -> Self {
-        Self::StdIoError(e)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    #[track_caller]
-    fn from(e: std::io::Error) -> Self {
-        Self::from_kind(e)
-    }
-}
-
-impl From<std::string::FromUtf8Error> for ErrorKind {
-    fn from(e: std::string::FromUtf8Error) -> Self {
-        Self::FromUtf8Error(e)
-    }
-}
-
-impl From<std::string::FromUtf8Error> for Error {
-    #[track_caller]
-    fn from(e: std::string::FromUtf8Error) -> Self {
-        Self::from_kind(e)
-    }
-}
-
-impl From<std::string::FromUtf16Error> for ErrorKind {
-    fn from(e: std::string::FromUtf16Error) -> Self {
-        Self::FromUtf16Error(e)
-    }
-}
-
-impl From<std::string::FromUtf16Error> for Error {
-    #[track_caller]
-    fn from(e: std::string::FromUtf16Error) -> Self {
-        Self::from_kind(e)
-    }
-}
-
-impl From<tokio::task::JoinError> for ErrorKind {
-    fn from(e: tokio::task::JoinError) -> Self {
-        Self::TokioJoinError(e)
-    }
-}
-
-impl From<tokio::task::JoinError> for Error {
-    #[track_caller]
-    fn from(e: tokio::task::JoinError) -> Self {
-        Self::from_kind(e)
-    }
-}
+/*
+type X = ;
+x!(Error X);
+*/
