@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tokio::time::sleep;
 
-use crate::{ctrlc_issued_reset, sh, Command, MapAddError, Result};
+use crate::{ctrlc_issued_reset, sh, Command, MapAddError, Result, STD_DELAY};
 
 /// Intended to be called from the main() of a standalone binary, or run from
 /// this repo `cargo r --example auto_exec_i -- --container-name main`
@@ -25,13 +25,14 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
             if line.ends_with(container_name) {
                 let line = line.trim();
                 let id = &line[0..line.find(' ').map_add_err(|| ())?];
-                println!("found container {id}, forwarding stdin, stdout, stderr");
+                println!("Found container {id}, forwarding stdin, stdout, stderr");
                 docker_exec_i(id).await?;
                 sh("docker rm -f", &[id]).await?;
+                println!("\nTerminated container {id}\n");
                 break
             }
         }
-        sleep(Duration::from_millis(300)).await;
+        sleep(STD_DELAY).await;
     }
     Ok(())
 }
@@ -46,7 +47,16 @@ pub async fn docker_exec_i(container_id: &str) -> Result<()> {
         if ctrlc_issued_reset() {
             break
         }
-        sleep(Duration::from_millis(300)).await;
+        match runner.wait_with_timeout(Duration::ZERO).await {
+            Ok(()) => break,
+            Err(e) => {
+                if !e.is_timeout() {
+                    runner.terminate().await?;
+                    return e.map_add_err(|| ())
+                }
+            }
+        }
+        sleep(STD_DELAY).await;
     }
     runner.terminate().await?;
     Ok(())

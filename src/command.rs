@@ -347,21 +347,20 @@ impl CommandRunner {
     /// Attempts to force the command to exit, but does not wait for the request
     /// to take effect.
     pub fn start_terminate(&mut self) -> Result<()> {
-        self.child_process
-            .as_mut()
-            .unwrap()
-            .start_kill()
-            .map_add_err(|| ())
+        if let Some(child_process) = self.child_process.as_mut() {
+            child_process.start_kill().map_add_err(|| ())
+        } else {
+            Ok(())
+        }
     }
 
     /// Forces the command to exit
     pub async fn terminate(&mut self) -> Result<()> {
-        self.child_process
-            .as_mut()
-            .unwrap()
-            .kill()
-            .await
-            .map_add_err(|| ())
+        if let Some(child_process) = self.child_process.as_mut() {
+            child_process.kill().await.map_add_err(|| ())?;
+            self.child_process.take().unwrap();
+        }
+        Ok(())
     }
 
     // TODO for ridiculous output sizes, we may want something that only looks at

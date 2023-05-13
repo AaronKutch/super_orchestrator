@@ -1,8 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    future::Future,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::{fs::File, io::AsyncWriteExt, time::sleep};
 
-use crate::{Command, MapAddError, Result};
+use crate::{Command, Error, MapAddError, Result};
 
 /// use the "ctrlc_support" feature to see functions that use this
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
@@ -32,6 +36,29 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<()> {
         .run_to_completion()
         .await?
         .assert_success()
+}
+
+pub const STD_TRIES: u64 = 300;
+pub const STD_DELAY: Duration = Duration::from_millis(300);
+
+/// Repeatedly polls `f` until it returns an `Ok` which is returned, or
+/// `num_tries` is reached in which a timeout error is returned
+#[track_caller]
+pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
+    num_tries: u64,
+    delay: Duration,
+    mut f: F,
+) -> Result<T> {
+    for _ in 0..num_tries {
+        match f().await {
+            Ok(o) => return Ok(o),
+            Err(_) => (),
+        }
+        sleep(delay).await;
+    }
+    Err(Error::timeout().add_err(format!(
+        "wait_for_ok(num_tries: {num_tries}, delay: {delay:?}) timeout"
+    )))
 }
 
 /// First, this splits by `separate`, trims outer whitespace, sees if `key` is
