@@ -50,9 +50,8 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
     mut f: F,
 ) -> Result<T> {
     for _ in 0..num_tries {
-        match f().await {
-            Ok(o) => return Ok(o),
-            Err(_) => (),
+        if let Ok(o) = f().await {
+            return Ok(o)
         }
         sleep(delay).await;
     }

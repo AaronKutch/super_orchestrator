@@ -16,6 +16,15 @@ pub struct LogFileOptions {
 }
 
 impl LogFileOptions {
+    pub fn new(directory: &str, file_name: &str, create: bool, overwrite: bool) -> Self {
+        Self {
+            directory: directory.to_owned(),
+            file_name: file_name.to_owned(),
+            create,
+            overwrite,
+        }
+    }
+
     pub async fn acquire_file(&self) -> Result<File> {
         let dir_path = acquire_dir_path(&self.directory)
             .await

@@ -4,8 +4,8 @@ use log::warn;
 use tokio::time::Instant;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, Command, CommandResult, CommandRunner, LogFileOptions,
-    MapAddError, Result,
+    acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
+    LogFileOptions, MapAddError, Result,
 };
 
 /// Container running information, put this into a `ContainerNetwork`
@@ -19,6 +19,8 @@ pub struct Container {
     // each string is passed in as `--build-arg "[String]"` (the quotations are added), so a string
     // "ARG=val" would set the variable "ARG" for the docker file to use.
     pub build_args: Vec<String>,
+    // note that the binary is automatically included
+    pub volumes: Vec<(String, String)>,
     // path to the entrypoint binary locally
     pub entrypoint_path: String,
     // passed in as ["arg1", "arg2", ...] with the bracket and quotations being added
@@ -31,6 +33,7 @@ impl Container {
         dockerfile: Option<&str>,
         image: &str,
         build_args: &[&str],
+        volumes: &[(&str, &str)],
         entrypoint_path: &str,
         entrypoint_args: &[&str],
     ) -> Self {
@@ -40,6 +43,10 @@ impl Container {
             image: image.to_owned(),
             build_args: build_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
+                acc
+            }),
+            volumes: volumes.iter().fold(Vec::new(), |mut acc, e| {
+                acc.push((e.0.to_string(), e.1.to_string()));
                 acc
             }),
             entrypoint_path: entrypoint_path.to_owned(),
@@ -227,8 +234,6 @@ impl ContainerNetwork {
 
             let bin_path = acquire_file_path(&container.entrypoint_path).await?;
             let bin_s = bin_path.file_name().unwrap().to_str().unwrap();
-            // just include the needed binary
-            let volume = format!("{}:/usr/bin/{}", container.entrypoint_path, bin_s);
             let mut args = vec![
                 "create",
                 "--rm",
@@ -238,11 +243,32 @@ impl ContainerNetwork {
                 &container.name,
                 "--name",
                 &container.name,
-                "--volume",
-                &volume,
-                "-t",
-                &container.image,
             ];
+            // volumes
+            let mut volumes = container.volumes.clone();
+            // include the needed binary
+            volumes.push((
+                container.entrypoint_path.clone(),
+                format!("/usr/bin/{bin_s}"),
+            ));
+            let mut combined_volumes = vec![];
+            for volume in &volumes {
+                let path = acquire_path(&volume.0)
+                    .await
+                    .map_add_err(|| "could not locate local part of volume argument")?;
+                combined_volumes.push(format!(
+                    "{}:{}",
+                    path.to_str().map_add_err(|| ())?,
+                    volume.1
+                ));
+            }
+            for volume in &combined_volumes {
+                args.push("--volume");
+                args.push(volume);
+            }
+            args.push("-t");
+            args.push(&container.image);
+            // the binary
             args.push(bin_s);
             // TODO
             let mut tmp = vec![];
@@ -262,13 +288,14 @@ impl ContainerNetwork {
                 args.push(&container.entrypoint_args);
                 s += "]";
             }*/
-            match Command::new("docker", &args)
+            let command = Command::new("docker", &args)
                 .ci_mode(ci_mode)
                 .stdout_log(&debug_log)
-                .stderr_log(&debug_log)
-                .run_to_completion()
-                .await
-            {
+                .stderr_log(&debug_log);
+            if ci_mode {
+                println!("ci_mode command debug: {command:#?}");
+            }
+            match command.run_to_completion().await {
                 Ok(output) => {
                     match output.assert_success() {
                         Ok(_) => {
