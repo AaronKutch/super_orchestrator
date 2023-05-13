@@ -1,14 +1,8 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::time::Duration;
 
 use tokio::time::sleep;
 
-use crate::{sh, Command, MapAddError, Result};
+use crate::{ctrlc_issued_reset, sh, Command, MapAddError, Result};
 
 /// Intended to be called from the main() of a standalone binary, or run from
 /// this repo `cargo r --example auto_exec_i -- --container-name main`
@@ -21,15 +15,8 @@ use crate::{sh, Command, MapAddError, Result};
 /// whole program.
 pub async fn auto_exec_i(container_name: &str) -> Result<()> {
     println!("running auto_exec_i({container_name})");
-
-    let ctrlc_issued = Arc::new(AtomicBool::new(false));
-    let ctrlc_issued_move = ctrlc_issued.clone();
-    ctrlc::set_handler(move || {
-        ctrlc_issued_move.store(true, Ordering::SeqCst);
-    })?;
-
     loop {
-        if ctrlc_issued.load(Ordering::SeqCst) {
+        if ctrlc_issued_reset() {
             break
         }
         let comres = Command::new("docker ps", &[]).run_to_completion().await?;
@@ -39,7 +26,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
                 let line = line.trim();
                 let id = &line[0..line.find(' ').map_add_err(|| ())?];
                 println!("found container {id}, forwarding stdin, stdout, stderr");
-                docker_exec_i(id, ctrlc_issued.clone()).await?;
+                docker_exec_i(id).await?;
                 sh("docker rm -f", &[id]).await?;
                 break
             }
@@ -49,14 +36,14 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn docker_exec_i(container_id: &str, ctrlc_issued: Arc<AtomicBool>) -> Result<()> {
+pub async fn docker_exec_i(container_id: &str) -> Result<()> {
     let mut runner = Command::new("docker exec -i", &[container_id, "bash"])
         .ci_mode(true)
-        .pipe_stdin(true)
+        .inherit_stdin(true)
         .run()
         .await?;
     loop {
-        if ctrlc_issued.load(Ordering::SeqCst) {
+        if ctrlc_issued_reset() {
             break
         }
         sleep(Duration::from_millis(300)).await;
