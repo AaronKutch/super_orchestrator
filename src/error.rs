@@ -40,6 +40,9 @@ pub enum ErrorKind {
     #[cfg(feature = "serde_json_support")]
     #[error("SerdeJsonError")]
     SerdeJsonError(serde_json::Error),
+    #[cfg(feature = "ctrlc_support")]
+    #[error("CtrlcError")]
+    CtrlcError(ctrlc::Error),
 }
 
 /// An experimental error struct that has an internal stack for different kinds
@@ -269,6 +272,10 @@ x!(SerdeJsonError X7);
 type X8 = ron::error::Error;
 #[cfg(feature = "ron_support")]
 x!(RonError X8);
+#[cfg(feature = "ctrlc_support")]
+type X9 = ctrlc::Error;
+#[cfg(feature = "ctrlc_support")]
+x!(CtrlcError X9);
 
 /*
 type X = ;

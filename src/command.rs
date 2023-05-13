@@ -44,6 +44,8 @@ pub struct Command {
     pub stderr_log: Option<LogFileOptions>,
     /// Forward stdouts and stderrs to the current processes stdout and stderr
     pub ci: bool,
+    /// Pipes stdin, otherwise uses `Stdio::null()`
+    pub pipe_stdin: bool,
     /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
     /// false should not be relied upon in normal program operation,
     /// `CommandRunner`s should be properly finished so that the child
@@ -76,6 +78,8 @@ impl Debug for Command {
     }
 }
 
+/// Note: if the `log` crate is used and an implementor active, warnings from
+/// bad `Drop`s can be issued
 #[must_use]
 pub struct CommandRunner {
     // this information is kept around for failures
@@ -171,6 +175,7 @@ impl Command {
             cwd: None,
             stdout_log: None,
             stderr_log: None,
+            pipe_stdin: false,
             ci: false,
             forget_on_drop: false,
         }
@@ -178,6 +183,11 @@ impl Command {
 
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
+        self
+    }
+
+    pub fn pipe_stdin(mut self, pipe_stdin: bool) -> Self {
+        self.pipe_stdin = pipe_stdin;
         self
     }
 
@@ -193,10 +203,10 @@ impl Command {
 
     #[track_caller]
     pub async fn run(self) -> Result<CommandRunner> {
-        let mut tmp = process::Command::new(&self.command);
+        let mut cmd = process::Command::new(&self.command);
         if self.env_clear {
             // must happen before the `envs` call
-            tmp.env_clear();
+            cmd.env_clear();
         }
         if let Some(ref cwd) = self.cwd {
             // TODO when `track_caller` works on `async`, we might be able to remove some of
@@ -204,7 +214,7 @@ impl Command {
             let cwd = acquire_dir_path(cwd)
                 .await
                 .map_add_err(|| format!("{self:?}.run()"))?;
-            tmp.current_dir(cwd);
+            cmd.current_dir(cwd);
         }
         // do as much as possible before spawning the process
         let mut stdout_file = if let Some(ref log_file_options) = self.stdout_log {
@@ -217,11 +227,15 @@ impl Command {
         } else {
             None
         };
-        let mut child = tmp
-            .args(&self.args)
+        cmd.args(&self.args)
             .envs(self.envs.iter().map(|x| (&x.0, &x.1)))
-            .kill_on_drop(!self.forget_on_drop)
-            .stdin(Stdio::null())
+            .kill_on_drop(!self.forget_on_drop);
+        if self.pipe_stdin {
+            cmd.stdin(Stdio::inherit());
+        } else {
+            cmd.stdin(Stdio::null());
+        }
+        let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

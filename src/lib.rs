@@ -10,9 +10,12 @@ mod paths;
 
 pub use command::*;
 pub mod docker;
+#[cfg(feature = "ctrlc_support")]
+pub mod docker_helpers;
 pub use error::*;
 pub use log_file::*;
 pub use paths::*;
+use tokio::{fs::File, io::AsyncWriteExt};
 
 /// Equivalent to calling `Command::new(cmd_with_args,
 /// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;`
@@ -62,4 +65,15 @@ pub fn get_separated_val(
         }
     }
     value.map_add_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
+}
+
+/// Closing files is a tricky thing (I think (?) the `sync_all` part can even
+/// apply to read-only files because of the openness static) if syncronization
+/// with other programs is required, this function makes sure changes are
+/// flushed and `sync_all` is called to make sure the data has actually been
+/// written to filesystem.
+pub async fn close_file(mut file: File) -> Result<()> {
+    file.flush().await?;
+    file.sync_all().await?;
+    Ok(())
 }
