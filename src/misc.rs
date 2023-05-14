@@ -29,13 +29,15 @@ pub fn ctrlc_issued_reset() -> bool {
 }
 
 /// Equivalent to calling `Command::new(cmd_with_args,
-/// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;`
-pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<()> {
-    Command::new(cmd_with_args, args)
+/// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;` and
+/// returning the stdout
+pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
+    let comres = Command::new(cmd_with_args, args)
         .ci_mode(true)
         .run_to_completion()
-        .await?
-        .assert_success()
+        .await?;
+    comres.assert_success()?;
+    Ok(comres.stdout)
 }
 
 pub const STD_TRIES: u64 = 300;
@@ -82,6 +84,7 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
 ///     "\"hello world\""
 /// );
 /// ```
+#[track_caller]
 pub fn get_separated_val(
     input: &str,
     separate: &str,

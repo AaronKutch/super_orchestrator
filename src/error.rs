@@ -31,6 +31,10 @@ pub enum ErrorKind {
     // we don't want that in our generic string errors.
     #[error("FromUtf16Error")]
     FromUtf16Error(std::string::FromUtf16Error),
+    #[error("ParseIntError")]
+    ParseIntError(std::num::ParseIntError),
+    #[error("ParseFloatError")]
+    ParseFloatError(std::num::ParseFloatError),
     #[error("TokioJoinError")]
     TokioJoinError(tokio::task::JoinError),
     // Borsh effecively uses `std::io::Error`
@@ -276,6 +280,10 @@ x!(RonError X8);
 type X9 = ctrlc::Error;
 #[cfg(feature = "ctrlc_support")]
 x!(CtrlcError X9);
+type X10 = std::num::ParseIntError;
+x!(ParseIntError X10);
+type X11 = std::num::ParseFloatError;
+x!(ParseFloatError X11);
 
 /*
 type X = ;
