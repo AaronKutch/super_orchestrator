@@ -15,16 +15,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, Error, LogFileOptions, MapAddError, Result};
-
-/// For implementing `Debug`, this wrapper makes strings use their `Display`
-/// impl rather than `Debug` impl
-pub struct DisplayStr<'a>(&'a str);
-impl<'a> Debug for DisplayStr<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use crate::{acquire_dir_path, DisplayStr, Error, LogFileOptions, MapAddError, Result};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.

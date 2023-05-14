@@ -1,4 +1,6 @@
 use std::{
+    fmt,
+    fmt::Debug,
     future::Future,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -26,6 +28,15 @@ pub fn std_init() -> Result<()> {
 /// Returns if `CTRLC_ISSUED` has been set, and resets it to `false`
 pub fn ctrlc_issued_reset() -> bool {
     CTRLC_ISSUED.swap(false, Ordering::SeqCst)
+}
+
+/// For implementing `Debug`, this wrapper makes strings use their `Display`
+/// impl rather than `Debug` impl
+pub struct DisplayStr<'a>(pub &'a str);
+impl<'a> Debug for DisplayStr<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// Equivalent to calling `Command::new(cmd_with_args,
