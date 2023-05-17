@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use log::warn;
-use tokio::time::Instant;
+use tokio::time::{sleep, Instant};
 
 use crate::{
     acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
@@ -114,6 +114,9 @@ impl ContainerNetwork {
             let _ = Command::new("docker", &["rm", "-f", &id])
                 .run_to_completion()
                 .await;
+        }
+        while let Some(mut runner) = self.container_runners.pop_first() {
+            let _ = runner.1.terminate().await;
         }
     }
 
@@ -273,7 +276,7 @@ impl ContainerNetwork {
             // TODO
             let mut tmp = vec![];
             for arg in &container.entrypoint_args {
-                tmp.push(format!("\"{arg}\""));
+                tmp.push(arg.to_owned());
             }
             for s in &tmp {
                 args.push(s);
@@ -347,46 +350,89 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    /// Returns `Err(timed_out_id)` on timeout, `Ok(Err(..))` on internal error,
-    /// `Ok(Ok(()))` on success in waiting for all containers to stop
+    /// If `terminate_on_failure`, then if any container runner has an error or
+    /// completes with unsuccessful return status, the whole network will be
+    /// terminated.
+    ///
+    /// If called with `Duration::ZERO`, this will complete successfully if all
+    /// containers were terminated before this call.
     pub async fn wait_with_timeout(
         &mut self,
         mut ids_to_wait_on: Vec<String>,
+        terminate_on_failure: bool,
         duration: Duration,
     ) -> Result<()> {
         let start = Instant::now();
-        let mut current = start;
-        while let Some(id) = ids_to_wait_on.pop() {
-            let runner = self.container_runners.get_mut(&id).map_add_err(|| {
-                "ContainerNetwork::wait_timeout -> id \"{id}\" not found in the network"
-            })?;
-            let elapsed = current.saturating_duration_since(start);
-            if let Err(e) = runner
-                .wait_with_timeout(duration.checked_sub(elapsed).unwrap_or(Duration::ZERO))
-                .await
-            {
-                if e.is_timeout() {
-                    return e.map_add_err(|| {
-                        format!(
-                            "ContainerNetwork::wait_timeout() timeout waiting for container id \
-                             \"{id}\" to complete"
+        let mut skip_fail = true;
+        // we will check in a loop so that if a container has failed in the meantime, we
+        // terminate all
+        let mut i = 0;
+        loop {
+            if ids_to_wait_on.is_empty() {
+                break
+            }
+            if i >= ids_to_wait_on.len() {
+                i = 0;
+                let current = Instant::now();
+                let elapsed = current.saturating_duration_since(start);
+                if elapsed > duration {
+                    if skip_fail {
+                        // give one extra round, this is strong enough for the `Duration::ZERO`
+                        // guarantee
+                        skip_fail = false;
+                    } else {
+                        if terminate_on_failure {
+                            self.unconditional_terminate().await;
+                        }
+                        return format!(
+                            "ContainerNetwork::wait_with_timeout() timeout waiting for container \
+                             ids {ids_to_wait_on:?} to complete"
                         )
-                    })
+                        .map_add_err(|| ())
+                    }
                 } else {
-                    self.active_container_ids.remove(&id).unwrap();
-                    return e.map_add_err(|| {
-                        format!(
-                            "ContainerNetwork::wait_timeout() command runner error with container \
-                             id \"{id}\""
-                        )
-                    })
+                    sleep(Duration::from_millis(256)).await;
                 }
             }
-            self.active_container_ids.remove(&id).unwrap();
-            let runner = self.container_runners.remove(&id).unwrap();
-            self.container_results
-                .insert(id.clone(), runner.get_command_result().unwrap());
-            current = Instant::now();
+
+            let id = &ids_to_wait_on[i];
+            let runner = self.container_runners.get_mut(id).map_add_err(|| {
+                "ContainerNetwork::wait_with_timeout -> id \"{id}\" not found in the network"
+            })?;
+            match runner.wait_with_timeout(Duration::ZERO).await {
+                Ok(()) => {
+                    self.active_container_ids.remove(id).unwrap();
+                    let runner = self.container_runners.remove(id).unwrap();
+                    let res = runner.get_command_result().unwrap();
+                    let status = res.assert_success();
+                    self.container_results.insert(id.clone(), res);
+                    if terminate_on_failure && status.is_err() {
+                        self.unconditional_terminate().await;
+                        return status.map_add_err(|| {
+                            format!(
+                                "ContainerNetwork::wait_with_timeout() command runner had \
+                                 unsuccessful return status with container id \"{id}\""
+                            )
+                        })
+                    }
+                    ids_to_wait_on.remove(i);
+                }
+                Err(e) => {
+                    if !e.is_timeout() {
+                        self.active_container_ids.remove(id).unwrap();
+                        if terminate_on_failure {
+                            self.unconditional_terminate().await;
+                        }
+                        return e.map_add_err(|| {
+                            format!(
+                                "ContainerNetwork::wait_with_timeout() command runner error with \
+                                 container id \"{id}\""
+                            )
+                        })
+                    }
+                    i += 1;
+                }
+            }
         }
         Ok(())
     }

@@ -409,6 +409,8 @@ impl CommandRunner {
     /// error. After `Ok(())` is returned, the `CommandRunner` is finished and
     /// you can call `get_command_result`. Call [Error::is_timeout()] on the
     /// error to see if it was a timeout or another kind of error.
+    ///
+    /// Note: use `Duration::ZERO` if you want a single attempt
     pub async fn wait_with_timeout(&mut self, duration: Duration) -> Result<()> {
         // backoff control
         let mut interval = Duration::from_millis(1);
