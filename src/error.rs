@@ -23,6 +23,10 @@ pub enum ErrorKind {
     StrError(&'static str),
     #[error("StringError")]
     StringError(String),
+    #[error("BoxedError")]
+    BoxedError(Box<dyn std::error::Error>),
+    #[error("TryFromIntError")]
+    TryFromIntError(std::num::TryFromIntError),
     #[error("StdIoError")]
     StdIoError(std::io::Error),
     #[error("FromUtf8Error")]
@@ -111,6 +115,13 @@ impl Error {
     #[track_caller]
     pub fn timeout() -> Self {
         Self::from_kind(ErrorKind::TimeoutError)
+    }
+
+    /// Can handle anything implementing `std::error::Error`. Most often called
+    /// like `Err(Error::boxed(Box::new(e)))`.
+    #[track_caller]
+    pub fn boxed(e: Box<dyn std::error::Error>) -> Self {
+        Self::from_kind(ErrorKind::BoxedError(e))
     }
 
     /// The same as [Error::add_err] but without pushing location to stack
@@ -284,6 +295,10 @@ type X10 = std::num::ParseIntError;
 x!(ParseIntError X10);
 type X11 = std::num::ParseFloatError;
 x!(ParseFloatError X11);
+type X12 = std::num::TryFromIntError;
+x!(TryFromIntError X12);
+type X13 = Box<dyn std::error::Error>;
+x!(BoxedError X13);
 
 /*
 type X = ;

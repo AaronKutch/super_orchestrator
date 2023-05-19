@@ -8,11 +8,11 @@ mod error;
 mod log_file;
 mod misc;
 mod paths;
-
 pub use command::*;
 pub mod docker;
 #[cfg(feature = "ctrlc_support")]
 pub mod docker_helpers;
+pub mod net_message;
 pub use error::*;
 pub use log_file::*;
 pub use misc::*;

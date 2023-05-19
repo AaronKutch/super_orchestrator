@@ -31,10 +31,11 @@ pub struct Container {
 }
 
 impl Container {
+    /// Note: `name` is also used for the hostname
     pub fn new(
         name: &str,
         dockerfile: Option<&str>,
-        image: &str,
+        image: Option<&str>,
         build_args: &[&str],
         volumes: &[(&str, &str)],
         entrypoint_path: &str,
@@ -43,7 +44,7 @@ impl Container {
         Self {
             name: name.to_owned(),
             dockerfile: dockerfile.map(|s| s.to_owned()),
-            image: image.to_owned(),
+            image: image.map(|s| s.to_owned()).unwrap_or(name.to_owned()),
             build_args: build_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
                 acc
@@ -142,16 +143,16 @@ impl ContainerNetwork {
 
     /// Force removes containers with the given names. No errors are returned in
     /// case of duplicate names or names that are not in the active set.
-    pub async fn terminate(&mut self, names: &[String]) {
+    pub async fn terminate(&mut self, names: &[&str]) {
         for name in names {
-            if let Some(docker_id) = self.active_container_ids.remove(name) {
+            if let Some(docker_id) = self.active_container_ids.remove(*name) {
                 // TODO we should parse errors to differentiate whether it is
                 // simply a race condition where the container finished before
                 // this time, or is a proper command runner error.
                 let _ = Command::new("docker rm -f", &[&docker_id])
                     .run_to_completion()
                     .await;
-                let mut runner = self.container_runners.remove(name).unwrap();
+                let mut runner = self.container_runners.remove(*name).unwrap();
                 let _ = runner.terminate().await;
             }
         }
@@ -170,7 +171,7 @@ impl ContainerNetwork {
     }
 
     /// Runs only the given `names`
-    pub async fn run(&mut self, names: &[String], ci_mode: bool) -> Result<()> {
+    pub async fn run(&mut self, names: &[&str], ci_mode: bool) -> Result<()> {
         // relatively cheap preverification should be done first to prevent much more
         // expensive later undos
         let mut set = BTreeSet::new();
@@ -182,18 +183,18 @@ impl ContainerNetwork {
                 ))
                 .map_add_err(|| ())
             }
-            if !self.containers.contains_key(name) {
+            if !self.containers.contains_key(*name) {
                 return Err(format!(
                     "ContainerNetwork::run() argument name \"{name}\" is not contained in the \
                      network"
                 ))
                 .map_add_err(|| ())
             }
-            set.insert(name.clone());
+            set.insert(*name);
         }
 
         for name in names {
-            let container = &self.containers[name];
+            let container = &self.containers[*name];
             acquire_file_path(&container.entrypoint_path).await?;
             if let Some(ref dockerfile) = container.dockerfile {
                 acquire_file_path(dockerfile).await?;
@@ -265,7 +266,7 @@ impl ContainerNetwork {
 
         // run all the creation first so that everything is pulled and prepared
         for name in names {
-            let container = &self.containers[name];
+            let container = &self.containers[*name];
             if let Some(ref dockerfile) = container.dockerfile {
                 let mut dockerfile = acquire_file_path(dockerfile).await?;
                 // yes we do need to do this because of the weird way docker build works
@@ -361,7 +362,8 @@ impl ContainerNetwork {
                             let mut docker_id = output.stdout;
                             // remove trailing '\n'
                             docker_id.pop().unwrap();
-                            self.active_container_ids.insert(name.clone(), docker_id);
+                            self.active_container_ids
+                                .insert(name.to_string(), docker_id);
                         }
                         Err(e) => {
                             self.terminate_all().await;
@@ -378,7 +380,7 @@ impl ContainerNetwork {
 
         // start containers
         for name in names {
-            let docker_id = &self.active_container_ids[name];
+            let docker_id = &self.active_container_ids[*name];
             let mut command = Command::new("docker start --attach", &[docker_id]);
             command.stdout_log = Some(LogFileOptions {
                 directory: log_dir.clone(),
@@ -394,7 +396,7 @@ impl ContainerNetwork {
             });
             match command.ci_mode(ci_mode).run().await {
                 Ok(runner) => {
-                    self.container_runners.insert(name.clone(), runner);
+                    self.container_runners.insert(name.to_string(), runner);
                 }
                 Err(e) => {
                     self.terminate_all().await;
@@ -408,7 +410,11 @@ impl ContainerNetwork {
 
     pub async fn run_all(&mut self, ci_mode: bool) -> Result<()> {
         let names = self.inactive_names();
-        self.run(&names, ci_mode).await.map_add_err(|| ())
+        let mut v: Vec<&str> = vec![];
+        for name in &names {
+            v.push(name);
+        }
+        self.run(&v, ci_mode).await.map_add_err(|| ())
     }
 
     /// If `terminate_on_failure`, then if any container runner has an error or
