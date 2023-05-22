@@ -66,7 +66,7 @@ impl Container {
 /// alternative to `docker-compose`
 ///
 /// Note: when having multiple containers on some platforms there is
-/// an obnoxious issue https://github.com/moby/libnetwork/issues/2647
+/// an obnoxious issue <https://github.com/moby/libnetwork/issues/2647>
 /// that means you may have to set `is_not_internal`
 #[must_use]
 #[derive(Debug)]

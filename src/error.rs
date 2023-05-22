@@ -118,7 +118,9 @@ impl Error {
     }
 
     /// Can handle anything implementing `std::error::Error`. Most often called
-    /// like `Err(Error::boxed(Box::new(e)))`.
+    /// like `Err(Error::boxed(Box::new(e)))` or `.map_err(|e|
+    /// Error::boxed(Box::new(e) as Box<dyn std::error::Error>)).map_add_err(||
+    /// "more info and a location")?`.
     #[track_caller]
     pub fn boxed(e: Box<dyn std::error::Error>) -> Self {
         Self::from_kind(ErrorKind::BoxedError(e))
