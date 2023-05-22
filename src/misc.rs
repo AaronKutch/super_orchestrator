@@ -1,4 +1,5 @@
 use std::{
+    any::type_name,
     fmt,
     fmt::Debug,
     future::Future,
@@ -28,6 +29,16 @@ pub fn std_init() -> Result<()> {
 /// Returns if `CTRLC_ISSUED` has been set, and resets it to `false`
 pub fn ctrlc_issued_reset() -> bool {
     CTRLC_ISSUED.swap(false, Ordering::SeqCst)
+}
+
+/// Takes the SHA3-256 hash of the type name of `T` and returns it. Has the
+/// potential to change between compiler versions.
+pub fn type_hash<T: ?Sized>() -> [u8; 32] {
+    use sha3::{Digest, Sha3_256};
+    let name = type_name::<T>();
+    let mut hasher = Sha3_256::new();
+    hasher.update(name.as_bytes());
+    hasher.finalize().into()
 }
 
 /// For implementing `Debug`, this wrapper makes strings use their `Display`

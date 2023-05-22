@@ -19,6 +19,7 @@ musli = "0.0.49"
 musli-descriptive = { version = "0.0.49", features = ["std"] }
 ron = { version = "0.8", optional = true, default-features = false }
 serde_json = { version = "1.0", optional = true }
+sha3 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1.28", features = ["full"] }
 

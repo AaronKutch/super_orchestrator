@@ -9,7 +9,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{Error, MapAddError, Result};
+use crate::{type_hash, Error, MapAddError, Result};
 
 const MUSLI_CONFIG: Encoding = musli_descriptive::encoding::DEFAULT;
 
@@ -34,13 +34,22 @@ impl NetMessenger {
     }
 
     /// Binds to and listens on `socket_addr`, and accepts a single connection
-    /// to message with. Cancels the bind and returns a timeout error if
-    /// `timeout` is reached first.
-    pub async fn listen_single_connect(host: &str, timeout: Duration) -> Result<Self> {
+    /// to message with. Expects `expect` as the connecting `NetMessenger`.
+    /// Cancels the bind and returns a timeout error if `timeout` is reached
+    /// first.
+    pub async fn listen_single_connect(
+        host: &str,
+        expect: &str,
+        timeout: Duration,
+    ) -> Result<Self> {
         let socket_addr = lookup_host(host)
             .await?
             .next()
-            .map_add_err(|| "no socket addresses from lookup_host")?;
+            .map_add_err(|| "no socket addresses from lookup_host(host)")?;
+        let expect_addr = lookup_host(expect)
+            .await?
+            .next()
+            .map_add_err(|| "no socket addresses from lookup_host(expect)")?;
         let listener = TcpListener::bind(socket_addr).await.map_add_err(|| ())?;
 
         //let tmp = listener.accept().await?;
@@ -49,7 +58,11 @@ impl NetMessenger {
         // we use the cancel safety of `tokio::net::TcpListener::accept
         select! {
             tmp = listener.accept() => {
-                let (stream, _) = tmp.map_add_err(||())?;
+                let (stream, receiving) = tmp.map_add_err(||())?;
+                if receiving != expect_addr {
+                    return Err(Error::from(format!("NetMessenger::listen_single_connect() accepted \
+                    connection from {}, expected {} ({})", receiving, expect_addr, expect)))
+                }
                 Ok(Self {stream, buf: vec![]})
             }
             _ = sleep(timeout) => {
@@ -58,6 +71,11 @@ impl NetMessenger {
         }
     }
 
+    /// Note: The hash of `std::any::type_name` is sent and compared to
+    /// dynamically check if the correct `send` and `recv` pair are being used.
+    /// This may break if the `send` and `recv` are sending from different
+    /// binaries compiled by different compiler versions (but at least it is a
+    /// false positive).
     pub async fn send<T: ?Sized + Encode<DefaultMode>>(&mut self, msg: &T) -> Result<()> {
         dbg!(self.buf.len());
         match MUSLI_CONFIG.encode(&mut self.buf, msg) {
@@ -66,6 +84,8 @@ impl NetMessenger {
         };
         dbg!(self.buf.len());
         // TODO handle timeouts
+        let id = type_hash::<T>();
+        self.stream.write_all(&id).await.map_add_err(|| ())?;
         self.stream
             .write_u64_le(u64::try_from(self.buf.len())?)
             .await
@@ -77,6 +97,17 @@ impl NetMessenger {
 
     pub async fn recv<'de, T: ?Sized + Decode<'de, DefaultMode>>(&'de mut self) -> Result<T> {
         // TODO handle timeouts
+        let expected_id = type_hash::<T>();
+        let mut actual_id = [0u8; 32];
+        self.stream
+            .read_exact(&mut actual_id)
+            .await
+            .map_add_err(|| "NetMessenger::recv() could not read_exact")?;
+        if expected_id != actual_id {
+            return Err(Error::from(
+                "NetMessenger::recv() incoming type did not match expected type",
+            ))
+        }
         let data_len = usize::try_from(self.stream.read_u64_le().await?)?;
         dbg!(data_len);
         if data_len > self.buf.len() {
