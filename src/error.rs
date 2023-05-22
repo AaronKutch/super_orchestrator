@@ -159,6 +159,13 @@ impl Error {
         }
         false
     }
+
+    /// Chains the stacks of `other` onto `self`
+    pub fn chain_errors(mut self, mut other: Self) -> Self {
+        self.error_stack.append(&mut other.error_stack);
+        self.location_stack.append(&mut other.location_stack);
+        self
+    }
 }
 
 /// The intention of this trait is to convert `Option<T>`s, `Result<T, Error>`s,

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use musli::{en::Encode, mode::DefaultMode, Decode};
 use musli_descriptive::Encoding;
@@ -9,10 +9,11 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{type_hash, Error, MapAddError, Result};
+use crate::{type_hash, wait_for_ok, Error, MapAddError, Result};
 
 const MUSLI_CONFIG: Encoding = musli_descriptive::encoding::DEFAULT;
 
+/// Note: this is really only intended for self-contained Docker networks.
 #[derive(Debug)]
 pub struct NetMessenger {
     stream: TcpStream,
@@ -20,17 +21,45 @@ pub struct NetMessenger {
     buf: Vec<u8>,
 }
 
+pub async fn wait_for_ok_lookup_host(
+    num_retries: u64,
+    delay: Duration,
+    host: &str,
+) -> Result<SocketAddr> {
+    async fn f(host: &str) -> Result<SocketAddr> {
+        match lookup_host(host).await {
+            Ok(mut addrs) => {
+                if let Some(addr) = addrs.next() {
+                    Ok(addr)
+                } else {
+                    Err(Error::from("empty addrs"))
+                }
+            }
+            Err(e) => Err(e).map_add_err(|| "wait_for_ok_lookup_host(.., host: {host})"),
+        }
+    }
+    wait_for_ok(num_retries, delay, || f(host)).await
+}
+
 impl NetMessenger {
-    pub async fn connect(host: &str) -> Result<Self> {
+    /// Note: you should use `wait_for_ok_lookup_host` before calling this
+    /// function if the host may not even be available yet.
+    pub async fn connect(host: &str, timeout: Duration) -> Result<Self> {
         let socket_addr = lookup_host(host)
-            .await?
+            .await
+            .map_add_err(|| ())?
             .next()
-            .map_add_err(|| "no socket addresses from lookup_host")?;
-        let stream = TcpStream::connect(socket_addr).await.map_add_err(|| ())?;
-        Ok(Self {
-            stream,
-            buf: vec![],
-        })
+            .map_add_err(|| ())?;
+        // we use cancel safety here
+        select! {
+            tmp = TcpStream::connect(socket_addr) => {
+                let stream = tmp.map_add_err(||())?;
+                Ok(Self {stream, buf: vec![]})
+            }
+            _ = sleep(timeout) => {
+                Err(Error::timeout())
+            }
+        }
     }
 
     /// Binds to and listens on `socket_addr`, and accepts a single connection
@@ -59,18 +88,19 @@ impl NetMessenger {
         }
     }
 
+    /// Note: You should always use the turbofish to specify `T`, because it is
+    /// otherwise possible to get an unexpected type because of `&` coercion.
+    ///
     /// Note: The hash of `std::any::type_name` is sent and compared to
     /// dynamically check if the correct `send` and `recv` pair are being used.
     /// This may break if the `send` and `recv` are sending from different
     /// binaries compiled by different compiler versions (but at least it is a
     /// false positive).
     pub async fn send<T: ?Sized + Encode<DefaultMode>>(&mut self, msg: &T) -> Result<()> {
-        dbg!(self.buf.len());
         match MUSLI_CONFIG.encode(&mut self.buf, msg) {
             Ok(()) => (),
             Err(e) => return Err(Error::boxed(Box::new(e))),
         };
-        dbg!(self.buf.len());
         // TODO handle timeouts
         let id = type_hash::<T>();
         self.stream.write_all(&id).await.map_add_err(|| ())?;
@@ -97,7 +127,6 @@ impl NetMessenger {
             ))
         }
         let data_len = usize::try_from(self.stream.read_u64_le().await?)?;
-        dbg!(data_len);
         if data_len > self.buf.len() {
             self.buf.resize_with(data_len, || 0);
         }

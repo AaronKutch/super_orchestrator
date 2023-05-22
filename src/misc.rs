@@ -66,22 +66,58 @@ pub const STD_TRIES: u64 = 300;
 pub const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Repeatedly polls `f` until it returns an `Ok` which is returned, or
-/// `num_tries` is reached in which a timeout error is returned
+/// `num_retries` is reached in which a timeout error is returned.
+///
+/// # Example
+///
+/// This is the definition of `wait_for_ok_lookup_host`
+/// ```
+/// pub async fn wait_for_ok_lookup_host(
+///     num_retries: u64,
+///     delay: Duration,
+///     host: &str,
+/// ) -> Result<SocketAddr> {
+///     async fn f(host: &str) -> Result<SocketAddr> {
+///         match lookup_host(host).await {
+///             Ok(mut addrs) => {
+///                 if let Some(addr) = addrs.next() {
+///                     Ok(addr)
+///                 } else {
+///                     Err(Error::from("empty addrs"))
+///                 }
+///             }
+///             Err(e) => Err(e).map_add_err(|| "wait_for_ok_lookup_host(.., host: {host})"),
+///         }
+///     }
+///     wait_for_ok(num_retries, delay, || f(host)).await
+/// }
+/// ```
 #[track_caller]
 pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
-    num_tries: u64,
+    num_retries: u64,
     delay: Duration,
     mut f: F,
 ) -> Result<T> {
-    for _ in 0..num_tries {
-        if let Ok(o) = f().await {
-            return Ok(o)
+    let mut i = num_retries;
+    loop {
+        match f().await {
+            Ok(o) => return Ok(o),
+            Err(e) => {
+                if i == 0 {
+                    return Err(e.chain_errors(Error::timeout())).map_add_err(|| {
+                        format!(
+                            "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) timeout, \
+                             last error stack was"
+                        )
+                    })
+                }
+                i -= 1;
+            }
         }
+        // for `num_retries` we have the check afterwards so that 0 retries can still
+        // pass
         sleep(delay).await;
     }
-    Err(Error::timeout().add_err(format!(
-        "wait_for_ok(num_tries: {num_tries}, delay: {delay:?}) timeout"
-    )))
 }
 
 /// First, this splits by `separate`, trims outer whitespace, sees if `key` is
