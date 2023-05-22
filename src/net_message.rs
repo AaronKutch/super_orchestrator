@@ -37,19 +37,11 @@ impl NetMessenger {
     /// to message with. Expects `expect` as the connecting `NetMessenger`.
     /// Cancels the bind and returns a timeout error if `timeout` is reached
     /// first.
-    pub async fn listen_single_connect(
-        host: &str,
-        expect: &str,
-        timeout: Duration,
-    ) -> Result<Self> {
+    pub async fn listen_single_connect(host: &str, timeout: Duration) -> Result<Self> {
         let socket_addr = lookup_host(host)
             .await?
             .next()
             .map_add_err(|| "no socket addresses from lookup_host(host)")?;
-        let expect_addr = lookup_host(expect)
-            .await?
-            .next()
-            .map_add_err(|| "no socket addresses from lookup_host(expect)")?;
         let listener = TcpListener::bind(socket_addr).await.map_add_err(|| ())?;
 
         //let tmp = listener.accept().await?;
@@ -58,11 +50,7 @@ impl NetMessenger {
         // we use the cancel safety of `tokio::net::TcpListener::accept
         select! {
             tmp = listener.accept() => {
-                let (stream, receiving) = tmp.map_add_err(||())?;
-                if receiving != expect_addr {
-                    return Err(Error::from(format!("NetMessenger::listen_single_connect() accepted \
-                    connection from {}, expected {} ({})", receiving, expect_addr, expect)))
-                }
+                let (stream, _) = tmp.map_add_err(||())?;
                 Ok(Self {stream, buf: vec![]})
             }
             _ = sleep(timeout) => {
