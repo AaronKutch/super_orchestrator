@@ -97,6 +97,7 @@ impl NetMessenger {
     /// binaries compiled by different compiler versions (but at least it is a
     /// false positive).
     pub async fn send<T: ?Sized + Encode<DefaultMode>>(&mut self, msg: &T) -> Result<()> {
+        self.buf.clear();
         match MUSLI_CONFIG.encode(&mut self.buf, msg) {
             Ok(()) => (),
             Err(e) => return Err(Error::boxed(Box::new(e))),
