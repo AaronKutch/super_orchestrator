@@ -72,6 +72,11 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 ///
 /// This is the definition of `wait_for_ok_lookup_host`
 /// ```
+/// use std::{net::SocketAddr, time::Duration};
+///
+/// use super_orchestrator::{wait_for_ok, Error, MapAddError, Result};
+/// use tokio::net::lookup_host;
+///
 /// pub async fn wait_for_ok_lookup_host(
 ///     num_retries: u64,
 ///     delay: Duration,
@@ -86,7 +91,9 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 ///                     Err(Error::from("empty addrs"))
 ///                 }
 ///             }
-///             Err(e) => Err(e).map_add_err(|| "wait_for_ok_lookup_host(.., host: {host})"),
+///             Err(e) => {
+///                 Err(e).map_add_err(|| format!("wait_for_ok_lookup_host(.., host: {host})"))
+///             }
 ///         }
 ///     }
 ///     wait_for_ok(num_retries, delay, || f(host)).await

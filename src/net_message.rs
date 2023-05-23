@@ -21,6 +21,9 @@ pub struct NetMessenger {
     buf: Vec<u8>,
 }
 
+/// Note: it is possible for `lookup_host` to succeed, yet something like a
+/// `TcpStream::connect` call immediately afterwards can still fail, so this
+/// function by itself cannot be used as a barrier.
 pub async fn wait_for_ok_lookup_host(
     num_retries: u64,
     delay: Duration,
@@ -35,31 +38,40 @@ pub async fn wait_for_ok_lookup_host(
                     Err(Error::from("empty addrs"))
                 }
             }
-            Err(e) => Err(e).map_add_err(|| "wait_for_ok_lookup_host(.., host: {host})"),
+            Err(e) => Err(e).map_add_err(|| format!("wait_for_ok_lookup_host(.., host: {host})")),
         }
     }
     wait_for_ok(num_retries, delay, || f(host)).await
 }
 
-impl NetMessenger {
-    /// Note: you should use `wait_for_ok_lookup_host` before calling this
-    /// function if the host may not even be available yet.
-    pub async fn connect(host: &str, timeout: Duration) -> Result<Self> {
-        let socket_addr = lookup_host(host)
-            .await
-            .map_add_err(|| ())?
-            .next()
-            .map_add_err(|| ())?;
-        // we use cancel safety here
-        select! {
-            tmp = TcpStream::connect(socket_addr) => {
-                let stream = tmp.map_add_err(||())?;
-                Ok(Self {stream, buf: vec![]})
-            }
-            _ = sleep(timeout) => {
-                Err(Error::timeout())
-            }
+pub async fn wait_for_ok_tcp_stream_connect(
+    num_retries: u64,
+    delay: Duration,
+    socket_addr: SocketAddr,
+) -> Result<TcpStream> {
+    async fn f(socket_addr: SocketAddr) -> Result<TcpStream> {
+        match TcpStream::connect(socket_addr).await {
+            Ok(stream) => Ok(stream),
+            Err(e) => Err(e).map_add_err(|| {
+                format!("wait_for_ok_tcp_stream_connect(.., socket_addr: {socket_addr})")
+            }),
         }
+    }
+    wait_for_ok(num_retries, delay, || f(socket_addr)).await
+}
+
+impl NetMessenger {
+    pub async fn connect(num_retries: u64, delay: Duration, host: &str) -> Result<Self> {
+        let socket_addr = wait_for_ok_lookup_host(num_retries, delay, host)
+            .await
+            .map_add_err(|| ())?;
+        let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
+            .await
+            .map_add_err(|| ())?;
+        Ok(Self {
+            stream,
+            buf: vec![],
+        })
     }
 
     /// Binds to and listens on `socket_addr`, and accepts a single connection
