@@ -61,23 +61,9 @@ pub async fn wait_for_ok_tcp_stream_connect(
 }
 
 impl NetMessenger {
-    pub async fn connect(num_retries: u64, delay: Duration, host: &str) -> Result<Self> {
-        let socket_addr = wait_for_ok_lookup_host(num_retries, delay, host)
-            .await
-            .map_add_err(|| ())?;
-        let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
-            .await
-            .map_add_err(|| ())?;
-        Ok(Self {
-            stream,
-            buf: vec![],
-        })
-    }
-
     /// Binds to and listens on `socket_addr`, and accepts a single connection
-    /// to message with. Expects `expect` as the connecting `NetMessenger`.
-    /// Cancels the bind and returns a timeout error if `timeout` is reached
-    /// first.
+    /// to message with.Cancels the bind and returns a timeout error if
+    /// `timeout` is reached first.
     pub async fn listen_single_connect(host: &str, timeout: Duration) -> Result<Self> {
         let socket_addr = lookup_host(host)
             .await?
@@ -98,6 +84,21 @@ impl NetMessenger {
                 Err(Error::timeout())
             }
         }
+    }
+
+    /// Connects to another `NetMessenger` that is being started with
+    /// `listen_single_connect`.
+    pub async fn connect(num_retries: u64, delay: Duration, host: &str) -> Result<Self> {
+        let socket_addr = wait_for_ok_lookup_host(num_retries, delay, host)
+            .await
+            .map_add_err(|| ())?;
+        let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
+            .await
+            .map_add_err(|| ())?;
+        Ok(Self {
+            stream,
+            buf: vec![],
+        })
     }
 
     /// Note: You should always use the turbofish to specify `T`, because it is
