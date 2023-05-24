@@ -102,9 +102,14 @@ impl FileOptions {
             .map_add_err(|| "FileOptions::preacquire() -> empty path")?
             .to_str()
             .map_add_err(|| "bad OsStr conversion")?;
-        let path = acquire_dir_path(dir)
+        let mut path = acquire_dir_path(dir)
             .await
             .map_add_err(|| format!("{self:?}.preacquire() could not acquire directory"))?;
+        // we do this always for normalization purposes
+        let file_name = self.path.file_name().map_add_err(|| {
+            format!("{self:?}.precheck() could not acquire file name, was only a directory input?")
+        })?;
+        path.push(file_name);
         match self.options {
             ReadOrWrite::Read => (),
             ReadOrWrite::Write(WriteOptions { create, .. }) => {

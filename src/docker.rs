@@ -440,6 +440,9 @@ impl ContainerNetwork {
                         skip_fail = false;
                     } else {
                         if terminate_on_failure {
+                            // we put in some extra delay so that the log file writers have some
+                            // extra time to finish
+                            sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
                         return format!(
@@ -465,6 +468,7 @@ impl ContainerNetwork {
                     let status = res.assert_success();
                     self.container_results.insert(name.clone(), res);
                     if terminate_on_failure && status.is_err() {
+                        sleep(Duration::from_millis(300)).await;
                         self.terminate_all().await;
                         return status.map_add_err(|| {
                             format!(
@@ -479,6 +483,7 @@ impl ContainerNetwork {
                     if !e.is_timeout() {
                         self.active_container_ids.remove(name).unwrap();
                         if terminate_on_failure {
+                            sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
                         return e.map_add_err(|| {
