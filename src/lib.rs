@@ -1,11 +1,12 @@
-//! WIP
+//! WIP. Be aware that a lot of functions have not had tests written for them
+//! yet.
 
 // TODO
 #![allow(ungated_async_fn_track_caller)]
 
 mod command;
 mod error;
-mod log_file;
+mod file_options;
 mod misc;
 mod paths;
 pub use command::*;
@@ -14,6 +15,6 @@ pub mod docker;
 pub mod docker_helpers;
 pub mod net_message;
 pub use error::*;
-pub use log_file::*;
+pub use file_options::*;
 pub use misc::*;
 pub use paths::*;

@@ -15,7 +15,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, DisplayStr, Error, LogFileOptions, MapAddError, Result};
+use crate::{acquire_dir_path, DisplayStr, Error, FileOptions, MapAddError, Result};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
@@ -30,9 +30,9 @@ pub struct Command {
     /// Working directory for process
     pub cwd: Option<String>,
     /// If set, the command will copy the `stdout` to a file
-    pub stdout_log: Option<LogFileOptions>,
+    pub stdout_log: Option<FileOptions>,
     /// If set, the command will copy the `stderr` to a file
-    pub stderr_log: Option<LogFileOptions>,
+    pub stderr_log: Option<FileOptions>,
     /// Forward stdouts and stderrs to the current processes stdout and stderr
     pub ci: bool,
     /// Inherits stdin, otherwise uses `Stdio::null()`
@@ -183,13 +183,13 @@ impl Command {
         self
     }
 
-    pub fn stdout_log(mut self, log_file_options: &Option<LogFileOptions>) -> Self {
-        self.stdout_log = log_file_options.clone();
+    pub fn stdout_log(mut self, log_file_options: &FileOptions) -> Self {
+        self.stdout_log = Some(log_file_options.clone());
         self
     }
 
-    pub fn stderr_log(mut self, log_file_options: &Option<LogFileOptions>) -> Self {
-        self.stderr_log = log_file_options.clone();
+    pub fn stderr_log(mut self, log_file_options: &FileOptions) -> Self {
+        self.stderr_log = Some(log_file_options.clone());
         self
     }
 

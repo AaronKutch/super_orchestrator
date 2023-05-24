@@ -7,8 +7,8 @@ use log::warn;
 use tokio::time::{sleep, Instant};
 
 use crate::{
-    acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
-    LogFileOptions, MapAddError, Result,
+    acquire_file_path, acquire_path, Command, CommandResult, CommandRunner, FileOptions,
+    MapAddError, Result,
 };
 
 /// Container running information, put this into a `ContainerNetwork`
@@ -79,6 +79,8 @@ pub struct ContainerNetwork {
     active_container_ids: BTreeMap<String, String>,
     container_runners: BTreeMap<String, CommandRunner>,
     pub container_results: BTreeMap<String, CommandResult>,
+    // true if the network has been recreated
+    network_recreated: bool,
 }
 
 impl Drop for ContainerNetwork {
@@ -122,6 +124,7 @@ impl ContainerNetwork {
             active_container_ids: BTreeMap::new(),
             container_runners: BTreeMap::new(),
             container_results: BTreeMap::new(),
+            network_recreated: false,
         })
     }
 
@@ -205,35 +208,20 @@ impl ContainerNetwork {
             }
         }
 
-        // checking the log directory
-        let log_dir = acquire_dir_path(&self.log_dir)
-            .await?
-            .to_str()
-            .map_add_err(|| {
-                format!(
-                    "ContainerNetwork::run() -> log_dir: \"{}\" could not be canonicalized into a \
-                     String",
-                    self.log_dir
-                )
-            })?
-            .to_owned();
-        let mut debug_log = LogFileOptions {
-            directory: log_dir.clone(),
-            file_name: format!("container_network_{}.log", self.network_name),
-            create: true,
-            overwrite: true,
-        };
-        // precheck and overwrite
-        let _ = debug_log.acquire_file().await?;
-        // settings we will use for the rest
-        debug_log.create = false;
-        debug_log.overwrite = false;
-        let debug_log = Some(debug_log);
+        let debug_log = FileOptions::write2(
+            &self.log_dir,
+            &format!("container_network_{}.log", self.network_name),
+        );
+        // prechecking the log directory
+        debug_log
+            .preacquire()
+            .await
+            .map_add_err(|| "ContainerNetwork::run() when acquiring logs directory")?;
 
         // do this last
         for name in names {
             // remove potentially previously existing container with same name
-            let _ = Command::new("docker rm", &[name])
+            let _ = Command::new("docker rm -f", &[name])
                 // never put in CI mode or put in debug file, error on nonexistent container is
                 // confusing, actual errors will be returned
                 .ci_mode(false)
@@ -241,32 +229,35 @@ impl ContainerNetwork {
                 .await?;
         }
 
-        // remove old network if it exists (there is no option to ignore nonexistent
-        // networks, drop exit status errors and let the creation command handle any
-        // higher order errors)
-        let _ = Command::new("docker network rm", &[&self.network_name])
-            .ci_mode(ci_mode)
-            .stdout_log(&debug_log)
-            .stderr_log(&debug_log)
-            .run_to_completion()
-            .await;
-        let comres = if self.is_not_internal {
-            Command::new("docker network create", &[&self.network_name])
+        if !self.network_recreated {
+            // remove old network if it exists (there is no option to ignore nonexistent
+            // networks, drop exit status errors and let the creation command handle any
+            // higher order errors)
+            let _ = Command::new("docker network rm", &[&self.network_name])
                 .ci_mode(ci_mode)
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log)
                 .run_to_completion()
-                .await?
-        } else {
-            Command::new("docker network create --internal", &[&self.network_name])
-                .ci_mode(ci_mode)
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log)
-                .run_to_completion()
-                .await?
-        };
-        // TODO we can get the network id
-        comres.assert_success()?;
+                .await;
+            let comres = if self.is_not_internal {
+                Command::new("docker network create", &[&self.network_name])
+                    .ci_mode(ci_mode)
+                    .stdout_log(&debug_log)
+                    .stderr_log(&debug_log)
+                    .run_to_completion()
+                    .await?
+            } else {
+                Command::new("docker network create --internal", &[&self.network_name])
+                    .ci_mode(ci_mode)
+                    .stdout_log(&debug_log)
+                    .stderr_log(&debug_log)
+                    .run_to_completion()
+                    .await?
+            };
+            // TODO we can get the network id
+            comres.assert_success()?;
+            self.network_recreated = true;
+        }
 
         // run all the creation first so that everything is pulled and prepared
         for name in names {
@@ -385,19 +376,15 @@ impl ContainerNetwork {
         // start containers
         for name in names {
             let docker_id = &self.active_container_ids[*name];
-            let mut command = Command::new("docker start --attach", &[docker_id]);
-            command.stdout_log = Some(LogFileOptions {
-                directory: log_dir.clone(),
-                file_name: format!("container_{}_stdout.log", name),
-                create: true,
-                overwrite: true,
-            });
-            command.stderr_log = Some(LogFileOptions {
-                directory: log_dir.clone(),
-                file_name: format!("container_{}_stderr.log", name),
-                create: true,
-                overwrite: true,
-            });
+            let command = Command::new("docker start --attach", &[docker_id])
+                .stdout_log(&FileOptions::write2(
+                    &self.log_dir,
+                    &format!("container_{}_stdout.log", name),
+                ))
+                .stderr_log(&FileOptions::write2(
+                    &self.log_dir,
+                    &format!("container_{}_stderr.log", name),
+                ));
             match command.ci_mode(ci_mode).run().await {
                 Ok(runner) => {
                     self.container_runners.insert(name.to_string(), runner);
