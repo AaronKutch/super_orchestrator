@@ -1,15 +1,21 @@
 use std::{
     any::type_name,
+    collections::HashSet,
     fmt,
     fmt::Debug,
     future::Future,
+    path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
-use tokio::{fs::File, io::AsyncWriteExt, time::sleep};
+use tokio::{
+    fs::{read_dir, remove_file, File},
+    io::AsyncWriteExt,
+    time::sleep,
+};
 
-use crate::{Command, Error, MapAddError, Result};
+use crate::{acquire_dir_path, Command, Error, MapAddError, Result};
 
 /// use the "ctrlc_support" feature to see functions that use this
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
@@ -176,5 +182,38 @@ pub fn get_separated_val(
 pub async fn close_file(mut file: File) -> Result<()> {
     file.flush().await?;
     file.sync_all().await?;
+    Ok(())
+}
+
+/// This is a guarded kind of removal that only removes all files in a directory
+/// with extensions matching the given `extensions`.
+pub async fn remove_files_in_dir(dir: &str, extensions: &[&str]) -> Result<()> {
+    let dir = acquire_dir_path(dir).await.map_add_err(|| ())?;
+    let mut iter = read_dir(dir.clone()).await.map_add_err(|| ())?;
+    let mut set = HashSet::new();
+    for extension in extensions {
+        set.insert(extension.to_string());
+    }
+    loop {
+        let entry = iter.next_entry().await.map_add_err(|| ())?;
+        if let Some(entry) = entry {
+            let file_type = entry.file_type().await.map_add_err(|| ())?;
+            if file_type.is_file() {
+                if let Some(name) = entry.file_name().as_os_str().to_str() {
+                    let file_only_path = PathBuf::from(name.to_owned());
+                    if let Some(extension) = file_only_path.extension() {
+                        if set.contains(extension.to_str().unwrap()) {
+                            // remove the file
+                            let mut combined = dir.clone();
+                            combined.push(file_only_path);
+                            remove_file(combined).await.map_add_err(|| ())?;
+                        }
+                    }
+                }
+            }
+        } else {
+            break
+        }
+    }
     Ok(())
 }
