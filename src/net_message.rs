@@ -14,6 +14,12 @@ use crate::{type_hash, wait_for_ok, Error, MapAddError, Result};
 const MUSLI_CONFIG: Encoding = musli_descriptive::encoding::DEFAULT;
 
 /// Note: this is really only intended for self-contained Docker networks.
+///
+/// TODO what we need is a sequence of bijection statements macro which forms a
+/// single document for barriers and syncronization between different programs,
+/// maybe include ordinary code in it. It starts in the starting program, and at
+/// a DSL keyword it succinctly logically moves a tuple of things to the next
+/// program in parallel.
 #[derive(Debug)]
 pub struct NetMessenger {
     stream: TcpStream,
