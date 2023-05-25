@@ -135,6 +135,10 @@ impl NetMessenger {
         Ok(())
     }
 
+    /// Note: If you don't directly assign the output to a binding with a
+    /// specified type, you should always use the turbofish to specify `T`,
+    /// because it is otherwise possible to get an unexpected type because
+    /// of `&` coercion.
     pub async fn recv<'de, T: ?Sized + Decode<'de, DefaultMode>>(&'de mut self) -> Result<T> {
         let error_msg = "NetMessenger::recv() could not read_exact, this may be because the other \
                          side was abruptly terminated";
