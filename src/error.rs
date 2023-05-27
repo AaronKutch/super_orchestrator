@@ -51,6 +51,12 @@ pub enum ErrorKind {
     #[cfg(feature = "ctrlc_support")]
     #[error("CtrlcError")]
     CtrlcError(ctrlc::Error),
+    #[cfg(feature = "toml_support")]
+    #[error("TomlDeError")]
+    TomlDeError(toml::de::Error),
+    #[cfg(feature = "toml_support")]
+    #[error("TomlSerError")]
+    TomlSerError(toml::ser::Error),
 }
 
 /// An experimental error struct that has an internal stack for different kinds
@@ -308,6 +314,14 @@ type X12 = std::num::TryFromIntError;
 x!(TryFromIntError X12);
 type X13 = Box<dyn std::error::Error>;
 x!(BoxedError X13);
+#[cfg(feature = "toml_support")]
+type X14 = toml::de::Error;
+#[cfg(feature = "toml_support")]
+x!(TomlDeError X14);
+#[cfg(feature = "toml_support")]
+type X15 = toml::ser::Error;
+#[cfg(feature = "toml_support")]
+x!(TomlSerError X15);
 
 /*
 type X = ;

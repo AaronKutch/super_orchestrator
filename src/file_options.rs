@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
 
 use crate::{acquire_dir_path, acquire_file_path, close_file, Error, MapAddError, Result};
@@ -199,6 +199,38 @@ impl FileOptions {
             .map_add_err(|| "write_str")?;
         file.write_all(s.as_bytes()).await.map_add_err(|| ())?;
         close_file(file).await.map_add_err(|| ())?;
+        Ok(())
+    }
+
+    /// Copies bytes from the source to destination. Does not do any permissions
+    /// copying unlike `tokio::fs::copy`
+    pub async fn copy(src_file_path: &str, dst_file_path: &str) -> Result<()> {
+        let src = Self::read(src_file_path)
+            .acquire_file()
+            .await
+            .map_add_err(|| {
+                format!(
+                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
+                     opening source"
+                )
+            })?;
+        let mut dst = Self::write(dst_file_path)
+            .acquire_file()
+            .await
+            .map_add_err(|| {
+                format!(
+                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
+                     opening destination"
+                )
+            })?;
+        tokio::io::copy_buf(&mut BufReader::new(src), &mut dst)
+            .await
+            .map_add_err(|| {
+                format!(
+                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
+                     copying"
+                )
+            })?;
         Ok(())
     }
 }

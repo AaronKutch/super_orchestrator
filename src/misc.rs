@@ -68,6 +68,14 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     Ok(comres.stdout)
 }
 
+pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
+    let comres = Command::new(cmd_with_args, args)
+        .run_to_completion()
+        .await?;
+    comres.assert_success()?;
+    Ok(comres.stdout)
+}
+
 pub const STD_TRIES: u64 = 300;
 pub const STD_DELAY: Duration = Duration::from_millis(300);
 
@@ -187,6 +195,8 @@ pub async fn close_file(mut file: File) -> Result<()> {
 
 /// This is a guarded kind of removal that only removes all files in a directory
 /// with extensions matching the given `extensions`.
+///
+/// e.x. `remove_files_in_dir("./logs", &["log"]).await?;`
 pub async fn remove_files_in_dir(dir: &str, extensions: &[&str]) -> Result<()> {
     let dir = acquire_dir_path(dir).await.map_add_err(|| ())?;
     let mut iter = read_dir(dir.clone()).await.map_add_err(|| ())?;
