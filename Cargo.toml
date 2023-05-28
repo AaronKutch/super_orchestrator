@@ -23,11 +23,13 @@ sha3 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1.28", features = ["full"] }
 toml = { version = "0.7", optional = true }
+serde_yaml = { version = "0.9", optional = true }
 
 [features]
-default = ["serde_json_support", "ron_support", "ctrlc_support", "env_logger_support", "toml_support"]
+default = ["serde_json_support", "ron_support", "ctrlc_support", "env_logger_support", "toml_support", "serde_yaml_support"]
 serde_json_support = ["serde_json"]
 ron_support = ["ron"]
 ctrlc_support = ["ctrlc"]
 env_logger_support = ["env_logger"]
 toml_support = ["toml"]
+serde_yaml_support = ["serde_yaml"]

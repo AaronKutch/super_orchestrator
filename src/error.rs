@@ -57,6 +57,9 @@ pub enum ErrorKind {
     #[cfg(feature = "toml_support")]
     #[error("TomlSerError")]
     TomlSerError(toml::ser::Error),
+    #[cfg(feature = "serde_yaml_support")]
+    #[error("SerdeYamlError")]
+    SerdeYamlError(serde_yaml::Error),
 }
 
 /// An experimental error struct that has an internal stack for different kinds
@@ -322,6 +325,10 @@ x!(TomlDeError X14);
 type X15 = toml::ser::Error;
 #[cfg(feature = "toml_support")]
 x!(TomlSerError X15);
+#[cfg(feature = "serde_yaml_support")]
+type X16 = serde_yaml::Error;
+#[cfg(feature = "serde_yaml_support")]
+x!(SerdeYamlError X16);
 
 /*
 type X = ;
