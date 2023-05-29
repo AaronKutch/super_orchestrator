@@ -16,4 +16,3 @@ pub mod net_message;
 pub use file_options::*;
 pub use misc::*;
 pub use paths::*;
-pub use stacked_errors;
