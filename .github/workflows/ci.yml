@@ -19,7 +19,6 @@ jobs:
           rustup default stable
       - name: Run test suite
         run: |
-          cargo bench --all-features
           cargo test --all-features
           cargo test --release --all-features
 
