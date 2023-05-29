@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
+use stacked_errors::{Error, MapAddError, Result};
 use tokio::fs;
-
-use crate::{Error, MapAddError, Result};
 
 /// Canonicalizes and checks the existence of a path. Also adds on better
 /// information to errors. Note: may introduce TOCTOU bugs.

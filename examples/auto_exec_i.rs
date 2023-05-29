@@ -1,5 +1,6 @@
 use clap::Parser;
-use super_orchestrator::{docker_helpers::auto_exec_i, std_init, Result};
+use stacked_errors::Result;
+use super_orchestrator::{docker_helpers::auto_exec_i, std_init};
 
 /// Runs auto_exec_i
 #[derive(Parser, Debug)]

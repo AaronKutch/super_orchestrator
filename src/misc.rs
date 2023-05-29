@@ -9,13 +9,14 @@ use std::{
     time::Duration,
 };
 
+use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     fs::{read_dir, remove_file, File},
     io::AsyncWriteExt,
     time::sleep,
 };
 
-use crate::{acquire_dir_path, Command, Error, MapAddError, Result};
+use crate::{acquire_dir_path, Command};
 
 /// use the "ctrlc_support" feature to see functions that use this
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
@@ -88,7 +89,8 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 /// ```
 /// use std::{net::SocketAddr, time::Duration};
 ///
-/// use super_orchestrator::{wait_for_ok, Error, MapAddError, Result};
+/// use stacked_errors::{Error, MapAddError, Result};
+/// use super_orchestrator::wait_for_ok;
 /// use tokio::net::lookup_host;
 ///
 /// pub async fn wait_for_ok_lookup_host(

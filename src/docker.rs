@@ -4,12 +4,10 @@ use std::{
 };
 
 use log::warn;
+use stacked_errors::{MapAddError, Result};
 use tokio::time::{sleep, Instant};
 
-use crate::{
-    acquire_file_path, acquire_path, Command, CommandResult, CommandRunner, FileOptions,
-    MapAddError, Result,
-};
+use crate::{acquire_file_path, acquire_path, Command, CommandResult, CommandRunner, FileOptions};
 
 /// Container running information, put this into a `ContainerNetwork`
 #[derive(Debug)]

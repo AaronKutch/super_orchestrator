@@ -5,7 +5,6 @@
 #![allow(ungated_async_fn_track_caller)]
 
 mod command;
-mod error;
 mod file_options;
 mod misc;
 mod paths;
@@ -14,7 +13,7 @@ pub mod docker;
 #[cfg(feature = "ctrlc_support")]
 pub mod docker_helpers;
 pub mod net_message;
-pub use error::*;
 pub use file_options::*;
 pub use misc::*;
 pub use paths::*;
+pub use stacked_errors;

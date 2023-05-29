@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+use stacked_errors::{MapAddError, Result};
 use tokio::time::sleep;
 
-use crate::{ctrlc_issued_reset, sh, Command, MapAddError, Result, STD_DELAY};
+use crate::{ctrlc_issued_reset, sh, Command, STD_DELAY};
 
 /// Intended to be called from the main() of a standalone binary, or run from
 /// this repo `cargo r --example auto_exec_i -- --container-name main`

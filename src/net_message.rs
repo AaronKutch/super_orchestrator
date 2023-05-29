@@ -2,6 +2,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use musli::{en::Encode, mode::DefaultMode, Decode};
 use musli_descriptive::Encoding;
+use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{lookup_host, TcpListener, TcpStream},
@@ -9,7 +10,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{type_hash, wait_for_ok, Error, MapAddError, Result};
+use crate::{type_hash, wait_for_ok};
 
 const MUSLI_CONFIG: Encoding = musli_descriptive::encoding::DEFAULT;
 

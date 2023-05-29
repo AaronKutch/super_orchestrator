@@ -7,6 +7,7 @@ use std::{
 };
 
 use log::warn;
+use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{self, Child},
@@ -15,7 +16,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, DisplayStr, Error, FileOptions, MapAddError, Result};
+use crate::{acquire_dir_path, DisplayStr, FileOptions};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
