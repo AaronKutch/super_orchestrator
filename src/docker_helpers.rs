@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use log::info;
 use stacked_errors::{MapAddError, Result};
 use tokio::time::sleep;
 
@@ -15,7 +16,7 @@ use crate::{ctrlc_issued_reset, sh, Command, STD_DELAY};
 /// terminate the container and resume looping. Ctrl-C again terminates the
 /// whole program.
 pub async fn auto_exec_i(container_name: &str) -> Result<()> {
-    println!("running auto_exec_i({container_name})");
+    info!("running auto_exec_i({container_name})");
     loop {
         if ctrlc_issued_reset() {
             break
@@ -26,10 +27,10 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
             if line.ends_with(container_name) {
                 let line = line.trim();
                 let id = &line[0..line.find(' ').map_add_err(|| ())?];
-                println!("Found container {id}, forwarding stdin, stdout, stderr");
+                info!("Found container {id}, forwarding stdin, stdout, stderr");
                 docker_exec_i(id).await?;
                 let _ = sh("docker rm -f", &[id]).await;
-                println!("\nTerminated container {id}\n");
+                info!("\nTerminated container {id}\n");
                 break
             }
         }

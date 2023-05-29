@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use log::warn;
+use log::{info, warn};
 use stacked_errors::{MapAddError, Result};
 use tokio::time::{sleep, Instant};
 
@@ -346,7 +346,7 @@ impl ContainerNetwork {
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log);
             if ci_mode {
-                println!("ci_mode command debug: {command:#?}");
+                info!("ci_mode command debug: {command:#?}");
             }
             match command.run_to_completion().await {
                 Ok(output) => {
