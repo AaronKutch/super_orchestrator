@@ -1,5 +1,7 @@
 //! WIP. Be aware that a lot of functions have not had tests written for them
 //! yet.
+//!
+//! See the examples for intended usage.
 
 // TODO
 #![allow(ungated_async_fn_track_caller)]

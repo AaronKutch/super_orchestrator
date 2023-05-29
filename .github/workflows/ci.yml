@@ -19,6 +19,7 @@ jobs:
           rustup default stable
       - name: Run test suite
         run: |
+          cargo r --example docker_entrypoint_pattern
           cargo test --all-features
           cargo test --release --all-features
 
