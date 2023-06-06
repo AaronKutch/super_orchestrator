@@ -202,8 +202,6 @@ impl Command {
             cmd.env_clear();
         }
         if let Some(ref cwd) = self.cwd {
-            // TODO when `track_caller` works on `async`, we might be able to remove some of
-            // these `locate`s
             let cwd = acquire_dir_path(cwd)
                 .await
                 .map_add_err(|| format!("{self:?}.run()"))?;

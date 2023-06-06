@@ -37,8 +37,8 @@ async fn main() -> Result<()> {
 
     if let Some(ref s) = args.entrypoint {
         match s.as_str() {
-            "container0_runner" => container0_runner().await,
-            "container1_runner" => container1_runner().await,
+            "container0" => container0_runner().await,
+            "container1" => container1_runner().await,
             _ => format!("entrypoint \"{s}\" is not recognized").map_add_err(|| ()),
         }
     } else {
@@ -74,7 +74,7 @@ async fn container_runner() -> Result<()> {
         "test",
         vec![
             Container::new(
-                "container0_runner",
+                "container0",
                 None,
                 // note: you would put a path to a docker file above if you wanted to run that way
                 // and set this field to `None`, otherwise if you want the plain image do this
@@ -82,16 +82,16 @@ async fn container_runner() -> Result<()> {
                 &[],
                 volumes,
                 entrypoint,
-                &["--entrypoint", "container0_runner"],
+                &["--entrypoint", "container0"],
             ),
             Container::new(
-                "container1_runner",
+                "container1",
                 None,
                 Some("fedora:38"),
                 &[],
                 volumes,
                 entrypoint,
-                &["--entrypoint", "container1_runner"],
+                &["--entrypoint", "container1"],
             ),
         ],
         // TODO see issue on `ContainerNetwork` struct documentation
@@ -104,7 +104,7 @@ async fn container_runner() -> Result<()> {
 }
 
 async fn container0_runner() -> Result<()> {
-    let host = "container1_runner:26000";
+    let host = "container1:26000";
     let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, host)
         .await
         .map_add_err(|| ())?;

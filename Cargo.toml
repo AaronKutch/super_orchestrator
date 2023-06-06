@@ -19,12 +19,17 @@ musli-descriptive = { version = "0.0.49", features = ["std"] }
 serde_json = { version = "1.0", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 sha3 = "0.10"
-stacked_errors = { version = "0.1", default-features = false, features = ["tokio_rt_support"] }
+#stacked_errors = { version = "0.1", default-features = false, features = ["tokio_rt_support"] }
+stacked_errors = { git = "https://github.com/AaronKutch/stacked_errors", rev = "74d52fd24ff7ec1faab4f2065f37ff356f089137", default-features = false, features = ["tokio_rt_support"] }
+#stacked_errors = { path = "../stacked_errors", default-features = false, features = ["tokio_rt_support"] }
 tokio = { version = "1.28", features = ["full"] }
 
 [features]
 default = ["serde_json_support", "ctrlc_support", "env_logger_support", "serde_yaml_support"]
-serde_json_support = ["serde_json"]
+serde_json_support = ["serde_json", "stacked_errors/serde_json_support"]
 ctrlc_support = ["ctrlc", "stacked_errors/ctrlc_support"]
-env_logger_support = ["env_logger"]
-serde_yaml_support = ["serde_yaml"]
+env_logger_support = ["env_logger", "stacked_errors/env_logger_support"]
+serde_yaml_support = ["serde_yaml", "stacked_errors/serde_yaml_support"]
+ron_support = ["stacked_errors/ron_support"]
+toml_support = ["stacked_errors/toml_support"]
+reqwest_support = ["stacked_errors/reqwest_support"]
