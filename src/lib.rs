@@ -18,3 +18,5 @@ pub mod net_message;
 pub use file_options::*;
 pub use misc::*;
 pub use paths::*;
+/// This reexport helps with dealing with dependency wrangling
+pub use stacked_errors;
