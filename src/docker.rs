@@ -14,17 +14,21 @@ use crate::{acquire_file_path, acquire_path, Command, CommandResult, CommandRunn
 pub struct Container {
     pub name: String,
     pub dockerfile: Option<String>,
-    // if `dockerfile` is not set, this should be an existing image name, otherwise this becomes
-    // the name of the build image
+    /// if `dockerfile` is not set, this should be an existing image name,
+    /// otherwise this becomes the name of the build image
     pub image: String,
-    // each string is passed in as `--build-arg "[String]"` (the quotations are added), so a string
-    // "ARG=val" would set the variable "ARG" for the docker file to use.
+    /// Any flags and args passed to to `docker build`
     pub build_args: Vec<String>,
-    // note that the binary is automatically included
+    /// Any flags and args passed to to `docker create`. Volumes by `volumes
+    /// have the advantage of being canonicalized and prechecked.
+    pub create_args: Vec<String>,
+    /// note that the entrypoint binary is automatically included if
+    /// `extrypoint_path` is set
     pub volumes: Vec<(String, String)>,
-    // path to the entrypoint binary locally
-    pub entrypoint_path: String,
-    // passed in as ["arg1", "arg2", ...] with the bracket and quotations being added
+    /// Path to the entrypoint binary locally
+    pub entrypoint_path: Option<String>,
+    /// passed in as ["arg1", "arg2", ...] with the bracket and quotations being
+    /// added
     pub entrypoint_args: Vec<String>,
 }
 
@@ -34,29 +38,44 @@ impl Container {
         name: &str,
         dockerfile: Option<&str>,
         image: Option<&str>,
-        build_args: &[&str],
         volumes: &[(&str, &str)],
-        entrypoint_path: &str,
+        entrypoint_path: Option<&str>,
         entrypoint_args: &[&str],
     ) -> Self {
         Self {
             name: name.to_owned(),
             dockerfile: dockerfile.map(|s| s.to_owned()),
             image: image.map(|s| s.to_owned()).unwrap_or(name.to_owned()),
-            build_args: build_args.iter().fold(Vec::new(), |mut acc, e| {
-                acc.push(e.to_string());
-                acc
-            }),
+            build_args: vec![],
+            create_args: vec![],
             volumes: volumes.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push((e.0.to_string(), e.1.to_string()));
                 acc
             }),
-            entrypoint_path: entrypoint_path.to_owned(),
+            entrypoint_path: entrypoint_path.map(|s| s.to_owned()),
             entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
                 acc
             }),
         }
+    }
+
+    /// Sets the `build_args`
+    pub fn build_args(mut self, build_args: &[&str]) -> Self {
+        self.build_args = build_args.iter().fold(Vec::new(), |mut acc, e| {
+            acc.push(e.to_string());
+            acc
+        });
+        self
+    }
+
+    /// Sets the `create_args`
+    pub fn create_args(mut self, create_args: &[&str]) -> Self {
+        self.create_args = create_args.iter().fold(Vec::new(), |mut acc, e| {
+            acc.push(e.to_string());
+            acc
+        });
+        self
     }
 }
 
@@ -200,7 +219,9 @@ impl ContainerNetwork {
 
         for name in names {
             let container = &self.containers[*name];
-            acquire_file_path(&container.entrypoint_path).await?;
+            if let Some(ref path) = container.entrypoint_path {
+                acquire_file_path(path).await?;
+            }
             if let Some(ref dockerfile) = container.dockerfile {
                 acquire_file_path(dockerfile).await?;
             }
@@ -267,10 +288,9 @@ impl ContainerNetwork {
                 let mut args = vec!["build", "-t", &container.image, "--file", &dockerfile_full];
                 dockerfile.pop();
                 let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
-                // TODO
                 let mut tmp = vec![];
                 for arg in &container.build_args {
-                    tmp.push(format!("\"{arg}\""));
+                    tmp.push(arg);
                 }
                 for s in &tmp {
                     args.push(s);
@@ -285,8 +305,13 @@ impl ContainerNetwork {
                     .assert_success()?;
             }
 
-            let bin_path = acquire_file_path(&container.entrypoint_path).await?;
-            let bin_s = bin_path.file_name().unwrap().to_str().unwrap();
+            let bin_path = if let Some(ref path) = container.entrypoint_path {
+                Some(acquire_file_path(path).await?)
+            } else {
+                None
+            };
+            let bin_s = bin_path.map(|p| p.file_name().unwrap().to_str().unwrap().to_owned());
+            let bin_s = bin_s.as_ref();
             let mut args = vec![
                 "create",
                 "--rm",
@@ -300,10 +325,12 @@ impl ContainerNetwork {
             // volumes
             let mut volumes = container.volumes.clone();
             // include the needed binary
-            volumes.push((
-                container.entrypoint_path.clone(),
-                format!("/usr/bin/{bin_s}"),
-            ));
+            if let Some(bin_s) = bin_s {
+                volumes.push((
+                    container.entrypoint_path.as_ref().unwrap().to_owned(),
+                    format!("/usr/bin/{bin_s}"),
+                ));
+            }
             let mut combined_volumes = vec![];
             for volume in &volumes {
                 let path = acquire_path(&volume.0)
@@ -319,11 +346,18 @@ impl ContainerNetwork {
                 args.push("--volume");
                 args.push(volume);
             }
+            // other creation args
+            for create_arg in &container.create_args {
+                args.push(create_arg);
+            }
+            // tag
             args.push("-t");
             args.push(&container.image);
             // the binary
-            args.push(bin_s);
-            // TODO
+            if let Some(bin_s) = bin_s.as_ref() {
+                args.push(bin_s);
+            }
+            // entrypoint args
             let mut tmp = vec![];
             for arg in &container.entrypoint_args {
                 tmp.push(arg.to_owned());
@@ -331,16 +365,6 @@ impl ContainerNetwork {
             for s in &tmp {
                 args.push(s);
             }
-            /*if !container.entrypoint_args.is_empty() {
-                let mut s = "[";
-
-                for (i, arg) in container.entrypoint_args.iter().enumerate() {
-                    args += "\"";
-                    args += "\"";
-                }
-                args.push(&container.entrypoint_args);
-                s += "]";
-            }*/
             let command = Command::new("docker", &args)
                 .ci_mode(ci_mode)
                 .stdout_log(&debug_log)

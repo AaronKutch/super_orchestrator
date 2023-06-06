@@ -21,15 +21,21 @@ use crate::{acquire_dir_path, Command};
 /// use the "ctrlc_support" feature to see functions that use this
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
 
-/// Sets up `env_logger` with `LevelFilter::Info` and the ctrl-c handler
-#[cfg(all(feature = "ctrlc_support", feature = "env_logger_support"))]
+/// Sets up the ctrl-c handler
+#[cfg(feature = "ctrlc_support")]
+pub fn ctrlc_init() -> Result<()> {
+    ctrlc::set_handler(move || {
+        CTRLC_ISSUED.store(true, Ordering::SeqCst);
+    })?;
+    Ok(())
+}
+
+/// Sets up `env_logger` with `LevelFilter::Info`
+#[cfg(feature = "env_logger_support")]
 pub fn std_init() -> Result<()> {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Info)
         .init();
-    ctrlc::set_handler(move || {
-        CTRLC_ISSUED.store(true, Ordering::SeqCst);
-    })?;
     Ok(())
 }
 

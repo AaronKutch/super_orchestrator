@@ -67,7 +67,10 @@ async fn container_runner() -> Result<()> {
         container_target,
     ])
     .await?;
-    let entrypoint = &format!("./target/{container_target}/release/examples/{this_bin}");
+    let entrypoint = Some(format!(
+        "./target/{container_target}/release/examples/{this_bin}"
+    ));
+    let entrypoint = entrypoint.as_ref().map(|s| s.as_str());
 
     let volumes = &[("./logs", "/logs")];
     let mut cn = ContainerNetwork::new(
@@ -79,7 +82,6 @@ async fn container_runner() -> Result<()> {
                 // note: you would put a path to a docker file above if you wanted to run that way
                 // and set this field to `None`, otherwise if you want the plain image do this
                 Some("fedora:38"),
-                &[],
                 volumes,
                 entrypoint,
                 &["--entrypoint", "container0"],
@@ -88,7 +90,6 @@ async fn container_runner() -> Result<()> {
                 "container1",
                 None,
                 Some("fedora:38"),
-                &[],
                 volumes,
                 entrypoint,
                 &["--entrypoint", "container1"],
