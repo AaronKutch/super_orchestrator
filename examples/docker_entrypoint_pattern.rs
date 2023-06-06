@@ -70,7 +70,7 @@ async fn container_runner() -> Result<()> {
     let entrypoint = Some(format!(
         "./target/{container_target}/release/examples/{this_bin}"
     ));
-    let entrypoint = entrypoint.as_ref().map(|s| s.as_str());
+    let entrypoint = entrypoint.as_deref();
 
     let volumes = &[("./logs", "/logs")];
     let mut cn = ContainerNetwork::new(
