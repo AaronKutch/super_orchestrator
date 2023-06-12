@@ -5,6 +5,7 @@
  - Removed `Command::inherit_stdin` and instead introduced a `run_with_stdin` function that takes
    any `Stdio`. Simply use `.run_with_stdin(Stdio::inherit())` if you want the property
    `inherit_stdin` had.
+ - Changed `remove_files_in_dir` to also handle files without extensions
 
 ### Additions
  - `Command::run_with_input_to_completion`
