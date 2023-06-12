@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{process::Stdio, time::Duration};
 
 use log::info;
 use stacked_errors::{MapAddError, Result};
@@ -42,8 +42,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
 pub async fn docker_exec_i(container_id: &str) -> Result<()> {
     let mut runner = Command::new("docker exec -i", &[container_id, "bash"])
         .ci_mode(true)
-        .inherit_stdin(true)
-        .run()
+        .run_with_stdin(Stdio::inherit())
         .await?;
     loop {
         if ctrlc_issued_reset() {

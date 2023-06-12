@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0] - TODO
+### Changes
+ - Removed `Command::inherit_stdin` and instead introduced a `run_with_stdin` function that takes
+   any `Stdio`. Simply use `.run_with_stdin(Stdio::inherit())` if you want the property
+   `inherit_stdin` had.
+
+### Additions
+ - `Command::run_with_input_to_completion`
+
 ## [0.2.0] - 06-06-2023
 ### Changes
  - Forwarded `stacked_errors` and its features
