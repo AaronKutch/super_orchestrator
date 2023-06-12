@@ -343,7 +343,7 @@ impl Command {
         stdin.write_all(input).await.map_add_err(|| {
             "Command::run_with_input_to_completion() -> failed to write_all to process stdin"
         })?;
-        // needs to close to actually shutdown
+        // needs to close to actually finish
         drop(stdin);
         runner.wait_with_output().await
     }
