@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - TODO
+## [0.3.0] - 13-06-2023
 ### Changes
 - Removed `Command::inherit_stdin` and instead introduced a `run_with_stdin` function that takes
   any `Stdio`. Simply use `.run_with_stdin(Stdio::inherit())` if you want the property
