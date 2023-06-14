@@ -202,7 +202,8 @@ pub async fn close_file(mut file: File) -> Result<()> {
 }
 
 /// This is a guarded kind of removal that only removes all files in a directory
-/// with extensions matching the given `extensions`.
+/// with extensions matching the given `extensions`. If a file does not have an
+/// extension, it matches against the whole file name.
 ///
 /// e.x. `remove_files_in_dir("./logs", &["log"]).await?;`
 pub async fn remove_files_in_dir(dir: &str, extensions: &[&str]) -> Result<()> {
@@ -219,13 +220,18 @@ pub async fn remove_files_in_dir(dir: &str, extensions: &[&str]) -> Result<()> {
             if file_type.is_file() {
                 if let Some(name) = entry.file_name().as_os_str().to_str() {
                     let file_only_path = PathBuf::from(name.to_owned());
+                    let mut rm_file = false;
                     if let Some(extension) = file_only_path.extension() {
                         if set.contains(extension.to_str().unwrap()) {
-                            // remove the file
-                            let mut combined = dir.clone();
-                            combined.push(file_only_path);
-                            remove_file(combined).await.map_add_err(|| ())?;
+                            rm_file = true;
                         }
+                    } else if set.contains(file_only_path.to_str().unwrap()) {
+                        rm_file = true;
+                    }
+                    if rm_file {
+                        let mut combined = dir.clone();
+                        combined.push(file_only_path);
+                        remove_file(combined).await.map_add_err(|| ())?;
                     }
                 }
             }

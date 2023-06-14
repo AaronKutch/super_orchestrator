@@ -10,7 +10,7 @@ use log::warn;
 use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{self, Child},
+    process::{self, Child, ChildStdin},
     sync::Mutex,
     task::{self, JoinHandle},
     time::sleep,
@@ -36,8 +36,6 @@ pub struct Command {
     pub stderr_log: Option<FileOptions>,
     /// Forward stdouts and stderrs to the current processes stdout and stderr
     pub ci: bool,
-    /// Inherits stdin, otherwise uses `Stdio::null()`
-    pub inherit_stdin: bool,
     /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
     /// false should not be relied upon in normal program operation,
     /// `CommandRunner`s should be properly finished so that the child
@@ -65,7 +63,6 @@ impl Debug for Command {
             .field("stdout_log", &self.stdout_log)
             .field("stderr_log", &self.stderr_log)
             .field("ci", &self.ci)
-            .field("inherit_stdin", &self.inherit_stdin)
             .field("forget_on_drop", &self.forget_on_drop)
             .finish()
     }
@@ -81,6 +78,7 @@ pub struct CommandRunner {
     // do not make public, some functions assume this is available
     child_process: Option<Child>,
     handles: Vec<tokio::task::JoinHandle<()>>,
+    stdin: Option<ChildStdin>,
     // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
     // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
     // copying it to here in order to not lose the data.
@@ -168,7 +166,6 @@ impl Command {
             cwd: None,
             stdout_log: None,
             stderr_log: None,
-            inherit_stdin: false,
             ci: false,
             forget_on_drop: false,
         }
@@ -176,11 +173,6 @@ impl Command {
 
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
-        self
-    }
-
-    pub fn inherit_stdin(mut self, inherit_stdin: bool) -> Self {
-        self.inherit_stdin = inherit_stdin;
         self
     }
 
@@ -195,7 +187,7 @@ impl Command {
     }
 
     #[track_caller]
-    pub async fn run(self) -> Result<CommandRunner> {
+    pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
         let mut cmd = process::Command::new(&self.command);
         if self.env_clear {
             // must happen before the `envs` call
@@ -221,16 +213,13 @@ impl Command {
         cmd.args(&self.args)
             .envs(self.envs.iter().map(|x| (&x.0, &x.1)))
             .kill_on_drop(!self.forget_on_drop);
-        if self.inherit_stdin {
-            cmd.stdin(Stdio::inherit());
-        } else {
-            cmd.stdin(Stdio::null());
-        }
         let mut child = cmd
+            .stdin(stdin_cfg)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_add_err(|| format!("{self:?}.run()"))?;
+        let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
         let stdout = Arc::new(Mutex::new(String::new()));
@@ -317,10 +306,17 @@ impl Command {
             command: Some(self),
             child_process: Some(child),
             handles,
+            stdin,
             stdout,
             stderr,
             result: None,
         })
+    }
+
+    /// Calls [Command::run_with_stdin] with `Stdio::null()`
+    #[track_caller]
+    pub async fn run(self) -> Result<CommandRunner> {
+        self.run_with_stdin(Stdio::null()).await
     }
 
     #[track_caller]
@@ -330,6 +326,26 @@ impl Command {
             .map_add_err(|| "Command::run_to_completion")?
             .wait_with_output()
             .await
+    }
+
+    /// Same as [Command::run_to_completion] except it pipes `input` to the
+    /// process stdin.
+    #[track_caller]
+    pub async fn run_with_input_to_completion(self, input: &[u8]) -> Result<CommandResult> {
+        let mut runner = self
+            .run_with_stdin(Stdio::piped())
+            .await
+            .map_add_err(|| "Command::run_with_input_to_completion")?;
+        let mut stdin = runner
+            .stdin
+            .take()
+            .map_add_err(|| "using Stdio::piped() did not result in a stdin handle")?;
+        stdin.write_all(input).await.map_add_err(|| {
+            "Command::run_with_input_to_completion() -> failed to write_all to process stdin"
+        })?;
+        // needs to close to actually finish
+        drop(stdin);
+        runner.wait_with_output().await
     }
 }
 
@@ -344,13 +360,52 @@ impl CommandRunner {
         }
     }
 
-    /// Forces the command to exit
+    /// Forces the command to exit. Drops the internal handle. Returns an error
+    /// if some termination method has already been called (this will not
+    /// error if the process exited itself, only if a termination function that
+    /// removes the handle has been called).
     pub async fn terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.kill().await.map_add_err(|| ())?;
             self.child_process.take().unwrap();
+            Ok(())
+        } else {
+            Err(Error::from(
+                "`CommandRunner` has already had some termination method called",
+            ))
         }
+    }
+
+    /// Returns the `pid` of the child process. Returns `None` if the command
+    /// has been terminated or the internal `id` call returned `None`.
+    pub fn pid(&self) -> Option<u32> {
+        if let Some(child_process) = self.child_process.as_ref() {
+            if let Some(pid) = child_process.id() {
+                return Some(pid)
+            }
+        }
+        None
+    }
+
+    /// Sends a Unix `Signal` to the process.
+    #[cfg(feature = "nix_support")]
+    pub fn send_unix_signal(&self, unix_signal: nix::sys::signal::Signal) -> Result<()> {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(
+                i32::try_from(self.pid().map_add_err(|| ())?).map_add_err(|| ())?,
+            ),
+            unix_signal,
+        )
+        .unwrap();
         Ok(())
+    }
+
+    /// Has the same effect as "Ctrl-C" in a terminal. Users should preferably
+    /// `wait_with_timeout` afterwards to wait for the process to exit
+    /// correctly.
+    #[cfg(feature = "nix_support")]
+    pub fn send_unix_sigterm(&self) -> Result<()> {
+        self.send_unix_signal(nix::sys::signal::Signal::SIGTERM)
     }
 
     // TODO for ridiculous output sizes, we may want something that only looks at
@@ -423,8 +478,8 @@ impl CommandRunner {
                 }
                 Err(e) => {
                     return e.map_add_err(|| {
-                        "CommandRunner::wait_with_output_timeout failed at `try_wait` before \
-                         reaching timeout or completed command"
+                        "CommandRunner::wait_with_timeout failed at `try_wait` before reaching \
+                         timeout or completed command"
                     })
                 }
             }
