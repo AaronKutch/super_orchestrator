@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.1] - 14-06-2023
+### Fixes
+- Fixed that `auto_exec_i` would try to terminate twice
+
 ## [0.3.0] - 13-06-2023
 ### Changes
 - Removed `Command::inherit_stdin` and instead introduced a `run_with_stdin` function that takes

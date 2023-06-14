@@ -46,6 +46,7 @@ pub async fn docker_exec_i(container_id: &str) -> Result<()> {
         .await?;
     loop {
         if ctrlc_issued_reset() {
+            runner.terminate().await?;
             break
         }
         match runner.wait_with_timeout(Duration::ZERO).await {
@@ -59,6 +60,5 @@ pub async fn docker_exec_i(container_id: &str) -> Result<()> {
         }
         sleep(STD_DELAY).await;
     }
-    runner.terminate().await?;
     Ok(())
 }
