@@ -360,13 +360,52 @@ impl CommandRunner {
         }
     }
 
-    /// Forces the command to exit
+    /// Forces the command to exit. Drops the internal handle. Returns an error
+    /// if some termination method has already been called (this will not
+    /// error if the process exited itself, only if a termination function that
+    /// removes the handle has been called).
     pub async fn terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.kill().await.map_add_err(|| ())?;
             self.child_process.take().unwrap();
+            Ok(())
+        } else {
+            Err(Error::from(
+                "`CommandRunner` has already had some termination method called",
+            ))
         }
+    }
+
+    /// Returns the `pid` of the child process. Returns `None` if the command
+    /// has been terminated or the internal `id` call returned `None`.
+    pub fn pid(&self) -> Option<u32> {
+        if let Some(child_process) = self.child_process.as_ref() {
+            if let Some(pid) = child_process.id() {
+                return Some(pid)
+            }
+        }
+        None
+    }
+
+    /// Sends a Unix `Signal` to the process.
+    #[cfg(feature = "nix_support")]
+    pub fn send_unix_signal(&self, unix_signal: nix::sys::signal::Signal) -> Result<()> {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(
+                i32::try_from(self.pid().map_add_err(|| ())?).map_add_err(|| ())?,
+            ),
+            unix_signal,
+        )
+        .unwrap();
         Ok(())
+    }
+
+    /// Has the same effect as "Ctrl-C" in a terminal. Users should preferably
+    /// `wait_with_timeout` afterwards to wait for the process to exit
+    /// correctly.
+    #[cfg(feature = "nix_support")]
+    pub fn send_unix_sigterm(&self) -> Result<()> {
+        self.send_unix_signal(nix::sys::signal::Signal::SIGTERM)
     }
 
     // TODO for ridiculous output sizes, we may want something that only looks at
