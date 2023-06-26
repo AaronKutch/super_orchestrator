@@ -6,6 +6,9 @@
 - `Command`s and `ContainerNetwork`s now produce no warnings on dropping if the thread is panicking
 - Changed the result of `type_hash` to be 16 bytes
 
+### Additions
+- Command ci_mode debugs are colored
+
 ## [0.3.1] - 14-06-2023
 ### Fixes
 - Fixed that `auto_exec_i` would try to terminate twice

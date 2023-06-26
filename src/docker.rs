@@ -349,21 +349,21 @@ impl ContainerNetwork {
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
             let _ = Command::new("docker network rm", &[&self.network_name])
-                .ci_mode(ci_mode)
+                .ci_mode(false)
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log)
                 .run_to_completion()
                 .await;
             let comres = if self.is_not_internal {
                 Command::new("docker network create", &[&self.network_name])
-                    .ci_mode(ci_mode)
+                    .ci_mode(false)
                     .stdout_log(&debug_log)
                     .stderr_log(&debug_log)
                     .run_to_completion()
                     .await?
             } else {
                 Command::new("docker network create --internal", &[&self.network_name])
-                    .ci_mode(ci_mode)
+                    .ci_mode(false)
                     .stdout_log(&debug_log)
                     .stderr_log(&debug_log)
                     .run_to_completion()
@@ -507,7 +507,7 @@ impl ContainerNetwork {
                 args.push(s);
             }
             let command = Command::new("docker", &args)
-                .ci_mode(ci_mode)
+                .ci_mode(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log);
             if ci_mode {
