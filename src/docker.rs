@@ -459,7 +459,8 @@ impl ContainerNetwork {
                         .stderr_log(&debug_log)
                         .run_to_completion()
                         .await?
-                        .assert_success()?;
+                        .assert_success()
+                        .map_add_err(|| format!("Failed when using the dockerfile at {path}"))?;
                 }
                 Dockerfile::Contents(ref contents) => {
                     // tag
@@ -489,7 +490,13 @@ impl ContainerNetwork {
                         .stderr_log(&debug_log)
                         .run_to_completion()
                         .await?
-                        .assert_success()?;
+                        .assert_success()
+                        .map_add_err(|| {
+                            format!(
+                                "The Dockerfile::Contents written to \
+                                 \"__tmp.dockerfile\":\n{contents}\n"
+                            )
+                        })?;
                 }
             }
 

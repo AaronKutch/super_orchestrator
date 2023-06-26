@@ -27,7 +27,7 @@ struct Args {
     /// If left `None`, the container runner program runs, otherwise this
     /// specifies the entrypoint to run
     #[arg(short, long)]
-    entrypoint: Option<String>,
+    entry_name: Option<String>,
 }
 
 #[tokio::main]
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     std_init()?;
     let args = Args::parse();
 
-    if let Some(ref s) = args.entrypoint {
+    if let Some(ref s) = args.entry_name {
         match s.as_str() {
             "container0" => container0_runner().await,
             "container1" => container1_runner().await,
@@ -50,27 +50,28 @@ async fn main() -> Result<()> {
 async fn container_runner() -> Result<()> {
     let logs_dir = "./logs";
     let dockerfiles_dir = "./dockerfiles";
-    let this_bin = "docker_entrypoint_pattern";
+    let bin_entrypoint = "docker_entrypoint_pattern";
     let container_target = "x86_64-unknown-linux-gnu";
 
     // build internal runner with `--release`
     //sh("cargo build --release --bin", &[
-    //    this_bin,
+    //    bin_entrypoint,
     //    "--target",
     //    container_target,
     //])
     //.await?;
-    //let entrypoint = &format!("./target/{container_target}/release/{this_bin}");
+    //let entrypoint =
+    // &format!("./target/{container_target}/release/{bin_entrypoint}");
 
     // for this example we need this command
     sh("cargo build --release --example", &[
-        this_bin,
+        bin_entrypoint,
         "--target",
         container_target,
     ])
     .await?;
     let entrypoint = Some(format!(
-        "./target/{container_target}/release/examples/{this_bin}"
+        "./target/{container_target}/release/examples/{bin_entrypoint}"
     ));
     let entrypoint = entrypoint.as_deref();
 
