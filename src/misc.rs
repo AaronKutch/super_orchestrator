@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+pub(crate) use color_cycle::next_terminal_color;
 use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     fs::{read_dir, remove_file, File},
@@ -245,4 +246,28 @@ pub async fn remove_files_in_dir(dir: &str, extensions: &[&str]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+mod color_cycle {
+    use std::sync::atomic::AtomicUsize;
+
+    use owo_colors::{AnsiColors, AnsiColors::*};
+
+    const COLOR_CYCLE: [AnsiColors; 8] = [
+        White,
+        Yellow,
+        Green,
+        Cyan,
+        BrightBlack,
+        Blue,
+        BrightCyan,
+        BrightGreen,
+    ];
+
+    static COLOR_NUM: AtomicUsize = AtomicUsize::new(0);
+
+    pub(crate) fn next_terminal_color() -> AnsiColors {
+        let inx = COLOR_NUM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        COLOR_CYCLE[inx % COLOR_CYCLE.len()]
+    }
 }

@@ -7,6 +7,7 @@ use std::{
 };
 
 use log::warn;
+use owo_colors::OwoColorize;
 use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -16,7 +17,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, DisplayStr, FileOptions};
+use crate::{acquire_dir_path, next_terminal_color, DisplayStr, FileOptions};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
@@ -239,6 +240,11 @@ impl Command {
         } else {
             None
         };
+        let terminal_color = if stdout_forward0.is_some() || stdout_forward1.is_some() {
+            next_terminal_color()
+        } else {
+            owo_colors::AnsiColors::Default
+        };
         let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).lines();
         let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).lines();
         let command_name = self.command.clone();
@@ -260,10 +266,9 @@ impl Command {
                         }
                         // forward stdout to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward0 {
+                            let s = format!("{} {}  |", command_name, child_id);
                             let _ = stdout_forward
-                                .write(
-                                    format!("{command_name} {child_id} stdout | {line}").as_bytes(),
-                                )
+                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
                                 .await
                                 .expect("command stdout to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -291,10 +296,9 @@ impl Command {
                         }
                         // forward stderr to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward1 {
+                            let s = format!("{} {} E|", command_name, child_id);
                             let _ = stdout_forward
-                                .write(
-                                    format!("{command_name} {child_id} stderr | {line}").as_bytes(),
-                                )
+                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
                                 .await
                                 .expect("command stderr to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
