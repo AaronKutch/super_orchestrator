@@ -46,18 +46,8 @@ pub struct Command {
 
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut command = self.command.clone();
-        if !self.args.is_empty() {
-            command += " ";
-            for (i, arg) in self.args.iter().enumerate() {
-                command += arg;
-                if i != (self.args.len() - 1) {
-                    command += " ";
-                }
-            }
-        }
         f.debug_struct("Command")
-            .field("command", &DisplayStr(&command))
+            .field("command", &DisplayStr(&self.get_unified_command()))
             .field("env_clear", &self.env_clear)
             .field("envs", &self.envs)
             .field("cwd", &self.cwd)
@@ -109,10 +99,8 @@ impl Drop for CommandRunner {
         // normal case
         if self.child_process.is_some() && (!std::thread::panicking()) {
             warn!(
-                "A `CommandRunner` was dropped and not properly finished, if not finished then \
-                 the child process may continue using up resources or be force stopped at any \
-                 time. The `Command` to run was: {:#?}",
-                self.command
+                "A `CommandRunner` was dropped without being properly finished, the command was: {}",
+                self.command.as_ref().map(|c| c.get_unified_command()).unwrap_or(String::new())
             )
         }
     }
@@ -188,6 +176,20 @@ impl Command {
     pub fn stderr_log(mut self, log_file_options: &FileOptions) -> Self {
         self.stderr_log = Some(log_file_options.clone());
         self
+    }
+
+    pub(crate) fn get_unified_command(&self) -> String {
+        let mut command = self.command.clone();
+        if !self.args.is_empty() {
+            command += " ";
+            for (i, arg) in self.args.iter().enumerate() {
+                command += arg;
+                if i != (self.args.len() - 1) {
+                    command += " ";
+                }
+            }
+        }
+        command
     }
 
     #[track_caller]

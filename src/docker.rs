@@ -133,8 +133,7 @@ impl Drop for ContainerNetwork {
         if (!self.container_runners.is_empty()) && (!std::thread::panicking()) {
             warn!(
                 "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
-                 running. If not consumed properly then the internal commands may continue using \
-                 up resources or be force stopped at any time",
+                 running",
                 self.network_name
             )
         }
