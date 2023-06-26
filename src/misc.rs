@@ -44,14 +44,19 @@ pub fn ctrlc_issued_reset() -> bool {
     CTRLC_ISSUED.swap(false, Ordering::SeqCst)
 }
 
-/// Takes the SHA3-256 hash of the type name of `T` and returns it. Has the
+/// Takes the hash of the type name of `T` and returns it. Has the
 /// potential to change between compiler versions.
-pub fn type_hash<T: ?Sized>() -> [u8; 32] {
+pub fn type_hash<T: ?Sized>() -> [u8; 16] {
+    // we can't make this `const` currently because of `type_name`, however it
+    // should compile down to the result in practice, at least on release mode
     use sha3::{Digest, Sha3_256};
     let name = type_name::<T>();
     let mut hasher = Sha3_256::new();
     hasher.update(name.as_bytes());
-    hasher.finalize().into()
+    let tmp: [u8; 32] = hasher.finalize().into();
+    let mut res = [0u8; 16];
+    res.copy_from_slice(&tmp[0..16]);
+    res
 }
 
 /// For implementing `Debug`, this wrapper makes strings use their `Display`

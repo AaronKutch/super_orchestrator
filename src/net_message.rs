@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{any::type_name, net::SocketAddr, time::Duration};
 
 use musli::{en::Encode, mode::DefaultMode, Decode};
 use musli_descriptive::Encoding;
@@ -151,15 +151,16 @@ impl NetMessenger {
                          side was abruptly terminated";
         // TODO handle timeouts
         let expected_id = type_hash::<T>();
-        let mut actual_id = [0u8; 32];
+        let mut actual_id = [0u8; 16];
         self.stream
             .read_exact(&mut actual_id)
             .await
             .map_add_err(|| error_msg)?;
         if expected_id != actual_id {
-            return Err(Error::from(
-                "NetMessenger::recv() incoming type did not match expected type",
-            ))
+            return Err(Error::from(format!(
+                "NetMessenger::recv() -> incoming type did not match expected type ({})",
+                type_name::<T>()
+            )))
         }
         let data_len = usize::try_from(self.stream.read_u64_le().await.map_add_err(|| error_msg)?)?;
         if data_len > self.buf.len() {

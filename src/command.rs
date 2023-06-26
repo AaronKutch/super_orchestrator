@@ -103,7 +103,10 @@ impl Drop for CommandRunner {
     fn drop(&mut self) {
         // we could call `try_wait` and see if the process has actually exited or not,
         // but the user should have called one of the consuming functions
-        if self.child_process.is_some() {
+
+        // we purposely parenthesize in this way to avoid calling `panicking` in the
+        // normal case
+        if self.child_process.is_some() && (!std::thread::panicking()) {
             warn!(
                 "A `CommandRunner` was dropped and not properly finished, if not finished then \
                  the child process may continue using up resources or be force stopped at any \

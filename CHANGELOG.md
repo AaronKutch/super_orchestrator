@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - TODO
+### Changes
+- Refactored the way Dockerfiles are handled in `ContainerNetwork`s and in `Container`s
+- `Command`s and `ContainerNetwork`s now produce no warnings on dropping if the thread is panicking
+- Changed the result of `type_hash` to be 16 bytes
+
 ## [0.3.1] - 14-06-2023
 ### Fixes
 - Fixed that `auto_exec_i` would try to terminate twice
