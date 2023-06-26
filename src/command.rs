@@ -99,8 +99,12 @@ impl Drop for CommandRunner {
         // normal case
         if self.child_process.is_some() && (!std::thread::panicking()) {
             warn!(
-                "A `CommandRunner` was dropped without being properly finished, the command was: {}",
-                self.command.as_ref().map(|c| c.get_unified_command()).unwrap_or(String::new())
+                "A `CommandRunner` was dropped without being properly finished, the command was: \
+                 {}",
+                self.command
+                    .as_ref()
+                    .map(|c| c.get_unified_command())
+                    .unwrap_or(String::new())
             )
         }
     }
