@@ -1,6 +1,7 @@
 //! Functions for managing Docker containers
 //!
-//! See the `docker_entrypoint_pattern` example for how to use all of this together.
+//! See the `docker_entrypoint_pattern` example for how to use all of this
+//! together.
 
 use std::{
     collections::{BTreeMap, BTreeSet},

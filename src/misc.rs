@@ -294,7 +294,7 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
                  {i} is empty"
             )))
         }
-        let is_extension = s.chars().next().unwrap() == '.';
+        let is_extension = s.starts_with('.');
         if is_extension {
             s = &s[1..];
         }
