@@ -83,6 +83,7 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     Ok(comres.stdout)
 }
 
+/// [sh] but without CI mode
 pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     let comres = Command::new(cmd_with_args, args)
         .run_to_completion()
@@ -198,11 +199,9 @@ pub fn get_separated_val(
     value.map_add_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
 }
 
-/// Closing files is a tricky thing (I think (?) the `sync_all` part can even
-/// apply to read-only files because of the openness static) if syncronization
-/// with other programs is required, this function makes sure changes are
-/// flushed and `sync_all` is called to make sure the data has actually been
-/// written to filesystem.
+/// This function makes sure changes are flushed and `sync_all` is called to
+/// make sure the file has actually been completely written to the filesystem
+/// and closed before the end of this function.
 pub async fn close_file(mut file: File) -> Result<()> {
     file.flush().await?;
     file.sync_all().await?;
@@ -216,59 +215,66 @@ pub async fn close_file(mut file: File) -> Result<()> {
 ///
 /// # Example
 ///
-/// ```
-/// // create some empty example files
-/// FileOptions::write_str("./logs/binary", "").await?;
-/// FileOptions::write_str("./logs/ex0.log", "").await?;
-/// FileOptions::write_str("./logs/ex1.log", "").await?;
-/// FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
-/// FileOptions::write_str("./logs/tar.gz", "").await?;
+/// ```no_run
+/// use super_orchestrator::{
+///     acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
+/// };
+/// async fn ex() -> Result<()> {
+///     // create some empty example files
+///     FileOptions::write_str("./logs/binary", "").await?;
+///     FileOptions::write_str("./logs/ex0.log", "").await?;
+///     FileOptions::write_str("./logs/ex1.log", "").await?;
+///     FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
+///     FileOptions::write_str("./logs/tar.gz", "").await?;
 ///
-/// remove_files_in_dir("./logs", &["r.gz", ".r.gz"]).await?;
-/// // check that files "ex2.tar.gz" and "tar.gz" were not removed
-/// // even though "r.gz" is in their string suffixes, because it
-/// // only matches against complete extension components.
-/// acquire_file_path("./logs/ex2.tar.gz").await?;
-/// acquire_file_path("./logs/tar.gz").await?;
+///     remove_files_in_dir("./logs", &["r.gz", ".r.gz"]).await?;
+///     // check that files "ex2.tar.gz" and "tar.gz" were not removed
+///     // even though "r.gz" is in their string suffixes, because it
+///     // only matches against complete extension components.
+///     acquire_file_path("./logs/ex2.tar.gz").await?;
+///     acquire_file_path("./logs/tar.gz").await?;
 ///
-/// remove_files_in_dir("./logs", &["binary", ".log"]).await?;
-/// // check that only the "binary" and all ".log" files were removed
-/// assert!(acquire_file_path("./logs/binary").await.is_err());
-/// assert!(acquire_file_path("./logs/ex0.log").await.is_err());
-/// assert!(acquire_file_path("./logs/ex1.log").await.is_err());
-/// acquire_file_path("./logs/ex2.tar.gz").await?;
-/// acquire_file_path("./logs/tar.gz").await?;
+///     remove_files_in_dir("./logs", &["binary", ".log"]).await?;
+///     // check that only the "binary" and all ".log" files were removed
+///     assert!(acquire_file_path("./logs/binary").await.is_err());
+///     assert!(acquire_file_path("./logs/ex0.log").await.is_err());
+///     assert!(acquire_file_path("./logs/ex1.log").await.is_err());
+///     acquire_file_path("./logs/ex2.tar.gz").await?;
+///     acquire_file_path("./logs/tar.gz").await?;
 ///
-/// remove_files_in_dir("./logs", &[".gz"]).await?;
-/// // any thing ending with ".gz" should be gone
-/// assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
-/// assert!(acquire_file_path("./logs/tar.gz").await.is_err());
+///     remove_files_in_dir("./logs", &[".gz"]).await?;
+///     // any thing ending with ".gz" should be gone
+///     assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
+///     assert!(acquire_file_path("./logs/tar.gz").await.is_err());
 ///
-/// // recreate some files
-/// FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
-/// FileOptions::write_str("./logs/ex3.tar.gz.other", "").await?;
-/// FileOptions::write_str("./logs/tar.gz", "").await?;
+///     // recreate some files
+///     FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
+///     FileOptions::write_str("./logs/ex3.tar.gz.other", "").await?;
+///     FileOptions::write_str("./logs/tar.gz", "").await?;
 ///
-/// remove_files_in_dir("./logs", &["tar.gz"]).await?;
-/// // only the file is matched because the element did not begin with a "."
-/// acquire_file_path("./logs/ex2.tar.gz").await?;
-/// acquire_file_path("./logs/ex3.tar.gz.other").await?;
-/// assert!(acquire_file_path("./logs/tar.gz").await.is_err());
+///     remove_files_in_dir("./logs", &["tar.gz"]).await?;
+///     // only the file is matched because the element did not begin with a "."
+///     acquire_file_path("./logs/ex2.tar.gz").await?;
+///     acquire_file_path("./logs/ex3.tar.gz.other").await?;
+///     assert!(acquire_file_path("./logs/tar.gz").await.is_err());
 ///
-/// FileOptions::write_str("./logs/tar.gz", "").await?;
+///     FileOptions::write_str("./logs/tar.gz", "").await?;
 ///
-/// remove_files_in_dir("./logs", &[".tar.gz"]).await?;
-/// // only a strict extension suffix is matched
-/// assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
-/// acquire_file_path("./logs/ex3.tar.gz.other").await?;
-/// acquire_file_path("./logs/tar.gz").await?;
+///     remove_files_in_dir("./logs", &[".tar.gz"]).await?;
+///     // only a strict extension suffix is matched
+///     assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
+///     acquire_file_path("./logs/ex3.tar.gz.other").await?;
+///     acquire_file_path("./logs/tar.gz").await?;
 ///
-/// FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
+///     FileOptions::write_str("./logs/ex2.tar.gz", "").await?;
 ///
-/// remove_files_in_dir("./logs", &[".gz", ".other"]).await?;
-/// assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
-/// assert!(acquire_file_path("./logs/ex3.tar.gz.other").await.is_err());
-/// assert!(acquire_file_path("./logs/tar.gz").await.is_err());
+///     remove_files_in_dir("./logs", &[".gz", ".other"]).await?;
+///     assert!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
+///     assert!(acquire_file_path("./logs/ex3.tar.gz.other").await.is_err());
+///     assert!(acquire_file_path("./logs/tar.gz").await.is_err());
+///
+///     Ok(())
+/// }
 /// ```
 ///
 /// # Errors

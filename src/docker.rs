@@ -1,3 +1,7 @@
+//! Functions for managing Docker containers
+//!
+//! See the `docker_entrypoint_pattern` example for how to use all of this together.
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
@@ -12,6 +16,7 @@ use crate::{
     FileOptions,
 };
 
+/// Ways of using a dockerfile for building a container
 #[derive(Debug, Clone)]
 pub enum Dockerfile {
     /// Builds using an image in the format "name:tag" such as "fedora:38"
@@ -30,7 +35,7 @@ pub enum Dockerfile {
 #[derive(Debug, Clone)]
 pub struct Container {
     /// The name of the container, note the "name:tag" docker argument would go
-    /// in `Dockerfile::Image`
+    /// in [Dockerfile::NameTag]
     pub name: String,
     /// Usually should be the same as the tag
     pub host_name: String,
@@ -106,10 +111,10 @@ impl Container {
 ///
 /// # Note
 ///
-/// When having multiple containers on some platforms there is an obnoxious
-/// issue <https://github.com/moby/libnetwork/issues/2647> that means you may
-/// have to set `is_not_internal` to `true` even if networking is only done
-/// inbetween containers within the network.
+/// When running multiple containers with networking, there is an issue on some
+/// platforms <https://github.com/moby/libnetwork/issues/2647> that means you
+/// may have to set `is_not_internal` to `true` even if networking is only done
+/// between containers within the network.
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
@@ -145,7 +150,7 @@ impl ContainerNetwork {
     /// be attached to, `containers` is the set of containers that can be
     /// referred to later by name, `dockerfile_write_dir` is the directory in
     /// which "__tmp.dockerfile" can be written if `Dockerfile::Contents` is
-    /// used, `is_not_internal` turns of `--internal`, and `log_dir` is where
+    /// used, `is_not_internal` turns off `--internal`, and `log_dir` is where
     /// ".log" log files will be written.
     ///
     /// Note: if `Dockerfile::Contents` is used, and if it uses resources like
@@ -156,6 +161,8 @@ impl ContainerNetwork {
     /// "./dockerfiles" for the write directory, and
     /// "./dockerfiles/dockerfile_resources" for resources used by the
     /// dockerfiles.
+    ///
+    /// # Errors
     ///
     /// Can return an error if there are containers with duplicate names, or a
     /// container is built with `Dockerfile::Content` but no
@@ -669,6 +676,7 @@ impl ContainerNetwork {
         Ok(())
     }
 
+    /// Runs [ContainerNetwork::wait_with_timeout] on all active containers.
     pub async fn wait_with_timeout_all(
         &mut self,
         terminate_on_failure: bool,

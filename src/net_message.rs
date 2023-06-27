@@ -28,6 +28,8 @@ pub struct NetMessenger {
     buf: Vec<u8>,
 }
 
+/// Waits for looking up a host's `SocketAddr` to be successful.
+///
 /// Note: it is possible for `lookup_host` to succeed, yet something like a
 /// `TcpStream::connect` call immediately afterwards can still fail, so this
 /// function by itself cannot be used as a barrier.
@@ -51,6 +53,7 @@ pub async fn wait_for_ok_lookup_host(
     wait_for_ok(num_retries, delay, || f(host)).await
 }
 
+/// Waits for a tcp connection to be successful
 pub async fn wait_for_ok_tcp_stream_connect(
     num_retries: u64,
     delay: Duration,
@@ -69,7 +72,7 @@ pub async fn wait_for_ok_tcp_stream_connect(
 
 impl NetMessenger {
     /// Binds to and listens on `socket_addr`, and accepts a single connection
-    /// to message with.Cancels the bind and returns a timeout error if
+    /// to message with. Cancels the bind and returns a timeout error if
     /// `timeout` is reached first.
     pub async fn listen_single_connect(host: &str, timeout: Duration) -> Result<Self> {
         let socket_addr = lookup_host(host)
