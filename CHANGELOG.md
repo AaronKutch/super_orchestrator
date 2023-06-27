@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0] - TODO
+## [0.4.0] - 27-06-2023
 ### Changes
 - Changed the semantics of `remove_files_in_dir` for hopefully the last time
 - Refactored the way Dockerfiles are handled in `ContainerNetwork`s and in `Container`s
