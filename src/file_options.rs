@@ -11,9 +11,9 @@ use crate::{acquire_dir_path, acquire_file_path, close_file};
 #[derive(Debug, Clone, Copy)]
 pub struct WriteOptions {
     // creates file if nonexistent
-    create: bool,
+    pub create: bool,
     // truncation by default, append otherwise
-    append: bool,
+    pub append: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

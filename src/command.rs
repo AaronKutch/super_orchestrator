@@ -7,6 +7,7 @@ use std::{
 };
 
 use log::warn;
+use owo_colors::OwoColorize;
 use stacked_errors::{Error, MapAddError, Result};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -16,7 +17,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, DisplayStr, FileOptions};
+use crate::{acquire_dir_path, next_terminal_color, DisplayStr, FileOptions};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
@@ -45,18 +46,8 @@ pub struct Command {
 
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut command = self.command.clone();
-        if !self.args.is_empty() {
-            command += " ";
-            for (i, arg) in self.args.iter().enumerate() {
-                command += arg;
-                if i != (self.args.len() - 1) {
-                    command += " ";
-                }
-            }
-        }
         f.debug_struct("Command")
-            .field("command", &DisplayStr(&command))
+            .field("command", &DisplayStr(&self.get_unified_command()))
             .field("env_clear", &self.env_clear)
             .field("envs", &self.envs)
             .field("cwd", &self.cwd)
@@ -103,12 +94,17 @@ impl Drop for CommandRunner {
     fn drop(&mut self) {
         // we could call `try_wait` and see if the process has actually exited or not,
         // but the user should have called one of the consuming functions
-        if self.child_process.is_some() {
+
+        // we purposely parenthesize in this way to avoid calling `panicking` in the
+        // normal case
+        if self.child_process.is_some() && (!std::thread::panicking()) {
             warn!(
-                "A `CommandRunner` was dropped and not properly finished, if not finished then \
-                 the child process may continue using up resources or be force stopped at any \
-                 time. The `Command` to run was: {:#?}",
+                "A `CommandRunner` was dropped without being properly finished, the command was: \
+                 {}",
                 self.command
+                    .as_ref()
+                    .map(|c| c.get_unified_command())
+                    .unwrap_or(String::new())
             )
         }
     }
@@ -186,6 +182,20 @@ impl Command {
         self
     }
 
+    pub(crate) fn get_unified_command(&self) -> String {
+        let mut command = self.command.clone();
+        if !self.args.is_empty() {
+            command += " ";
+            for (i, arg) in self.args.iter().enumerate() {
+                command += arg;
+                if i != (self.args.len() - 1) {
+                    command += " ";
+                }
+            }
+        }
+        command
+    }
+
     #[track_caller]
     pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
         let mut cmd = process::Command::new(&self.command);
@@ -236,6 +246,11 @@ impl Command {
         } else {
             None
         };
+        let terminal_color = if stdout_forward0.is_some() || stdout_forward1.is_some() {
+            next_terminal_color()
+        } else {
+            owo_colors::AnsiColors::Default
+        };
         let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).lines();
         let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).lines();
         let command_name = self.command.clone();
@@ -257,10 +272,9 @@ impl Command {
                         }
                         // forward stdout to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward0 {
+                            let s = format!("{} {}  |", command_name, child_id);
                             let _ = stdout_forward
-                                .write(
-                                    format!("{command_name} {child_id} stdout | {line}").as_bytes(),
-                                )
+                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
                                 .await
                                 .expect("command stdout to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -288,10 +302,9 @@ impl Command {
                         }
                         // forward stderr to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward1 {
+                            let s = format!("{} {} E|", command_name, child_id);
                             let _ = stdout_forward
-                                .write(
-                                    format!("{command_name} {child_id} stderr | {line}").as_bytes(),
-                                )
+                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
                                 .await
                                 .expect("command stderr to stdout copier failed");
                             stdout_forward.flush().await.unwrap();

@@ -1,22 +1,47 @@
+//! Functions for managing Docker containers
+//!
+//! See the `docker_entrypoint_pattern` example for how to use all of this
+//! together.
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
 };
 
 use log::{info, warn};
-use stacked_errors::{MapAddError, Result};
+use stacked_errors::{Error, MapAddError, Result};
 use tokio::time::{sleep, Instant};
 
-use crate::{acquire_file_path, acquire_path, Command, CommandResult, CommandRunner, FileOptions};
+use crate::{
+    acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
+    FileOptions,
+};
+
+/// Ways of using a dockerfile for building a container
+#[derive(Debug, Clone)]
+pub enum Dockerfile {
+    /// Builds using an image in the format "name:tag" such as "fedora:38"
+    /// (running will call something such as `docker pull name:tag`)
+    NameTag(String),
+    /// Builds from a dockerfile on a path (e.x.
+    /// "./tests/dockerfiles/example.dockerfile")
+    Path(String),
+    /// Builds from contents that are written to "__tmp.dockerfile" in a
+    /// directory determined by the `ContainerNetwork`. Note that resources used
+    /// by this dockerfile may need to be in the same directory.
+    Contents(String),
+}
 
 /// Container running information, put this into a `ContainerNetwork`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Container {
+    /// The name of the container, note the "name:tag" docker argument would go
+    /// in [Dockerfile::NameTag]
     pub name: String,
-    pub dockerfile: Option<String>,
-    /// if `dockerfile` is not set, this should be an existing image name,
-    /// otherwise this becomes the name of the build image
-    pub image: String,
+    /// Usually should be the same as the tag
+    pub host_name: String,
+    /// The dockerfile arguments
+    pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
     pub build_args: Vec<String>,
     /// Any flags and args passed to to `docker create`. Volumes by `volumes
@@ -36,28 +61,31 @@ impl Container {
     /// Note: `name` is also used for the hostname
     pub fn new(
         name: &str,
-        dockerfile: Option<&str>,
-        image: Option<&str>,
-        volumes: &[(&str, &str)],
+        dockerfile: Dockerfile,
         entrypoint_path: Option<&str>,
         entrypoint_args: &[&str],
     ) -> Self {
         Self {
             name: name.to_owned(),
-            dockerfile: dockerfile.map(|s| s.to_owned()),
-            image: image.map(|s| s.to_owned()).unwrap_or(name.to_owned()),
+            host_name: name.to_owned(),
+            dockerfile,
             build_args: vec![],
             create_args: vec![],
-            volumes: volumes.iter().fold(Vec::new(), |mut acc, e| {
-                acc.push((e.0.to_string(), e.1.to_string()));
-                acc
-            }),
+            volumes: vec![],
             entrypoint_path: entrypoint_path.map(|s| s.to_owned()),
             entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
                 acc
             }),
         }
+    }
+
+    pub fn volumes(mut self, volumes: &[(&str, &str)]) -> Self {
+        self.volumes = volumes.iter().fold(Vec::new(), |mut acc, e| {
+            acc.push((e.0.to_string(), e.1.to_string()));
+            acc
+        });
+        self
     }
 
     /// Sets the `build_args`
@@ -82,14 +110,18 @@ impl Container {
 /// A complete network of one or more containers, a more programmable
 /// alternative to `docker-compose`
 ///
-/// Note: when having multiple containers on some platforms there is
-/// an obnoxious issue <https://github.com/moby/libnetwork/issues/2647>
-/// that means you may have to set `is_not_internal`
+/// # Note
+///
+/// When running multiple containers with networking, there is an issue on some
+/// platforms <https://github.com/moby/libnetwork/issues/2647> that means you
+/// may have to set `is_not_internal` to `true` even if networking is only done
+/// between containers within the network.
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
     network_name: String,
     containers: BTreeMap<String, Container>,
+    dockerfile_write_dir: Option<String>,
     /// is `--internal` by default
     is_not_internal: bool,
     log_dir: String,
@@ -102,11 +134,12 @@ pub struct ContainerNetwork {
 
 impl Drop for ContainerNetwork {
     fn drop(&mut self) {
-        if !self.container_runners.is_empty() {
+        // we purposely parenthesize in this way to avoid calling `panicking` in the
+        // normal case
+        if (!self.container_runners.is_empty()) && (!std::thread::panicking()) {
             warn!(
                 "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
-                 running. If not consumed properly then the internal commands may continue using \
-                 up resources or be force stopped at any time",
+                 running",
                 self.network_name
             )
         }
@@ -114,15 +147,44 @@ impl Drop for ContainerNetwork {
 }
 
 impl ContainerNetwork {
-    /// Can return `Err` if there are containers with duplicate names
+    /// `network_name` sets the name of the docker network that containers will
+    /// be attached to, `containers` is the set of containers that can be
+    /// referred to later by name, `dockerfile_write_dir` is the directory in
+    /// which "__tmp.dockerfile" can be written if `Dockerfile::Contents` is
+    /// used, `is_not_internal` turns off `--internal`, and `log_dir` is where
+    /// ".log" log files will be written.
+    ///
+    /// Note: if `Dockerfile::Contents` is used, and if it uses resources like
+    /// `COPY --from [resource]`, then the resource needs to be in
+    /// `dockerfile_write_dir` because of restrictions that Docker makes.
+    ///
+    /// The standard layout is to have a "./logs" directory for the log files,
+    /// "./dockerfiles" for the write directory, and
+    /// "./dockerfiles/dockerfile_resources" for resources used by the
+    /// dockerfiles.
+    ///
+    /// # Errors
+    ///
+    /// Can return an error if there are containers with duplicate names, or a
+    /// container is built with `Dockerfile::Content` but no
+    /// `dockerfile_write_dir` is specified.
     pub fn new(
         network_name: &str,
         containers: Vec<Container>,
+        dockerfile_write_dir: Option<&str>,
         is_not_internal: bool,
         log_dir: &str,
     ) -> Result<Self> {
         let mut map = BTreeMap::new();
         for container in containers {
+            if dockerfile_write_dir.is_none()
+                && matches!(container.dockerfile, Dockerfile::Contents(_))
+            {
+                return Err(Error::from(
+                    "ContainerNetwork::new() a container is built with `Dockerfile::Contents`, \
+                     but `dockerfile_write_dir` is unset",
+                ))
+            }
             if map.contains_key(&container.name) {
                 return Err(format!(
                     "ContainerNetwork::new() two containers were supplied with the same name \
@@ -136,6 +198,7 @@ impl ContainerNetwork {
         Ok(Self {
             network_name: network_name.to_owned(),
             containers: map,
+            dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
             is_not_internal,
             log_dir: log_dir.to_owned(),
             active_container_ids: BTreeMap::new(),
@@ -143,6 +206,16 @@ impl ContainerNetwork {
             container_results: BTreeMap::new(),
             network_recreated: false,
         })
+    }
+
+    /// Adds the volumes to every container
+    pub fn add_common_volumes(mut self, volumes: &[(&str, &str)]) -> Self {
+        for container in self.containers.values_mut() {
+            container
+                .volumes
+                .extend(volumes.iter().map(|x| (x.0.to_owned(), x.1.to_owned())))
+        }
+        self
     }
 
     pub fn get_active_container_ids(&self) -> &BTreeMap<String, String> {
@@ -217,16 +290,6 @@ impl ContainerNetwork {
             set.insert(*name);
         }
 
-        for name in names {
-            let container = &self.containers[*name];
-            if let Some(ref path) = container.entrypoint_path {
-                acquire_file_path(path).await?;
-            }
-            if let Some(ref dockerfile) = container.dockerfile {
-                acquire_file_path(dockerfile).await?;
-            }
-        }
-
         let debug_log = FileOptions::write2(
             &self.log_dir,
             &format!("container_network_{}.log", self.network_name),
@@ -236,6 +299,46 @@ impl ContainerNetwork {
             .preacquire()
             .await
             .map_add_err(|| "ContainerNetwork::run() when acquiring logs directory")?;
+
+        let mut get_dockerfile_write_dir = false;
+        for name in names {
+            let container = &self.containers[*name];
+            if let Some(ref path) = container.entrypoint_path {
+                acquire_file_path(path).await?;
+            }
+            match container.dockerfile {
+                Dockerfile::NameTag(_) => {
+                    // adds unnecessary time to common case, just catch it at
+                    // build time or else we should add a flag to do this step
+                    // (which does update the image if it has new commits)
+                    /*let comres = Command::new("docker pull", &[&name_tag])
+                        .ci_mode(ci_mode)
+                        .stdout_log(&debug_log)
+                        .stderr_log(&debug_log)
+                        .run_to_completion()
+                        .await?;
+                    comres.assert_success().map_add_err(|| {
+                        format!("could not pull image for `Dockerfile::Image({name_tag})`")
+                    })?;*/
+                }
+                Dockerfile::Path(ref path) => {
+                    acquire_file_path(path)
+                        .await
+                        .map_add_err(|| "could not find dockerfile path")?;
+                }
+                Dockerfile::Contents(_) => get_dockerfile_write_dir = true,
+            }
+        }
+        let mut dockerfile_write_dir = None;
+        let mut dockerfile_write_file = None;
+        if get_dockerfile_write_dir {
+            let mut path = acquire_dir_path(self.dockerfile_write_dir.as_ref().unwrap())
+                .await
+                .map_add_err(|| "could not find `dockerfile_write_dir` directory")?;
+            dockerfile_write_dir = Some(path.to_str().map_add_err(|| ())?.to_owned());
+            path.push("__tmp.dockerfile");
+            dockerfile_write_file = Some(path.to_str().unwrap().to_owned());
+        }
 
         // do this last
         for name in names {
@@ -253,21 +356,21 @@ impl ContainerNetwork {
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
             let _ = Command::new("docker network rm", &[&self.network_name])
-                .ci_mode(ci_mode)
+                .ci_mode(false)
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log)
                 .run_to_completion()
                 .await;
             let comres = if self.is_not_internal {
                 Command::new("docker network create", &[&self.network_name])
-                    .ci_mode(ci_mode)
+                    .ci_mode(false)
                     .stdout_log(&debug_log)
                     .stderr_log(&debug_log)
                     .run_to_completion()
                     .await?
             } else {
                 Command::new("docker network create --internal", &[&self.network_name])
-                    .ci_mode(ci_mode)
+                    .ci_mode(false)
                     .stdout_log(&debug_log)
                     .stderr_log(&debug_log)
                     .run_to_completion()
@@ -281,29 +384,6 @@ impl ContainerNetwork {
         // run all the creation first so that everything is pulled and prepared
         for name in names {
             let container = &self.containers[*name];
-            if let Some(ref dockerfile) = container.dockerfile {
-                let mut dockerfile = acquire_file_path(dockerfile).await?;
-                // yes we do need to do this because of the weird way docker build works
-                let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
-                let mut args = vec!["build", "-t", &container.image, "--file", &dockerfile_full];
-                dockerfile.pop();
-                let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
-                let mut tmp = vec![];
-                for arg in &container.build_args {
-                    tmp.push(arg);
-                }
-                for s in &tmp {
-                    args.push(s);
-                }
-                args.push(&dockerfile_dir);
-                Command::new("docker", &args)
-                    .ci_mode(ci_mode)
-                    .stdout_log(&debug_log)
-                    .stderr_log(&debug_log)
-                    .run_to_completion()
-                    .await?
-                    .assert_success()?;
-            }
 
             let bin_path = if let Some(ref path) = container.entrypoint_path {
                 Some(acquire_file_path(path).await?)
@@ -312,6 +392,8 @@ impl ContainerNetwork {
             };
             let bin_s = bin_path.map(|p| p.file_name().unwrap().to_str().unwrap().to_owned());
             let bin_s = bin_s.as_ref();
+
+            // baseline args
             let mut args = vec![
                 "create",
                 "--rm",
@@ -322,6 +404,7 @@ impl ContainerNetwork {
                 "--name",
                 name,
             ];
+
             // volumes
             let mut volumes = container.volumes.clone();
             // include the needed binary
@@ -346,13 +429,85 @@ impl ContainerNetwork {
                 args.push("--volume");
                 args.push(volume);
             }
+
             // other creation args
             for create_arg in &container.create_args {
                 args.push(create_arg);
             }
-            // tag
-            args.push("-t");
-            args.push(&container.image);
+
+            match container.dockerfile {
+                Dockerfile::NameTag(ref name_tag) => {
+                    // tag using `name_tag`
+                    args.push("-t");
+                    args.push(name_tag);
+                }
+                Dockerfile::Path(ref path) => {
+                    // tag
+                    args.push("-t");
+                    args.push(&container.name);
+
+                    let mut dockerfile = acquire_file_path(path).await?;
+                    // yes we do need to do this because of the weird way docker build works
+                    let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
+                    let mut build_args =
+                        vec!["build", "-t", &container.name, "--file", &dockerfile_full];
+                    dockerfile.pop();
+                    let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
+                    let mut tmp = vec![];
+                    for arg in &container.build_args {
+                        tmp.push(arg);
+                    }
+                    for s in &tmp {
+                        build_args.push(s);
+                    }
+                    build_args.push(&dockerfile_dir);
+                    Command::new("docker", &build_args)
+                        .ci_mode(ci_mode)
+                        .stdout_log(&debug_log)
+                        .stderr_log(&debug_log)
+                        .run_to_completion()
+                        .await?
+                        .assert_success()
+                        .map_add_err(|| format!("Failed when using the dockerfile at {path}"))?;
+                }
+                Dockerfile::Contents(ref contents) => {
+                    // tag
+                    args.push("-t");
+                    args.push(&container.name);
+
+                    FileOptions::write_str(dockerfile_write_file.as_ref().unwrap(), contents)
+                        .await?;
+                    let mut build_args = vec![
+                        "build",
+                        "-t",
+                        &container.name,
+                        "--file",
+                        dockerfile_write_file.as_ref().unwrap(),
+                    ];
+                    let mut tmp = vec![];
+                    for arg in &container.build_args {
+                        tmp.push(arg);
+                    }
+                    for s in &tmp {
+                        build_args.push(s);
+                    }
+                    build_args.push(dockerfile_write_dir.as_ref().unwrap());
+                    Command::new("docker", &build_args)
+                        .ci_mode(ci_mode)
+                        .stdout_log(&debug_log)
+                        .stderr_log(&debug_log)
+                        .run_to_completion()
+                        .await?
+                        .assert_success()
+                        .map_add_err(|| {
+                            format!(
+                                "The Dockerfile::Contents written to \
+                                 \"__tmp.dockerfile\":\n{contents}\n"
+                            )
+                        })?;
+                }
+            }
+
             // the binary
             if let Some(bin_s) = bin_s.as_ref() {
                 args.push(bin_s);
@@ -366,7 +521,7 @@ impl ContainerNetwork {
                 args.push(s);
             }
             let command = Command::new("docker", &args)
-                .ci_mode(ci_mode)
+                .ci_mode(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log);
             if ci_mode {
@@ -522,6 +677,7 @@ impl ContainerNetwork {
         Ok(())
     }
 
+    /// Runs [ContainerNetwork::wait_with_timeout] on all active containers.
     pub async fn wait_with_timeout_all(
         &mut self,
         terminate_on_failure: bool,
