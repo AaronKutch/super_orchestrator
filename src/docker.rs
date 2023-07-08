@@ -597,42 +597,49 @@ impl ContainerNetwork {
     /// [" parts of stdouts that do not contain "ProbablyNotRootCauseError"
     /// (except if all have this).
     fn error_compilation(&mut self) -> Result<()> {
+        let not_root_cause = "ProbablyNotRootCauseError";
+        let error_stack = "Error: Error { stack: [";
         let mut all_errs_nonroot = true;
+        for result in self.container_results.values() {
+            match result {
+                Ok(comres) => {
+                    if (!comres.successful())
+                        && comres.stdout.contains(error_stack)
+                        && (!comres.stdout.contains(not_root_cause))
+                    {
+                        all_errs_nonroot = false;
+                    }
+                }
+                Err(_) => {
+                    all_errs_nonroot = false;
+                }
+            }
+        }
         let mut res = Error::empty();
         for (name, result) in &self.container_results {
             match result {
                 Ok(comres) => {
-                    if !(comres.successful() || comres.stdout.contains("ProbablyNotRootCauseError"))
+                    if !comres.successful()
+                        && (all_errs_nonroot || (!comres.stdout.contains(not_root_cause)))
                     {
-                        all_errs_nonroot = false;
                         // I don't know if there is a better way of doing this
-                        let start = comres
-                            .stdout
-                            .rfind("Error: Error { stack: [\n")
-                            .unwrap_or(0);
-                        res = res.add_err(format!(
-                            "Error stack from container {name}:\n{}",
-                            &comres.stdout[start..]
-                        ));
+                        if let Some(start) = comres.stdout.rfind(error_stack) {
+                            res = res.add_err_no_location(format!(
+                                "Error stack from container \"{name}\":\n{}",
+                                &comres.stdout[start..]
+                            ));
+                        } else {
+                            res = res.add_err_no_location(format!(
+                                "Error: Container \"{name}\" was unsuccessful but does not seem \
+                                 to have an error stack, check logs"
+                            ));
+                        }
                     }
                 }
                 Err(e) => {
-                    all_errs_nonroot = false;
-                    res = res.add_err(format!(
+                    res = res.add_err_no_location(format!(
                         "Command runner level error from container {name}:\n{e:?}"
                     ));
-                }
-            }
-        }
-        if all_errs_nonroot {
-            // print out all of them because one of them must be the root error
-            for (name, result) in &self.container_results {
-                if let Ok(comres) = result {
-                    if let Err(e) = comres.no_dbg().assert_success() {
-                        res = res
-                            .chain_errors(e)
-                            .add_err(format!("Error stack from container {name}:"));
-                    }
                 }
             }
         }
