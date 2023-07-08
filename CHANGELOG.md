@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - TODO
+### Changes
+- `stacked_errors` 0.3.0
+- Derived `Clone` for `CommandResult`
+- Added `CommandResultNoDbg`
+- Termination now will set the results it can for `Command`s and `ContainerNetwork`s
+- Docker networks with `NetMessenger`s now have much cleaner errors
+
 ## [0.4.0] - 27-06-2023
 ### Changes
 - Changed the semantics of `remove_files_in_dir` for hopefully the last time

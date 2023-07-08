@@ -127,7 +127,7 @@ pub struct ContainerNetwork {
     log_dir: String,
     active_container_ids: BTreeMap<String, String>,
     container_runners: BTreeMap<String, CommandRunner>,
-    pub container_results: BTreeMap<String, CommandResult>,
+    pub container_results: BTreeMap<String, Result<CommandResult>>,
     // true if the network has been recreated
     network_recreated: bool,
 }
@@ -251,19 +251,27 @@ impl ContainerNetwork {
                     .await;
                 let mut runner = self.container_runners.remove(*name).unwrap();
                 let _ = runner.terminate().await;
+                self.container_results
+                    .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
             }
         }
     }
 
     /// Force removes all active containers.
     pub async fn terminate_all(&mut self) {
-        while let Some((_, id)) = self.active_container_ids.pop_first() {
-            let _ = Command::new("docker", &["rm", "-f", &id])
-                .run_to_completion()
-                .await;
-        }
-        while let Some((_, mut runner)) = self.container_runners.pop_first() {
-            let _ = runner.terminate().await;
+        for name in self.active_names() {
+            if let Some(docker_id) = self.active_container_ids.remove(&name) {
+                // TODO we should parse errors to differentiate whether it is
+                // simply a race condition where the container finished before
+                // this time, or is a proper command runner error.
+                let _ = Command::new("docker rm -f", &[&docker_id])
+                    .run_to_completion()
+                    .await;
+                let mut runner = self.container_runners.remove(&name).unwrap();
+                let _ = runner.terminate().await;
+                self.container_results
+                    .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
+            }
         }
     }
 
@@ -585,6 +593,52 @@ impl ContainerNetwork {
         self.run(&v, ci_mode).await.map_add_err(|| ())
     }
 
+    /// Looks through the results and includes the last "Error: Error { stack:
+    /// [" parts of stdouts that do not contain "ProbablyNotRootCauseError"
+    /// (except if all have this).
+    fn error_compilation(&mut self) -> Result<()> {
+        let mut all_errs_nonroot = true;
+        let mut res = Error::empty();
+        for (name, result) in &self.container_results {
+            match result {
+                Ok(comres) => {
+                    if !(comres.successful() || comres.stdout.contains("ProbablyNotRootCauseError"))
+                    {
+                        all_errs_nonroot = false;
+                        // I don't know if there is a better way of doing this
+                        let start = comres
+                            .stdout
+                            .rfind("Error: Error { stack: [\n")
+                            .unwrap_or(0);
+                        res = res.add_err(format!(
+                            "Error stack from container {name}:\n{}",
+                            &comres.stdout[start..]
+                        ));
+                    }
+                }
+                Err(e) => {
+                    all_errs_nonroot = false;
+                    res = res.add_err(format!(
+                        "Command runner level error from container {name}:\n{e:?}"
+                    ));
+                }
+            }
+        }
+        if all_errs_nonroot {
+            // print out all of them because one of them must be the root error
+            for (name, result) in &self.container_results {
+                if let Ok(comres) = result {
+                    if let Err(e) = comres.no_dbg().assert_success() {
+                        res = res
+                            .chain_errors(e)
+                            .add_err(format!("Error stack from container {name}:"));
+                    }
+                }
+            }
+        }
+        Err(res)
+    }
+
     /// If `terminate_on_failure`, then if any container runner has an error or
     /// completes with unsuccessful return status, the whole network will be
     /// terminated.
@@ -641,17 +695,15 @@ impl ContainerNetwork {
                 Ok(()) => {
                     self.active_container_ids.remove(name).unwrap();
                     let runner = self.container_runners.remove(name).unwrap();
-                    let res = runner.get_command_result().unwrap();
-                    let status = res.assert_success();
-                    self.container_results.insert(name.clone(), res);
-                    if terminate_on_failure && status.is_err() {
+                    let first = runner.get_command_result().unwrap();
+                    let err = !first.successful();
+                    self.container_results.insert(name.clone(), Ok(first));
+                    if terminate_on_failure && err {
                         sleep(Duration::from_millis(300)).await;
                         self.terminate_all().await;
-                        return status.map_add_err(|| {
-                            format!(
-                                "ContainerNetwork::wait_with_timeout() command runner had \
-                                 unsuccessful return status with container id \"{name}\""
-                            )
+                        return self.error_compilation().map_add_err(|| {
+                            "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
+                             compilation:"
                         })
                     }
                     names.remove(i);
@@ -659,15 +711,14 @@ impl ContainerNetwork {
                 Err(e) => {
                     if !e.is_timeout() {
                         self.active_container_ids.remove(name).unwrap();
+                        self.container_results.insert(name.clone(), Err(e));
                         if terminate_on_failure {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return e.map_add_err(|| {
-                            format!(
-                                "ContainerNetwork::wait_with_timeout() command runner error with \
-                                 container name \"{name}\""
-                            )
+                        return self.error_compilation().map_add_err(|| {
+                            "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
+                             compilation:"
                         })
                     }
                     i += 1;
