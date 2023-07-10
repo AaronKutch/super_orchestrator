@@ -123,8 +123,6 @@ impl NetMessenger {
     /// binaries compiled by different compiler versions (but at least it is a
     /// false positive).
     pub async fn send<T: ?Sized + Encode<DefaultMode>>(&mut self, msg: &T) -> Result<()> {
-        let error_msg = "NetMessenger::send() could not write_all, this may be because the other \
-                         side was abruptly terminated";
         self.buf.clear();
         match MUSLI_CONFIG.encode(&mut self.buf, msg) {
             Ok(()) => (),
@@ -132,16 +130,22 @@ impl NetMessenger {
         };
         // TODO handle timeouts
         let id = type_hash::<T>();
-        self.stream.write_all(&id).await.map_add_err(|| error_msg)?;
+        if let Err(e) = self.stream.write_all(&id).await {
+            return Err(Error::probably_not_root_cause()
+                .add_err_no_location(format!(
+                    "NetMessenger::send::<{}>::() could not write_all, this may be because the \
+                     other side was abruptly terminated",
+                    type_name::<T>()
+                ))
+                .add_err_no_location(e))
+        }
+        // later errors are probably real network errors
         self.stream
             .write_u64_le(u64::try_from(self.buf.len())?)
             .await
-            .map_add_err(|| error_msg)?;
-        self.stream
-            .write_all(&self.buf)
-            .await
-            .map_add_err(|| error_msg)?;
-        self.stream.flush().await.map_add_err(|| error_msg)?;
+            .map_add_err(|| ())?;
+        self.stream.write_all(&self.buf).await.map_add_err(|| ())?;
+        self.stream.flush().await.map_add_err(|| ())?;
         Ok(())
     }
 
@@ -150,29 +154,33 @@ impl NetMessenger {
     /// because it is otherwise possible to get an unexpected type because
     /// of `&` coercion.
     pub async fn recv<'de, T: ?Sized + Decode<'de, DefaultMode>>(&'de mut self) -> Result<T> {
-        let error_msg = "NetMessenger::recv() could not read_exact, this may be because the other \
-                         side was abruptly terminated";
         // TODO handle timeouts
         let expected_id = type_hash::<T>();
         let mut actual_id = [0u8; 16];
-        self.stream
-            .read_exact(&mut actual_id)
-            .await
-            .map_add_err(|| error_msg)?;
+        if let Err(e) = self.stream.read_exact(&mut actual_id).await {
+            return Err(Error::probably_not_root_cause()
+                .add_err_no_location(format!(
+                    "NetMessenger::recv::<{}>::() could not read_exact, this may be because the \
+                     other side was abruptly terminated",
+                    type_name::<T>()
+                ))
+                .add_err_no_location(e))
+        }
+        // later errors are probably real network errors
         if expected_id != actual_id {
             return Err(Error::from(format!(
                 "NetMessenger::recv() -> incoming type did not match expected type ({})",
                 type_name::<T>()
             )))
         }
-        let data_len = usize::try_from(self.stream.read_u64_le().await.map_add_err(|| error_msg)?)?;
+        let data_len = usize::try_from(self.stream.read_u64_le().await.map_add_err(|| ())?)?;
         if data_len > self.buf.len() {
             self.buf.resize_with(data_len, || 0);
         }
         self.stream
             .read_exact(&mut self.buf[0..data_len])
             .await
-            .map_add_err(|| error_msg)?;
+            .map_add_err(|| ())?;
         match MUSLI_CONFIG.decode(&self.buf[0..data_len]) {
             Ok(o) => Ok(o),
             Err(e) => Err(Error::boxed(Box::new(e))),

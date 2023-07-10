@@ -46,16 +46,18 @@ pub struct Command {
 
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Command")
-            .field("command", &DisplayStr(&self.get_unified_command()))
-            .field("env_clear", &self.env_clear)
-            .field("envs", &self.envs)
-            .field("cwd", &self.cwd)
-            .field("stdout_log", &self.stdout_log)
-            .field("stderr_log", &self.stderr_log)
-            .field("ci", &self.ci)
-            .field("forget_on_drop", &self.forget_on_drop)
-            .finish()
+        f.write_fmt(format_args!(
+            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, stdout_log: {:?}, \
+             stderr_log: {:?}, ci: {}, forget_on_drop: {}}}",
+            DisplayStr(&self.get_unified_command()),
+            self.env_clear,
+            self.envs,
+            self.cwd,
+            self.stdout_log.as_ref().map(|x| &x.path),
+            self.stderr_log.as_ref().map(|x| &x.path),
+            self.ci,
+            self.forget_on_drop
+        ))
     }
 }
 
@@ -111,10 +113,11 @@ impl Drop for CommandRunner {
 }
 
 #[must_use]
+#[derive(Clone)]
 pub struct CommandResult {
     // this information is kept around for failures
     pub command: Command,
-    pub status: ExitStatus,
+    pub status: Option<ExitStatus>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -131,6 +134,20 @@ impl Debug for CommandResult {
 }
 
 impl Display for CommandResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+/// Used for avoiding printing out lengthy stdouts
+#[must_use]
+#[derive(Debug, Clone)]
+pub struct CommandResultNoDbg {
+    pub command: Command,
+    pub status: Option<ExitStatus>,
+}
+
+impl Display for CommandResultNoDbg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
@@ -364,7 +381,7 @@ impl Command {
 
 impl CommandRunner {
     /// Attempts to force the command to exit, but does not wait for the request
-    /// to take effect.
+    /// to take effect. This does not set `self.result`
     pub fn start_terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.start_kill().map_add_err(|| ())
@@ -377,10 +394,20 @@ impl CommandRunner {
     /// if some termination method has already been called (this will not
     /// error if the process exited itself, only if a termination function that
     /// removes the handle has been called).
+    ///
+    /// `self.result` is set, and `self.result.status` is set to `None`.
     pub async fn terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.kill().await.map_add_err(|| ())?;
-            self.child_process.take().unwrap();
+            drop(self.child_process.take().unwrap());
+            let stdout = self.stdout.lock().await.clone();
+            let stderr = self.stderr.lock().await.clone();
+            self.result = Some(CommandResult {
+                command: self.command.take().unwrap(),
+                status: None,
+                stdout,
+                stderr,
+            });
             Ok(())
         } else {
             Err(Error::from(
@@ -453,7 +480,7 @@ impl CommandRunner {
         let stderr = self.stderr.lock().await.clone();
         self.result = Some(CommandResult {
             command: self.command.take().unwrap(),
-            status: output.status,
+            status: Some(output.status),
             stdout,
             stderr,
         });
@@ -518,13 +545,77 @@ impl CommandRunner {
 }
 
 impl CommandResult {
+    pub fn no_dbg(&self) -> CommandResultNoDbg {
+        CommandResultNoDbg {
+            command: self.command.clone(),
+            status: self.status,
+        }
+    }
+
+    pub fn successful(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            false
+        }
+    }
+
+    pub fn successful_or_terminated(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            true
+        }
+    }
+
     #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
-        if self.status.success() {
-            Ok(())
+        if let Some(status) = self.status.as_ref() {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(Error::from(format!(
+                    "{self:#?}.assert_success() -> unsuccessful"
+                )))
+            }
         } else {
             Err(Error::from(format!(
-                "{self:#?}.check_status() -> unsuccessful"
+                "{self:#?}.assert_success() -> termination was called before completion"
+            )))
+        }
+    }
+}
+
+impl CommandResultNoDbg {
+    pub fn successful(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            false
+        }
+    }
+
+    pub fn successful_or_terminated(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            true
+        }
+    }
+
+    #[track_caller]
+    pub fn assert_success(&self) -> Result<()> {
+        if let Some(status) = self.status.as_ref() {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(Error::from(format!(
+                    "{self:#?}.assert_success() -> unsuccessful"
+                )))
+            }
+        } else {
+            Err(Error::from(format!(
+                "{self:#?}.assert_success() -> termination was called before completion"
             )))
         }
     }
