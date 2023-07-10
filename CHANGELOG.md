@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - TODO
+## [0.5.0] - 07-09-2023
 ### Changes
 - `stacked_errors` 0.3.0
 - Derived `Clone` for `CommandResult`
