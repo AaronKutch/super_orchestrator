@@ -594,44 +594,42 @@ impl ContainerNetwork {
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:
-    /// [" parts of stdouts that do not contain "ProbablyNotRootCauseError"
-    /// (except if all have this).
+    /// [" or " panicked at " parts of stdouts. Omits stacks that have
+    /// "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         let not_root_cause = "ProbablyNotRootCauseError";
         let error_stack = "Error: Error { stack: [";
-        let mut all_errs_nonroot = true;
-        for result in self.container_results.values() {
-            match result {
-                Ok(comres) => {
-                    if (!comres.successful())
-                        && comres.stdout.contains(error_stack)
-                        && (!comres.stdout.contains(not_root_cause))
-                    {
-                        all_errs_nonroot = false;
-                    }
-                }
-                Err(_) => {
-                    all_errs_nonroot = false;
-                }
-            }
-        }
+        let panicked_at = " panicked at ";
         let mut res = Error::empty();
         for (name, result) in &self.container_results {
             match result {
                 Ok(comres) => {
-                    if !comres.successful()
-                        && (all_errs_nonroot || (!comres.stdout.contains(not_root_cause)))
-                    {
-                        // I don't know if there is a better way of doing this
+                    if !comres.successful() {
+                        let mut encountered = false;
                         if let Some(start) = comres.stdout.rfind(error_stack) {
-                            res = res.add_err_no_location(format!(
-                                "Error stack from container \"{name}\":\n{}",
-                                &comres.stdout[start..]
-                            ));
-                        } else {
+                            if !comres.stdout.contains(not_root_cause) {
+                                encountered = true;
+                                res = res.add_err_no_location(format!(
+                                    "Error stack from container \"{name}\":\n{}",
+                                    &comres.stdout[start..]
+                                ));
+                            }
+                        }
+
+                        if let Some(i) = comres.stdout.rfind(panicked_at) {
+                            if let Some(i) = comres.stdout[0..i].rfind("thread") {
+                                encountered = true;
+                                res = res.add_err_no_location(format!(
+                                    "Panic message from container \"{name}\":\n{}",
+                                    &comres.stdout[i..]
+                                ));
+                            }
+                        }
+
+                        if (!encountered) && (!comres.successful_or_terminated()) {
                             res = res.add_err_no_location(format!(
                                 "Error: Container \"{name}\" was unsuccessful but does not seem \
-                                 to have an error stack, check logs"
+                                 to have an error stack or panic message"
                             ));
                         }
                     }
@@ -710,7 +708,7 @@ impl ContainerNetwork {
                         self.terminate_all().await;
                         return self.error_compilation().map_add_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation:"
+                             compilation (check logs for more):"
                         })
                     }
                     names.remove(i);
@@ -725,7 +723,7 @@ impl ContainerNetwork {
                         }
                         return self.error_compilation().map_add_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation:"
+                             compilation (check logs for more):"
                         })
                     }
                     i += 1;

@@ -560,6 +560,14 @@ impl CommandResult {
         }
     }
 
+    pub fn successful_or_terminated(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            true
+        }
+    }
+
     #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
@@ -584,6 +592,14 @@ impl CommandResultNoDbg {
             status.success()
         } else {
             false
+        }
+    }
+
+    pub fn successful_or_terminated(&self) -> bool {
+        if let Some(status) = self.status.as_ref() {
+            status.success()
+        } else {
+            true
         }
     }
 
