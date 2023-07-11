@@ -436,7 +436,7 @@ impl CommandRunner {
             ),
             unix_signal,
         )
-        .unwrap();
+        .map_err(|e| Error::boxed(Box::new(e)))?;
         Ok(())
     }
 
@@ -457,7 +457,7 @@ impl CommandRunner {
         let output = self
             .child_process
             .take()
-            .unwrap()
+            .map_add_err(|| "`CommandRunner` has already had some termination method called")?
             .wait_with_output()
             .await
             .map_add_err(|| {
@@ -495,7 +495,7 @@ impl CommandRunner {
     /// the `CommandResult`.
     #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
-        self.wait_with_output_internal().await?;
+        self.wait_with_output_internal().await.map_add_err(|| ())?;
         Ok(self.result.take().unwrap())
     }
 
@@ -510,7 +510,12 @@ impl CommandRunner {
         let mut interval = Duration::from_millis(1);
         let mut elapsed = Duration::ZERO;
         loop {
-            match self.child_process.as_mut().unwrap().try_wait() {
+            match self
+                .child_process
+                .as_mut()
+                .map_add_err(|| "`CommandRunner` has already had some termination method called")?
+                .try_wait()
+            {
                 Ok(o) => {
                     if o.is_some() {
                         break
