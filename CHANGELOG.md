@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.1] - 07-10-2023
+### Fixes
+- Fixed that failures on `ContainerNetwork` creation would result in panics
+- Fixed some places where multiple termination could cause panics for `CommandRunners`
+
 ## [0.5.0] - 07-09-2023
 ### Changes
 - `stacked_errors` 0.3.0
