@@ -249,10 +249,11 @@ impl ContainerNetwork {
                 let _ = Command::new("docker rm -f", &[&docker_id])
                     .run_to_completion()
                     .await;
-                let mut runner = self.container_runners.remove(*name).unwrap();
-                let _ = runner.terminate().await;
-                self.container_results
-                    .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
+                if let Some(mut runner) = self.container_runners.remove(*name) {
+                    let _ = runner.terminate().await;
+                    self.container_results
+                        .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
+                }
             }
         }
     }
@@ -267,10 +268,11 @@ impl ContainerNetwork {
                 let _ = Command::new("docker rm -f", &[&docker_id])
                     .run_to_completion()
                     .await;
-                let mut runner = self.container_runners.remove(&name).unwrap();
-                let _ = runner.terminate().await;
-                self.container_results
-                    .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
+                if let Some(mut runner) = self.container_runners.remove(&name) {
+                    let _ = runner.terminate().await;
+                    self.container_results
+                        .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
+                }
             }
         }
     }
@@ -541,7 +543,7 @@ impl ContainerNetwork {
                         Ok(_) => {
                             let mut docker_id = output.stdout;
                             // remove trailing '\n'
-                            docker_id.pop().unwrap();
+                            docker_id.pop();
                             self.active_container_ids
                                 .insert(name.to_string(), docker_id);
                         }
@@ -716,6 +718,8 @@ impl ContainerNetwork {
                 Err(e) => {
                     if !e.is_timeout() {
                         self.active_container_ids.remove(name).unwrap();
+                        let mut runner = self.container_runners.remove(name).unwrap();
+                        runner.terminate().await?;
                         self.container_results.insert(name.clone(), Err(e));
                         if terminate_on_failure {
                             sleep(Duration::from_millis(300)).await;
