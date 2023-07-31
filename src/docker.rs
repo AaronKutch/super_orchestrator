@@ -186,12 +186,11 @@ impl ContainerNetwork {
                 ))
             }
             if map.contains_key(&container.name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::new() two containers were supplied with the same name \
                      \"{}\"",
                     container.name
-                ))
-                .map_add_err(|| ())
+                )))
             }
             map.insert(container.name.clone(), container);
         }
@@ -284,18 +283,16 @@ impl ContainerNetwork {
         let mut set = BTreeSet::new();
         for name in names {
             if set.contains(name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::run() two containers were supplied with the same name \
                      \"{name}\""
-                ))
-                .map_add_err(|| ())
+                )))
             }
             if !self.containers.contains_key(*name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::run() argument name \"{name}\" is not contained in the \
                      network"
-                ))
-                .map_add_err(|| ())
+                )))
             }
             set.insert(*name);
         }
@@ -612,7 +609,7 @@ impl ContainerNetwork {
                             if !comres.stdout.contains(not_root_cause) {
                                 encountered = true;
                                 res = res.add_err_no_location(format!(
-                                    "Error stack from container \"{name}\":\n{}",
+                                    "Error stack from container \"{name}\":\n{}\n",
                                     &comres.stdout[start..]
                                 ));
                             }
@@ -622,7 +619,7 @@ impl ContainerNetwork {
                             if let Some(i) = comres.stdout[0..i].rfind("thread") {
                                 encountered = true;
                                 res = res.add_err_no_location(format!(
-                                    "Panic message from container \"{name}\":\n{}",
+                                    "Panic message from container \"{name}\":\n{}\n",
                                     &comres.stdout[i..]
                                 ));
                             }
@@ -631,14 +628,14 @@ impl ContainerNetwork {
                         if (!encountered) && (!comres.successful_or_terminated()) {
                             res = res.add_err_no_location(format!(
                                 "Error: Container \"{name}\" was unsuccessful but does not seem \
-                                 to have an error stack or panic message"
+                                 to have an error stack or panic message\n"
                             ));
                         }
                     }
                 }
                 Err(e) => {
                     res = res.add_err_no_location(format!(
-                        "Command runner level error from container {name}:\n{e:?}"
+                        "Command runner level error from container {name}:\n{e:?}\n"
                     ));
                 }
             }
@@ -710,7 +707,7 @@ impl ContainerNetwork {
                         self.terminate_all().await;
                         return self.error_compilation().map_add_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):"
+                             compilation (check logs for more):\n"
                         })
                     }
                     names.remove(i);
@@ -727,7 +724,7 @@ impl ContainerNetwork {
                         }
                         return self.error_compilation().map_add_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):"
+                             compilation (check logs for more):\n"
                         })
                     }
                     i += 1;

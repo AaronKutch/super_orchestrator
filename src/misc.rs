@@ -27,7 +27,8 @@ pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
 pub fn ctrlc_init() -> Result<()> {
     ctrlc::set_handler(move || {
         CTRLC_ISSUED.store(true, Ordering::SeqCst);
-    })?;
+    })
+    .map_add_err(|| ())?;
     Ok(())
 }
 
