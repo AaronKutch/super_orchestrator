@@ -2,8 +2,6 @@ use std::{
     any::type_name,
     collections::HashSet,
     ffi::OsString,
-    fmt,
-    fmt::Debug,
     future::Future,
     path::PathBuf,
     str::FromStr,
@@ -60,15 +58,6 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
     let mut res = [0u8; 16];
     res.copy_from_slice(&tmp[0..16]);
     res
-}
-
-/// For implementing `Debug`, this wrapper makes strings use their `Display`
-/// impl rather than `Debug` impl
-pub struct DisplayStr<'a>(pub &'a str);
-impl<'a> Debug for DisplayStr<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 /// Equivalent to calling `Command::new(cmd_with_args,

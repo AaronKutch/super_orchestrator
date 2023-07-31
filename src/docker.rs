@@ -600,7 +600,7 @@ impl ContainerNetwork {
     /// "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         let not_root_cause = "ProbablyNotRootCauseError";
-        let error_stack = "Error: Error { stack: [";
+        let error_stack = "Error { stack: [";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
         for (name, result) in &self.container_results {
