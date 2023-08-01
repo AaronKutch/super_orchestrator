@@ -8,7 +8,7 @@ use std::{
 
 use log::warn;
 use owo_colors::OwoColorize;
-use stacked_errors::{Error, MapAddError, Result};
+use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{self, Child, ChildStdin},
@@ -17,7 +17,7 @@ use tokio::{
     time::sleep,
 };
 
-use crate::{acquire_dir_path, next_terminal_color, DisplayStr, FileOptions};
+use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
@@ -223,7 +223,7 @@ impl Command {
         if let Some(ref cwd) = self.cwd {
             let cwd = acquire_dir_path(cwd)
                 .await
-                .map_add_err(|| format!("{self:?}.run()"))?;
+                .stack_err(|| format!("{self:?}.run()"))?;
             cmd.current_dir(cwd);
         }
         // do as much as possible before spawning the process
@@ -245,7 +245,7 @@ impl Command {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_add_err(|| format!("{self:?}.run()"))?;
+            .stack_err(|| format!("{self:?}.run()"))?;
         let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
@@ -353,7 +353,7 @@ impl Command {
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
-            .map_add_err(|| "Command::run_to_completion")?
+            .stack_err(|| "Command::run_to_completion")?
             .wait_with_output()
             .await
     }
@@ -365,12 +365,12 @@ impl Command {
         let mut runner = self
             .run_with_stdin(Stdio::piped())
             .await
-            .map_add_err(|| "Command::run_with_input_to_completion")?;
+            .stack_err(|| "Command::run_with_input_to_completion")?;
         let mut stdin = runner
             .stdin
             .take()
-            .map_add_err(|| "using Stdio::piped() did not result in a stdin handle")?;
-        stdin.write_all(input).await.map_add_err(|| {
+            .stack_err(|| "using Stdio::piped() did not result in a stdin handle")?;
+        stdin.write_all(input).await.stack_err(|| {
             "Command::run_with_input_to_completion() -> failed to write_all to process stdin"
         })?;
         // needs to close to actually finish
@@ -384,7 +384,7 @@ impl CommandRunner {
     /// to take effect. This does not set `self.result`
     pub fn start_terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process.start_kill().map_add_err(|| ())
+            child_process.start_kill().stack()
         } else {
             Ok(())
         }
@@ -398,7 +398,7 @@ impl CommandRunner {
     /// `self.result` is set, and `self.result.status` is set to `None`.
     pub async fn terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process.kill().await.map_add_err(|| ())?;
+            child_process.kill().await.stack()?;
             drop(self.child_process.take().unwrap());
             let stdout = self.stdout.lock().await.clone();
             let stderr = self.stderr.lock().await.clone();
@@ -431,12 +431,10 @@ impl CommandRunner {
     #[cfg(feature = "nix_support")]
     pub fn send_unix_signal(&self, unix_signal: nix::sys::signal::Signal) -> Result<()> {
         nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(
-                i32::try_from(self.pid().map_add_err(|| ())?).map_add_err(|| ())?,
-            ),
+            nix::unistd::Pid::from_raw(i32::try_from(self.pid().stack()?).stack()?),
             unix_signal,
         )
-        .map_err(|e| Error::boxed(Box::new(e)))?;
+        .stack()?;
         Ok(())
     }
 
@@ -457,12 +455,10 @@ impl CommandRunner {
         let output = self
             .child_process
             .take()
-            .map_add_err(|| "`CommandRunner` has already had some termination method called")?
+            .stack_err(|| "`CommandRunner` has already had some termination method called")?
             .wait_with_output()
             .await
-            .map_add_err(|| {
-                format!("{self:?}.wait_with_output() -> failed when waiting on child",)
-            })?;
+            .stack_err(|| format!("{self:?}.wait_with_output() -> failed when waiting on child"))?;
         /*let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
             format!("{self:?}.wait_with_output() -> failed to parse stderr as utf8")
         })?;
@@ -470,9 +466,9 @@ impl CommandRunner {
             format!("{self:?}.wait_with_output() -> failed to parse stdout as utf8")
         })?;*/
         while let Some(handle) = self.handles.pop() {
-            handle.await.map_add_err(|| {
-                format!("{self:?}.wait_with_output() -> `Command` task panicked")
-            })?;
+            handle
+                .await
+                .stack_err(|| format!("{self:?}.wait_with_output() -> `Command` task panicked"))?;
         }
         // note: the handles should be cleaned up first to make sure copies are finished
         // and no locks are being held
@@ -495,7 +491,7 @@ impl CommandRunner {
     /// the `CommandResult`.
     #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
-        self.wait_with_output_internal().await.map_add_err(|| ())?;
+        self.wait_with_output_internal().await.stack()?;
         Ok(self.result.take().unwrap())
     }
 
@@ -513,7 +509,7 @@ impl CommandRunner {
             match self
                 .child_process
                 .as_mut()
-                .map_add_err(|| "`CommandRunner` has already had some termination method called")?
+                .stack_err(|| "`CommandRunner` has already had some termination method called")?
                 .try_wait()
             {
                 Ok(o) => {
@@ -522,7 +518,7 @@ impl CommandRunner {
                     }
                 }
                 Err(e) => {
-                    return e.map_add_err(|| {
+                    return Err(Error::from(e)).stack_err(|| {
                         "CommandRunner::wait_with_timeout failed at `try_wait` before reaching \
                          timeout or completed command"
                     })
@@ -573,6 +569,8 @@ impl CommandResult {
         }
     }
 
+    /// Note: this uses `#[track_caller]` and pushes the caller's location to
+    /// the error stack.
     #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {

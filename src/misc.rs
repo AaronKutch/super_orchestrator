@@ -2,8 +2,6 @@ use std::{
     any::type_name,
     collections::HashSet,
     ffi::OsString,
-    fmt,
-    fmt::Debug,
     future::Future,
     path::PathBuf,
     str::FromStr,
@@ -12,7 +10,7 @@ use std::{
 };
 
 pub(crate) use color_cycle::next_terminal_color;
-use stacked_errors::{Error, MapAddError, Result};
+use stacked_errors::{Error, ErrorKind, Result, StackableErr};
 use tokio::{
     fs::{read_dir, remove_file, File},
     io::AsyncWriteExt,
@@ -29,7 +27,8 @@ pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
 pub fn ctrlc_init() -> Result<()> {
     ctrlc::set_handler(move || {
         CTRLC_ISSUED.store(true, Ordering::SeqCst);
-    })?;
+    })
+    .stack()?;
     Ok(())
 }
 
@@ -60,15 +59,6 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
     let mut res = [0u8; 16];
     res.copy_from_slice(&tmp[0..16]);
     res
-}
-
-/// For implementing `Debug`, this wrapper makes strings use their `Display`
-/// impl rather than `Debug` impl
-pub struct DisplayStr<'a>(pub &'a str);
-impl<'a> Debug for DisplayStr<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 /// Equivalent to calling `Command::new(cmd_with_args,
@@ -104,7 +94,7 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 /// ```
 /// use std::{net::SocketAddr, time::Duration};
 ///
-/// use stacked_errors::{Error, MapAddError, Result};
+/// use stacked_errors::{Error, Result, StackableErr};
 /// use super_orchestrator::wait_for_ok;
 /// use tokio::net::lookup_host;
 ///
@@ -122,9 +112,8 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 ///                     Err(Error::from("empty addrs"))
 ///                 }
 ///             }
-///             Err(e) => {
-///                 Err(e).map_add_err(|| format!("wait_for_ok_lookup_host(.., host: {host})"))
-///             }
+///             Err(e) => Err(Error::from(e))
+///                 .stack_err(|| format!("wait_for_ok_lookup_host(.., host: {host})")),
 ///         }
 ///     }
 ///     wait_for_ok(num_retries, delay, || f(host)).await
@@ -142,7 +131,7 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
             Ok(o) => return Ok(o),
             Err(e) => {
                 if i == 0 {
-                    return Err(e.chain_errors(Error::timeout())).map_add_err(|| {
+                    return Err(e.add_kind_locationless(ErrorKind::TimeoutError)).stack_err(|| {
                         format!(
                             "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) timeout, \
                              last error stack was"
@@ -196,7 +185,7 @@ pub fn get_separated_val(
             }
         }
     }
-    value.map_add_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
+    value.stack_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
 }
 
 /// This function makes sure changes are flushed and `sync_all` is called to
@@ -220,6 +209,9 @@ pub async fn close_file(mut file: File) -> Result<()> {
 ///     acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
 /// };
 /// async fn ex() -> Result<()> {
+///     // note: in regular use you would use `.await.stack()?` on the ends
+///     // to tell what lines are failing
+///
 ///     // create some empty example files
 ///     FileOptions::write_str("./logs/binary", "").await?;
 ///     FileOptions::write_str("./logs/ex0.log", "").await?;
@@ -300,7 +292,7 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
         }
         let path = PathBuf::from(s);
         let mut iter = path.components();
-        let component = iter.next().map_add_err(|| {
+        let component = iter.next().stack_err(|| {
             format!(
                 "remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?}) -> `ends_with` element \
                  {i} has no component"
@@ -321,12 +313,12 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
 
     let dir = acquire_dir_path(dir)
         .await
-        .map_add_err(|| format!("remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?})"))?;
-    let mut iter = read_dir(dir.clone()).await.map_add_err(|| ())?;
+        .stack_err(|| format!("remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?})"))?;
+    let mut iter = read_dir(dir.clone()).await.stack()?;
     loop {
-        let entry = iter.next_entry().await.map_add_err(|| ())?;
+        let entry = iter.next_entry().await.stack()?;
         if let Some(entry) = entry {
-            let file_type = entry.file_type().await.map_add_err(|| ())?;
+            let file_type = entry.file_type().await.stack()?;
             if file_type.is_file() {
                 if let Some(name) = entry.file_name().as_os_str().to_str() {
                     let file_only_path = PathBuf::from(name.to_owned());
@@ -362,7 +354,7 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
                     if rm_file {
                         let mut combined = dir.clone();
                         combined.push(file_only_path);
-                        remove_file(combined).await.map_add_err(|| ())?;
+                        remove_file(combined).await.stack()?;
                     }
                 }
             }

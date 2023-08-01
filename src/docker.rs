@@ -9,7 +9,7 @@ use std::{
 };
 
 use log::{info, warn};
-use stacked_errors::{Error, MapAddError, Result};
+use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
 
 use crate::{
@@ -186,12 +186,11 @@ impl ContainerNetwork {
                 ))
             }
             if map.contains_key(&container.name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::new() two containers were supplied with the same name \
                      \"{}\"",
                     container.name
-                ))
-                .map_add_err(|| ())
+                )))
             }
             map.insert(container.name.clone(), container);
         }
@@ -284,18 +283,16 @@ impl ContainerNetwork {
         let mut set = BTreeSet::new();
         for name in names {
             if set.contains(name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::run() two containers were supplied with the same name \
                      \"{name}\""
-                ))
-                .map_add_err(|| ())
+                )))
             }
             if !self.containers.contains_key(*name) {
-                return Err(format!(
+                return Err(Error::from(format!(
                     "ContainerNetwork::run() argument name \"{name}\" is not contained in the \
                      network"
-                ))
-                .map_add_err(|| ())
+                )))
             }
             set.insert(*name);
         }
@@ -308,7 +305,7 @@ impl ContainerNetwork {
         debug_log
             .preacquire()
             .await
-            .map_add_err(|| "ContainerNetwork::run() when acquiring logs directory")?;
+            .stack_err(|| "ContainerNetwork::run() when acquiring logs directory")?;
 
         let mut get_dockerfile_write_dir = false;
         for name in names {
@@ -327,14 +324,14 @@ impl ContainerNetwork {
                         .stderr_log(&debug_log)
                         .run_to_completion()
                         .await?;
-                    comres.assert_success().map_add_err(|| {
+                    comres.assert_success().stack_err(|| {
                         format!("could not pull image for `Dockerfile::Image({name_tag})`")
                     })?;*/
                 }
                 Dockerfile::Path(ref path) => {
                     acquire_file_path(path)
                         .await
-                        .map_add_err(|| "could not find dockerfile path")?;
+                        .stack_err(|| "could not find dockerfile path")?;
                 }
                 Dockerfile::Contents(_) => get_dockerfile_write_dir = true,
             }
@@ -344,8 +341,8 @@ impl ContainerNetwork {
         if get_dockerfile_write_dir {
             let mut path = acquire_dir_path(self.dockerfile_write_dir.as_ref().unwrap())
                 .await
-                .map_add_err(|| "could not find `dockerfile_write_dir` directory")?;
-            dockerfile_write_dir = Some(path.to_str().map_add_err(|| ())?.to_owned());
+                .stack_err(|| "could not find `dockerfile_write_dir` directory")?;
+            dockerfile_write_dir = Some(path.to_str().stack()?.to_owned());
             path.push("__tmp.dockerfile");
             dockerfile_write_file = Some(path.to_str().unwrap().to_owned());
         }
@@ -428,12 +425,8 @@ impl ContainerNetwork {
             for volume in &volumes {
                 let path = acquire_path(&volume.0)
                     .await
-                    .map_add_err(|| "could not locate local part of volume argument")?;
-                combined_volumes.push(format!(
-                    "{}:{}",
-                    path.to_str().map_add_err(|| ())?,
-                    volume.1
-                ));
+                    .stack_err(|| "could not locate local part of volume argument")?;
+                combined_volumes.push(format!("{}:{}", path.to_str().stack()?, volume.1));
             }
             for volume in &combined_volumes {
                 args.push("--volume");
@@ -478,7 +471,7 @@ impl ContainerNetwork {
                         .run_to_completion()
                         .await?
                         .assert_success()
-                        .map_add_err(|| format!("Failed when using the dockerfile at {path}"))?;
+                        .stack_err(|| format!("Failed when using the dockerfile at {path}"))?;
                 }
                 Dockerfile::Contents(ref contents) => {
                     // tag
@@ -509,7 +502,7 @@ impl ContainerNetwork {
                         .run_to_completion()
                         .await?
                         .assert_success()
-                        .map_add_err(|| {
+                        .stack_err(|| {
                             format!(
                                 "The Dockerfile::Contents written to \
                                  \"__tmp.dockerfile\":\n{contents}\n"
@@ -555,7 +548,7 @@ impl ContainerNetwork {
                 }
                 Err(e) => {
                     self.terminate_all().await;
-                    return e.map_add_err(|| "{self:?}.run()")
+                    return e.stack_err(|| "{self:?}.run()")
                 }
             }
         }
@@ -592,7 +585,7 @@ impl ContainerNetwork {
         for name in &names {
             v.push(name);
         }
-        self.run(&v, ci_mode).await.map_add_err(|| ())
+        self.run(&v, ci_mode).await.stack()
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:
@@ -600,7 +593,7 @@ impl ContainerNetwork {
     /// "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         let not_root_cause = "ProbablyNotRootCauseError";
-        let error_stack = "Error: Error { stack: [";
+        let error_stack = "Error { stack: [";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
         for (name, result) in &self.container_results {
@@ -611,8 +604,8 @@ impl ContainerNetwork {
                         if let Some(start) = comres.stdout.rfind(error_stack) {
                             if !comres.stdout.contains(not_root_cause) {
                                 encountered = true;
-                                res = res.add_err_no_location(format!(
-                                    "Error stack from container \"{name}\":\n{}",
+                                res = res.add_kind_locationless(format!(
+                                    "Error stack from container \"{name}\":\n{}\n",
                                     &comres.stdout[start..]
                                 ));
                             }
@@ -621,24 +614,24 @@ impl ContainerNetwork {
                         if let Some(i) = comres.stdout.rfind(panicked_at) {
                             if let Some(i) = comres.stdout[0..i].rfind("thread") {
                                 encountered = true;
-                                res = res.add_err_no_location(format!(
-                                    "Panic message from container \"{name}\":\n{}",
+                                res = res.add_kind_locationless(format!(
+                                    "Panic message from container \"{name}\":\n{}\n",
                                     &comres.stdout[i..]
                                 ));
                             }
                         }
 
                         if (!encountered) && (!comres.successful_or_terminated()) {
-                            res = res.add_err_no_location(format!(
+                            res = res.add_kind_locationless(format!(
                                 "Error: Container \"{name}\" was unsuccessful but does not seem \
-                                 to have an error stack or panic message"
+                                 to have an error stack or panic message\n"
                             ));
                         }
                     }
                 }
                 Err(e) => {
-                    res = res.add_err_no_location(format!(
-                        "Command runner level error from container {name}:\n{e:?}"
+                    res = res.add_kind_locationless(format!(
+                        "Command runner level error from container {name}:\n{e:?}\n"
                     ));
                 }
             }
@@ -683,11 +676,10 @@ impl ContainerNetwork {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return format!(
+                        return Err(Error::from(format!(
                             "ContainerNetwork::wait_with_timeout() timeout waiting for container \
                              names {names:?} to complete"
-                        )
-                        .map_add_err(|| ())
+                        )))
                     }
                 } else {
                     sleep(Duration::from_millis(256)).await;
@@ -695,7 +687,7 @@ impl ContainerNetwork {
             }
 
             let name = &names[i];
-            let runner = self.container_runners.get_mut(name).map_add_err(|| {
+            let runner = self.container_runners.get_mut(name).stack_err(|| {
                 "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the network"
             })?;
             match runner.wait_with_timeout(Duration::ZERO).await {
@@ -708,9 +700,9 @@ impl ContainerNetwork {
                     if terminate_on_failure && err {
                         sleep(Duration::from_millis(300)).await;
                         self.terminate_all().await;
-                        return self.error_compilation().map_add_err(|| {
+                        return self.error_compilation().stack_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):"
+                             compilation (check logs for more):\n"
                         })
                     }
                     names.remove(i);
@@ -725,9 +717,9 @@ impl ContainerNetwork {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return self.error_compilation().map_add_err(|| {
+                        return self.error_compilation().stack_err(|| {
                             "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):"
+                             compilation (check logs for more):\n"
                         })
                     }
                     i += 1;

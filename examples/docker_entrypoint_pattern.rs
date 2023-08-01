@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use log::info;
-use stacked_errors::{MapAddError, Result};
+use stacked_errors::{Error, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
             "container0" => container0_runner().await,
             "container1" => container1_runner().await,
             "container2" => Ok(()),
-            _ => format!("entrypoint \"{s}\" is not recognized").map_add_err(|| ()),
+            _ => Err(Error::from(format!("entrypoint \"{s}\" is not recognized"))),
         }
     } else {
         container_runner().await
@@ -127,8 +127,17 @@ async fn container0_runner() -> Result<()> {
     let host = "container1:26000";
     let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, host)
         .await
-        .map_add_err(|| ())?;
+        .stack()?;
     let s = "hello world".to_owned();
+
+    // check out the results of returning `stack_errors::Error`
+    //let _ = super_orchestrator::FileOptions::read_to_string("./nonexistent")
+    //    .await
+    //    .stack()?;
+
+    // check out the results of a panic
+    //panic!("uh oh");
+
     info!("container 0 runner is waiting for 20 seconds");
     sleep(Duration::from_secs(20)).await;
     nm.send::<String>(&s).await?;
