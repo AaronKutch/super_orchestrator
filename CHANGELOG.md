@@ -4,6 +4,7 @@
 ### Changes
 - `stacked_errors` 0.4.0, and removal of several now unnecessary feature flags
 - tweaks to error outputs
+- Use `serde` and `bincode` for `NetMessage` for now
 
 ## [0.5.1] - 2023-10-07
 ### Fixes

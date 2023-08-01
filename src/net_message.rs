@@ -1,7 +1,6 @@
 use std::{any::type_name, net::SocketAddr, time::Duration};
 
-use musli::{en::Encode, mode::DefaultMode, Decode};
-use musli_descriptive::Encoding;
+use serde::{de::DeserializeOwned, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -11,8 +10,6 @@ use tokio::{
 };
 
 use crate::{type_hash, wait_for_ok};
-
-const MUSLI_CONFIG: Encoding = musli_descriptive::encoding::DEFAULT;
 
 /// Note: this is really only intended for self-contained Docker networks.
 ///
@@ -122,12 +119,9 @@ impl NetMessenger {
     /// This may break if the `send` and `recv` are sending from different
     /// binaries compiled by different compiler versions (but at least it is a
     /// false positive).
-    pub async fn send<T: ?Sized + Encode<DefaultMode>>(&mut self, msg: &T) -> Result<()> {
+    pub async fn send<T: ?Sized + Serialize>(&mut self, msg: &T) -> Result<()> {
         self.buf.clear();
-        match MUSLI_CONFIG.encode(&mut self.buf, msg) {
-            Ok(()) => (),
-            Err(e) => return Err(Error::from_err(e)),
-        };
+        bincode::serialize_into(&mut self.buf, msg).stack_err(|| "failed to serialize message")?;
         // TODO handle timeouts
         let id = type_hash::<T>();
         if let Err(e) = self.stream.write_all(&id).await {
@@ -153,7 +147,7 @@ impl NetMessenger {
     /// specified type, you should always use the turbofish to specify `T`,
     /// because it is otherwise possible to get an unexpected type because
     /// of `&` coercion.
-    pub async fn recv<'de, T: ?Sized + Decode<'de, DefaultMode>>(&'de mut self) -> Result<T> {
+    pub async fn recv<T: ?Sized + DeserializeOwned>(&mut self) -> Result<T> {
         // TODO handle timeouts
         let expected_id = type_hash::<T>();
         let mut actual_id = [0u8; 16];
@@ -181,9 +175,7 @@ impl NetMessenger {
             .read_exact(&mut self.buf[0..data_len])
             .await
             .stack()?;
-        match MUSLI_CONFIG.decode(&self.buf[0..data_len]) {
-            Ok(o) => Ok(o),
-            Err(e) => Err(Error::from_err(e)),
-        }
+        bincode::deserialize_from(&self.buf[0..data_len])
+            .stack_err(|| "failed to deserialize message")
     }
 }
