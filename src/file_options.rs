@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use stacked_errors::{Error, MapAddError, Result};
+use stacked_errors::{Error, Result, StackableErr};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -100,14 +100,14 @@ impl FileOptions {
         let dir = self
             .path
             .parent()
-            .map_add_err(|| "FileOptions::preacquire() -> empty path")?
+            .stack_err(|| "FileOptions::preacquire() -> empty path")?
             .to_str()
-            .map_add_err(|| "bad OsStr conversion")?;
+            .stack_err(|| "bad OsStr conversion")?;
         let mut path = acquire_dir_path(dir)
             .await
-            .map_add_err(|| format!("{self:?}.preacquire() could not acquire directory"))?;
+            .stack_err(|| format!("{self:?}.preacquire() could not acquire directory"))?;
         // we do this always for normalization purposes
-        let file_name = self.path.file_name().map_add_err(|| {
+        let file_name = self.path.file_name().stack_err(|| {
             format!("{self:?}.precheck() could not acquire file name, was only a directory input?")
         })?;
         path.push(file_name);
@@ -119,9 +119,9 @@ impl FileOptions {
                 }
             }
         }
-        acquire_file_path(path.to_str().map_add_err(|| "bad OsStr conversion")?)
+        acquire_file_path(path.to_str().stack_err(|| "bad OsStr conversion")?)
             .await
-            .map_add_err(|| {
+            .stack_err(|| {
                 format!(
                     "{self:?}.precheck() could not acquire path to combined directory and file \
                      name"
@@ -133,13 +133,13 @@ impl FileOptions {
         let path = self
             .preacquire()
             .await
-            .map_add_err(|| "FileOptions::acquire_file()")?;
+            .stack_err(|| "FileOptions::acquire_file()")?;
         Ok(match self.options {
             ReadOrWrite::Read => OpenOptions::new()
                 .read(true)
                 .open(path)
                 .await
-                .map_add_err(|| format!("{self:?}.acquire_file()"))?,
+                .stack_err(|| format!("{self:?}.acquire_file()"))?,
             ReadOrWrite::Write(WriteOptions { create, append }) => {
                 if create {
                     OpenOptions::new()
@@ -149,7 +149,7 @@ impl FileOptions {
                         .append(append)
                         .open(&path)
                         .await
-                        .map_add_err(|| format!("{self:?}.acquire_file()"))?
+                        .stack_err(|| format!("{self:?}.acquire_file()"))?
                 } else {
                     OpenOptions::new()
                         .write(true)
@@ -157,7 +157,7 @@ impl FileOptions {
                         .append(append)
                         .open(path)
                         .await
-                        .map_add_err(|| format!("{self:?}.acquire_file()"))?
+                        .stack_err(|| format!("{self:?}.acquire_file()"))?
                 }
             }
         })
@@ -167,7 +167,7 @@ impl FileOptions {
         let mut file = Self::read(file_path)
             .acquire_file()
             .await
-            .map_add_err(|| "read_to_string")?;
+            .stack_err(|| "read_to_string")?;
         let mut s = String::new();
         file.read_to_string(&mut s).await?;
         Ok(s)
@@ -177,7 +177,7 @@ impl FileOptions {
         let mut file = Self::read2(directory, file_name)
             .acquire_file()
             .await
-            .map_add_err(|| "read2_to_string")?;
+            .stack_err(|| "read2_to_string")?;
         let mut s = String::new();
         file.read_to_string(&mut s).await?;
         Ok(s)
@@ -187,9 +187,9 @@ impl FileOptions {
         let mut file = Self::write(file_path)
             .acquire_file()
             .await
-            .map_add_err(|| "write_str")?;
-        file.write_all(s.as_bytes()).await.map_add_err(|| ())?;
-        close_file(file).await.map_add_err(|| ())?;
+            .stack_err(|| "write_str")?;
+        file.write_all(s.as_bytes()).await.stack()?;
+        close_file(file).await.stack()?;
         Ok(())
     }
 
@@ -197,9 +197,9 @@ impl FileOptions {
         let mut file = Self::write2(directory, file_name)
             .acquire_file()
             .await
-            .map_add_err(|| "write_str")?;
-        file.write_all(s.as_bytes()).await.map_add_err(|| ())?;
-        close_file(file).await.map_add_err(|| ())?;
+            .stack_err(|| "write_str")?;
+        file.write_all(s.as_bytes()).await.stack()?;
+        close_file(file).await.stack()?;
         Ok(())
     }
 
@@ -209,7 +209,7 @@ impl FileOptions {
         let src = Self::read(src_file_path)
             .acquire_file()
             .await
-            .map_add_err(|| {
+            .stack_err(|| {
                 format!(
                     "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
                      opening source"
@@ -218,7 +218,7 @@ impl FileOptions {
         let mut dst = Self::write(dst_file_path)
             .acquire_file()
             .await
-            .map_add_err(|| {
+            .stack_err(|| {
                 format!(
                     "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
                      opening destination"
@@ -226,7 +226,7 @@ impl FileOptions {
             })?;
         tokio::io::copy_buf(&mut BufReader::new(src), &mut dst)
             .await
-            .map_add_err(|| {
+            .stack_err(|| {
                 format!(
                     "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
                      copying"

@@ -1,7 +1,7 @@
 use std::{process::Stdio, time::Duration};
 
 use log::info;
-use stacked_errors::{MapAddError, Result};
+use stacked_errors::{Result, StackableErr};
 use tokio::time::sleep;
 
 use crate::{ctrlc_issued_reset, sh, Command, STD_DELAY};
@@ -26,7 +26,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
         for line in comres.stdout.lines().skip(1) {
             if line.ends_with(container_name) {
                 let line = line.trim();
-                let id = &line[0..line.find(' ').map_add_err(|| ())?];
+                let id = &line[0..line.find(' ').stack()?];
                 info!("Found container {id}, forwarding stdin, stdout, stderr");
                 docker_exec_i(id).await?;
                 let _ = sh("docker rm -f", &[id]).await;
@@ -54,7 +54,7 @@ pub async fn docker_exec_i(container_id: &str) -> Result<()> {
             Err(e) => {
                 if !e.is_timeout() {
                     runner.terminate().await?;
-                    return e.map_add_err(|| ())
+                    return e.stack()
                 }
             }
         }
