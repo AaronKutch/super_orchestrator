@@ -569,6 +569,8 @@ impl CommandResult {
         }
     }
 
+    /// Note: this uses `#[track_caller]` and pushes the caller's location to
+    /// the error stack.
     #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {

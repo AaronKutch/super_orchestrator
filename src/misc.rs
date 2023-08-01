@@ -209,6 +209,9 @@ pub async fn close_file(mut file: File) -> Result<()> {
 ///     acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
 /// };
 /// async fn ex() -> Result<()> {
+///     // note: in regular use you would use `.await.stack()?` on the ends
+///     // to tell what lines are failing
+///
 ///     // create some empty example files
 ///     FileOptions::write_str("./logs/binary", "").await?;
 ///     FileOptions::write_str("./logs/ex0.log", "").await?;
