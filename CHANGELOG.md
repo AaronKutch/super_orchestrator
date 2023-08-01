@@ -1,11 +1,16 @@
 # Changelog
 
-## [0.5.1] - 07-10-2023
+## [0.6.0] - 2023-10-07
+### Changes
+- `stacked_errors` 0.4.0, and removal of several now unnecessary feature flags
+- tweaks to error outputs
+
+## [0.5.1] - 2023-10-07
 ### Fixes
 - Fixed that failures on `ContainerNetwork` creation would result in panics
 - Fixed some places where multiple termination could cause panics for `CommandRunners`
 
-## [0.5.0] - 07-09-2023
+## [0.5.0] - 2023-09-07
 ### Changes
 - `stacked_errors` 0.3.0
 - Derived `Clone` for `CommandResult`
@@ -13,7 +18,7 @@
 - Termination now will set the results it can for `Command`s and `ContainerNetwork`s
 - Docker networks with `NetMessenger`s now have much cleaner errors
 
-## [0.4.0] - 27-06-2023
+## [0.4.0] - 2023-06-27
 ### Changes
 - Changed the semantics of `remove_files_in_dir` for hopefully the last time
 - Refactored the way Dockerfiles are handled in `ContainerNetwork`s and in `Container`s
@@ -23,11 +28,11 @@
 ### Additions
 - Command ci_mode debugs are colored
 
-## [0.3.1] - 14-06-2023
+## [0.3.1] - 2023-06-14
 ### Fixes
 - Fixed that `auto_exec_i` would try to terminate twice
 
-## [0.3.0] - 13-06-2023
+## [0.3.0] - 2023-06-13
 ### Changes
 - Removed `Command::inherit_stdin` and instead introduced a `run_with_stdin` function that takes
   any `Stdio`. Simply use `.run_with_stdin(Stdio::inherit())` if you want the property
@@ -43,13 +48,13 @@
 - `CommandRunner::send_unix_signal`
 - `CommandRunner::send_unix_sigterm`
 
-## [0.2.0] - 06-06-2023
+## [0.2.0] - 2023-06-06
 ### Changes
 - Forwarded `stacked_errors` and its features
 - Moved ctrl-c functionality from `std_init` into its own function
 - Made the entrypoint path optional for cases in which the container has a default entrypoint
 - Reworked Container::new and added functions for `build_args` and `create_args`
 
-## [0.1.0] - 29-05-2023
+## [0.1.0] - 2023-05-29
 ### Additions
 - Initial release
