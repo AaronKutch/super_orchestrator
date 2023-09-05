@@ -268,16 +268,19 @@ impl Command {
         } else {
             owo_colors::AnsiColors::Default
         };
-        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).lines();
-        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).lines();
+        // TODO have some kind of delay system that outputs after a delay if the line
+        // has not been finished
+        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).split(b'\n');
+        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).split(b'\n');
         let command_name = self.command.clone();
         let child_id = child.id().unwrap();
         let mut handles: Vec<JoinHandle<()>> = vec![];
         handles.push(task::spawn(async move {
             loop {
-                match stdout_read.next_line().await {
+                match stdout_read.next_segment().await {
                     Ok(Some(mut line)) => {
-                        line.push('\n');
+                        line.push(b'\n');
+                        let line = String::from_utf8_lossy(&line);
                         // copying for the `CommandResult`
                         stdout_arc_copy.lock().await.push_str(&line);
                         // copying to file
@@ -305,9 +308,10 @@ impl Command {
         let command_name = self.command.clone();
         handles.push(task::spawn(async move {
             loop {
-                match stderr_read.next_line().await {
+                match stderr_read.next_segment().await {
                     Ok(Some(mut line)) => {
-                        line.push('\n');
+                        line.push(b'\n');
+                        let line = String::from_utf8_lossy(&line);
                         // copying for the `CommandResult`
                         stderr_arc_copy.lock().await.push_str(&line);
                         // copying to file

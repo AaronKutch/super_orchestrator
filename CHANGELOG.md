@@ -1,6 +1,9 @@
 # Changelog
 
 ## [0.7.0] - TODO
+### Fixes
+- `Command` stdout copiers no longer panic on invalid utf-8
+
 ### Changes
 - Many dependency updates, use `postcard` internally instead of `bincode`
 
