@@ -1,4 +1,4 @@
-use std::{any::type_name, net::SocketAddr, time::Duration};
+use std::{any::type_name, cmp::max, net::SocketAddr, time::Duration};
 
 use serde::{de::DeserializeOwned, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
@@ -120,8 +120,29 @@ impl NetMessenger {
     /// binaries compiled by different compiler versions (but at least it is a
     /// false positive).
     pub async fn send<T: ?Sized + Serialize>(&mut self, msg: &T) -> Result<()> {
-        self.buf.clear();
-        bincode::serialize_into(&mut self.buf, msg).stack_err(|| "failed to serialize message")?;
+        loop {
+            self.buf.clear();
+            self.buf.resize(self.buf.capacity(), 0);
+            match postcard::to_slice(msg, &mut self.buf) {
+                Ok(_) => (),
+                Err(postcard::Error::SerializeBufferFull) => {
+                    // double the capacity
+                    // TODO we need to add limits, maybe a settable option on the `NetMessage`
+                    // struct
+                    let current_cap = max(self.buf.capacity(), 1);
+                    // reserve is based on `self.len() + additional` instead of
+                    // `self.capacity() + additional`
+                    let double = current_cap.wrapping_shl(1);
+                    self.buf.reserve(double);
+                    continue
+                }
+                Err(e) => {
+                    return Err(Error::from_err(e))
+                        .stack_err_locationless(|| "failed to serialize message")?
+                }
+            }
+            break
+        }
         // TODO handle timeouts
         let id = type_hash::<T>();
         if let Err(e) = self.stream.write_all(&id).await {
@@ -175,7 +196,6 @@ impl NetMessenger {
             .read_exact(&mut self.buf[0..data_len])
             .await
             .stack()?;
-        bincode::deserialize_from(&self.buf[0..data_len])
-            .stack_err(|| "failed to deserialize message")
+        postcard::from_bytes(&self.buf[0..data_len]).stack_err(|| "failed to deserialize message")
     }
 }

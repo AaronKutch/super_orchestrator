@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.0] - TODO
+### Changes
+- Many dependency updates, use `postcard` internally instead of `bincode`
+
 ## [0.6.0] - 2023-10-07
 ### Changes
 - `stacked_errors` 0.4.0, and removal of several now unnecessary feature flags

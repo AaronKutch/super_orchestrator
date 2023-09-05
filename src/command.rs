@@ -106,7 +106,7 @@ impl Drop for CommandRunner {
                 self.command
                     .as_ref()
                     .map(|c| c.get_unified_command())
-                    .unwrap_or(String::new())
+                    .unwrap_or_default()
             )
         }
     }
@@ -459,12 +459,6 @@ impl CommandRunner {
             .wait_with_output()
             .await
             .stack_err(|| format!("{self:?}.wait_with_output() -> failed when waiting on child"))?;
-        /*let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
-            format!("{self:?}.wait_with_output() -> failed to parse stderr as utf8")
-        })?;
-        let stdout = String::from_utf8(output.stdout.clone()).map_add_err(|| {
-            format!("{self:?}.wait_with_output() -> failed to parse stdout as utf8")
-        })?;*/
         while let Some(handle) = self.handles.pop() {
             handle
                 .await
