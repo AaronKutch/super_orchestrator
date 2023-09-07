@@ -186,6 +186,12 @@ impl Command {
         }
     }
 
+    /// Sets `self.cwd`
+    pub fn cwd(mut self, cwd: &str) -> Self {
+        self.cwd = Some(cwd.to_owned());
+        self
+    }
+
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
         self
