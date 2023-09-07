@@ -21,14 +21,17 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
         if ctrlc_issued_reset() {
             break
         }
-        let comres = Command::new("docker ps", &[]).run_to_completion().await?;
+        let comres = Command::new("docker ps", &[])
+            .run_to_completion()
+            .await
+            .stack()?;
         comres.assert_success()?;
-        for line in comres.stdout.lines().skip(1) {
+        for line in comres.stdout_as_utf8().stack()?.lines().skip(1) {
             if line.ends_with(container_name) {
                 let line = line.trim();
                 let id = &line[0..line.find(' ').stack()?];
                 info!("Found container {id}, forwarding stdin, stdout, stderr");
-                docker_exec_i(id).await?;
+                docker_exec_i(id).await.stack()?;
                 let _ = sh("docker rm -f", &[id]).await;
                 info!("\nTerminated container {id}\n");
                 break
@@ -43,17 +46,18 @@ pub async fn docker_exec_i(container_id: &str) -> Result<()> {
     let mut runner = Command::new("docker exec -i", &[container_id, "bash"])
         .ci_mode(true)
         .run_with_stdin(Stdio::inherit())
-        .await?;
+        .await
+        .stack()?;
     loop {
         if ctrlc_issued_reset() {
-            runner.terminate().await?;
+            runner.terminate().await.stack()?;
             break
         }
         match runner.wait_with_timeout(Duration::ZERO).await {
             Ok(()) => break,
             Err(e) => {
                 if !e.is_timeout() {
-                    runner.terminate().await?;
+                    runner.terminate().await.stack()?;
                     return e.stack()
                 }
             }

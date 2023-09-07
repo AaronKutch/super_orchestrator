@@ -5,7 +5,12 @@
 - `Command` stdout copiers no longer panic on invalid utf-8
 
 ### Changes
+- `Command` and `CommandResult` stdout and stderr are now `Vec<u8>` instead of `String`
+- `assert_success` is no longer `track_caller`
 - Many dependency updates, use `postcard` internally instead of `bincode`
+
+### Additions
+- Added `CommandResult::stdout_as_utf8` and some other related functions for convenience
 
 ## [0.6.0] - 2023-10-07
 ### Changes

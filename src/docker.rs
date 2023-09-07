@@ -384,7 +384,7 @@ impl ContainerNetwork {
                     .await?
             };
             // TODO we can get the network id
-            comres.assert_success()?;
+            comres.assert_success().stack()?;
             self.network_recreated = true;
         }
 
@@ -537,8 +537,13 @@ impl ContainerNetwork {
                             let mut docker_id = output.stdout;
                             // remove trailing '\n'
                             docker_id.pop();
-                            self.active_container_ids
-                                .insert(name.to_string(), docker_id);
+                            match String::from_utf8(docker_id) {
+                                Ok(docker_id) => {
+                                    self.active_container_ids
+                                        .insert(name.to_string(), docker_id);
+                                }
+                                Err(e) => return Err(Error::from(e)),
+                            }
                         }
                         Err(e) => {
                             self.terminate_all().await;
@@ -601,22 +606,23 @@ impl ContainerNetwork {
                 Ok(comres) => {
                     if !comres.successful() {
                         let mut encountered = false;
-                        if let Some(start) = comres.stdout.rfind(error_stack) {
-                            if !comres.stdout.contains(not_root_cause) {
+                        let stdout = comres.stdout_as_utf8_lossy();
+                        if let Some(start) = stdout.rfind(error_stack) {
+                            if !stdout.contains(not_root_cause) {
                                 encountered = true;
                                 res = res.add_kind_locationless(format!(
                                     "Error stack from container \"{name}\":\n{}\n",
-                                    &comres.stdout[start..]
+                                    &stdout[start..]
                                 ));
                             }
                         }
 
-                        if let Some(i) = comres.stdout.rfind(panicked_at) {
-                            if let Some(i) = comres.stdout[0..i].rfind("thread") {
+                        if let Some(i) = stdout.rfind(panicked_at) {
+                            if let Some(i) = stdout[0..i].rfind("thread") {
                                 encountered = true;
                                 res = res.add_kind_locationless(format!(
                                     "Panic message from container \"{name}\":\n{}\n",
-                                    &comres.stdout[i..]
+                                    &stdout[i..]
                                 ));
                             }
                         }

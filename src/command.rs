@@ -1,7 +1,9 @@
 use core::fmt;
 use std::{
+    borrow::Cow,
     fmt::{Debug, Display},
     process::{ExitStatus, Stdio},
+    str::Utf8Error,
     sync::Arc,
     time::Duration,
 };
@@ -75,8 +77,8 @@ pub struct CommandRunner {
     // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
     // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
     // copying it to here in order to not lose the data.
-    stdout: Arc<Mutex<String>>,
-    stderr: Arc<Mutex<String>>,
+    stdout: Arc<Mutex<Vec<u8>>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
     result: Option<CommandResult>,
 }
 
@@ -118,8 +120,8 @@ pub struct CommandResult {
     // this information is kept around for failures
     pub command: Command,
     pub status: Option<ExitStatus>,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 impl Debug for CommandResult {
@@ -127,8 +129,8 @@ impl Debug for CommandResult {
         f.debug_struct("CommandResult")
             .field("command", &self.command)
             .field("status", &self.status)
-            .field("stdout", &DisplayStr(&self.stdout))
-            .field("stderr", &DisplayStr(&self.stderr))
+            .field("stdout", &DisplayStr(&self.stdout_as_utf8_lossy()))
+            .field("stderr", &DisplayStr(&self.stderr_as_utf8_lossy()))
             .finish()
     }
 }
@@ -249,9 +251,9 @@ impl Command {
         let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
-        let stdout = Arc::new(Mutex::new(String::new()));
+        let stdout = Arc::new(Mutex::new(vec![]));
         let stdout_arc_copy = Arc::clone(&stdout);
-        let stderr = Arc::new(Mutex::new(String::new()));
+        let stderr = Arc::new(Mutex::new(vec![]));
         let stderr_arc_copy = Arc::clone(&stderr);
         let mut stdout_forward0 = if self.ci {
             Some(tokio::io::stdout())
@@ -280,21 +282,24 @@ impl Command {
                 match stdout_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
-                        let line = String::from_utf8_lossy(&line);
                         // copying for the `CommandResult`
-                        stdout_arc_copy.lock().await.push_str(&line);
+                        stdout_arc_copy.lock().await.extend_from_slice(&line);
                         // copying to file
                         if let Some(ref mut stdout_file) = stdout_file {
                             stdout_file
-                                .write_all(line.as_bytes())
+                                .write_all(&line)
                                 .await
                                 .expect("command stdout to file copier failed");
                         }
+                        let line_string = String::from_utf8_lossy(&line);
                         // forward stdout to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward0 {
                             let s = format!("{} {}  |", command_name, child_id);
                             let _ = stdout_forward
-                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
+                                .write(
+                                    format!("{} {}", s.color(terminal_color), line_string)
+                                        .as_bytes(),
+                                )
                                 .await
                                 .expect("command stdout to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -311,21 +316,25 @@ impl Command {
                 match stderr_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
-                        let line = String::from_utf8_lossy(&line);
                         // copying for the `CommandResult`
-                        stderr_arc_copy.lock().await.push_str(&line);
+                        stderr_arc_copy.lock().await.extend_from_slice(&line);
                         // copying to file
                         if let Some(ref mut stdout_file) = stderr_file {
                             stdout_file
-                                .write_all(line.as_bytes())
+                                .write_all(&line)
                                 .await
                                 .expect("command stderr to file copier failed");
                         }
+                        // use the lossy version for
+                        let line_string = String::from_utf8_lossy(&line);
                         // forward stderr to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward1 {
                             let s = format!("{} {} E|", command_name, child_id);
                             let _ = stdout_forward
-                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
+                                .write(
+                                    format!("{} {}", s.color(terminal_color), line_string)
+                                        .as_bytes(),
+                                )
                                 .await
                                 .expect("command stderr to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -567,9 +576,6 @@ impl CommandResult {
         }
     }
 
-    /// Note: this uses `#[track_caller]` and pushes the caller's location to
-    /// the error stack.
-    #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {
@@ -584,6 +590,26 @@ impl CommandResult {
                 "{self:#?}.assert_success() -> termination was called before completion"
             )))
         }
+    }
+
+    /// Returns `str::from_utf8(&self.stdout)`
+    pub fn stdout_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stdout)
+    }
+
+    /// Returns `str::from_utf8(&self.stderr)`
+    pub fn stderr_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stderr)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stdout)`
+    pub fn stdout_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stdout)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stderr)`
+    pub fn stderr_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stderr)
     }
 }
 
@@ -604,7 +630,6 @@ impl CommandResultNoDbg {
         }
     }
 
-    #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {
