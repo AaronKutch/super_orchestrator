@@ -11,13 +11,13 @@ keywords = ["container", "docker"]
 description = "advanced container orchestration tools"
 
 [dependencies]
-postcard = { version = "1", features = ["use-std"] }
 clap = { version = "4", features = ["derive"] }
 ctrlc = { version = "3", optional = true, default-features = false }
 env_logger = { version = "0.10", optional = true, default-features = false }
 log = "0.4"
 nix = { version = "0.27", optional = true, default-features = false, features = ["signal"] }
 owo-colors = { version = "3.5", default-features = false }
+postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0" }
 serde_json = { version = "1.0" }
 serde_yaml = { version = "0.9" }
@@ -26,6 +26,7 @@ stacked_errors = { version = "0.4", default-features = false }
 #stacked_errors = { git = "https://github.com/AaronKutch/stacked_errors", rev = "74d52fd24ff7ec1faab4f2065f37ff356f089137", default-features = false }
 #stacked_errors = { path = "../stacked_errors", default-features = false }
 tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 default = ["ctrlc_support", "env_logger_support", "nix_support"]
