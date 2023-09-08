@@ -1,6 +1,3 @@
-// TODO
-#![allow(ungated_async_fn_track_caller)]
-
 mod command;
 mod file_options;
 mod misc;

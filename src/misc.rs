@@ -63,14 +63,18 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
 
 /// Equivalent to calling `Command::new(cmd_with_args,
 /// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;` and
-/// returning the stdout
+/// returning the stdout as a `String` (returns an error if the stdout was not
+/// utf-8)
 pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     let comres = Command::new(cmd_with_args, args)
         .ci_mode(true)
         .run_to_completion()
         .await?;
     comres.assert_success()?;
-    Ok(comres.stdout)
+    comres
+        .stdout_as_utf8()
+        .map(|s| s.to_owned())
+        .stack_err_locationless(|| "`Command` output was not UTF-8")
 }
 
 /// [sh] but without CI mode
@@ -79,7 +83,10 @@ pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
         .run_to_completion()
         .await?;
     comres.assert_success()?;
-    Ok(comres.stdout)
+    comres
+        .stdout_as_utf8()
+        .map(|s| s.to_owned())
+        .stack_err_locationless(|| "`Command` output was not UTF-8")
 }
 
 pub const STD_TRIES: u64 = 300;
@@ -119,7 +126,6 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 ///     wait_for_ok(num_retries, delay, || f(host)).await
 /// }
 /// ```
-#[track_caller]
 pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
     num_retries: u64,
     delay: Duration,
@@ -169,7 +175,6 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
 ///     "\"hello world\""
 /// );
 /// ```
-#[track_caller]
 pub fn get_separated_val(
     input: &str,
     separate: &str,

@@ -1,7 +1,9 @@
 use core::fmt;
 use std::{
+    borrow::Cow,
     fmt::{Debug, Display},
     process::{ExitStatus, Stdio},
+    str::Utf8Error,
     sync::Arc,
     time::Duration,
 };
@@ -75,8 +77,8 @@ pub struct CommandRunner {
     // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
     // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
     // copying it to here in order to not lose the data.
-    stdout: Arc<Mutex<String>>,
-    stderr: Arc<Mutex<String>>,
+    stdout: Arc<Mutex<Vec<u8>>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
     result: Option<CommandResult>,
 }
 
@@ -106,7 +108,7 @@ impl Drop for CommandRunner {
                 self.command
                     .as_ref()
                     .map(|c| c.get_unified_command())
-                    .unwrap_or(String::new())
+                    .unwrap_or_default()
             )
         }
     }
@@ -118,8 +120,8 @@ pub struct CommandResult {
     // this information is kept around for failures
     pub command: Command,
     pub status: Option<ExitStatus>,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 impl Debug for CommandResult {
@@ -127,8 +129,8 @@ impl Debug for CommandResult {
         f.debug_struct("CommandResult")
             .field("command", &self.command)
             .field("status", &self.status)
-            .field("stdout", &DisplayStr(&self.stdout))
-            .field("stderr", &DisplayStr(&self.stderr))
+            .field("stdout", &DisplayStr(&self.stdout_as_utf8_lossy()))
+            .field("stderr", &DisplayStr(&self.stderr_as_utf8_lossy()))
             .finish()
     }
 }
@@ -184,6 +186,12 @@ impl Command {
         }
     }
 
+    /// Sets `self.cwd`
+    pub fn cwd(mut self, cwd: &str) -> Self {
+        self.cwd = Some(cwd.to_owned());
+        self
+    }
+
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
         self
@@ -213,7 +221,6 @@ impl Command {
         command
     }
 
-    #[track_caller]
     pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
         let mut cmd = process::Command::new(&self.command);
         if self.env_clear {
@@ -249,9 +256,9 @@ impl Command {
         let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
-        let stdout = Arc::new(Mutex::new(String::new()));
+        let stdout = Arc::new(Mutex::new(vec![]));
         let stdout_arc_copy = Arc::clone(&stdout);
-        let stderr = Arc::new(Mutex::new(String::new()));
+        let stderr = Arc::new(Mutex::new(vec![]));
         let stderr_arc_copy = Arc::clone(&stderr);
         let mut stdout_forward0 = if self.ci {
             Some(tokio::io::stdout())
@@ -268,30 +275,36 @@ impl Command {
         } else {
             owo_colors::AnsiColors::Default
         };
-        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).lines();
-        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).lines();
+        // TODO have some kind of delay system that outputs after a delay if the line
+        // has not been finished
+        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).split(b'\n');
+        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).split(b'\n');
         let command_name = self.command.clone();
         let child_id = child.id().unwrap();
         let mut handles: Vec<JoinHandle<()>> = vec![];
         handles.push(task::spawn(async move {
             loop {
-                match stdout_read.next_line().await {
+                match stdout_read.next_segment().await {
                     Ok(Some(mut line)) => {
-                        line.push('\n');
+                        line.push(b'\n');
                         // copying for the `CommandResult`
-                        stdout_arc_copy.lock().await.push_str(&line);
+                        stdout_arc_copy.lock().await.extend_from_slice(&line);
                         // copying to file
                         if let Some(ref mut stdout_file) = stdout_file {
                             stdout_file
-                                .write_all(line.as_bytes())
+                                .write_all(&line)
                                 .await
                                 .expect("command stdout to file copier failed");
                         }
+                        let line_string = String::from_utf8_lossy(&line);
                         // forward stdout to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward0 {
                             let s = format!("{} {}  |", command_name, child_id);
                             let _ = stdout_forward
-                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
+                                .write(
+                                    format!("{} {}", s.color(terminal_color), line_string)
+                                        .as_bytes(),
+                                )
                                 .await
                                 .expect("command stdout to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -305,23 +318,28 @@ impl Command {
         let command_name = self.command.clone();
         handles.push(task::spawn(async move {
             loop {
-                match stderr_read.next_line().await {
+                match stderr_read.next_segment().await {
                     Ok(Some(mut line)) => {
-                        line.push('\n');
+                        line.push(b'\n');
                         // copying for the `CommandResult`
-                        stderr_arc_copy.lock().await.push_str(&line);
+                        stderr_arc_copy.lock().await.extend_from_slice(&line);
                         // copying to file
                         if let Some(ref mut stdout_file) = stderr_file {
                             stdout_file
-                                .write_all(line.as_bytes())
+                                .write_all(&line)
                                 .await
                                 .expect("command stderr to file copier failed");
                         }
+                        // use the lossy version for
+                        let line_string = String::from_utf8_lossy(&line);
                         // forward stderr to stdout
                         if let Some(ref mut stdout_forward) = stdout_forward1 {
                             let s = format!("{} {} E|", command_name, child_id);
                             let _ = stdout_forward
-                                .write(format!("{} {}", s.color(terminal_color), line).as_bytes())
+                                .write(
+                                    format!("{} {}", s.color(terminal_color), line_string)
+                                        .as_bytes(),
+                                )
                                 .await
                                 .expect("command stderr to stdout copier failed");
                             stdout_forward.flush().await.unwrap();
@@ -344,12 +362,10 @@ impl Command {
     }
 
     /// Calls [Command::run_with_stdin] with `Stdio::null()`
-    #[track_caller]
     pub async fn run(self) -> Result<CommandRunner> {
         self.run_with_stdin(Stdio::null()).await
     }
 
-    #[track_caller]
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
@@ -360,7 +376,6 @@ impl Command {
 
     /// Same as [Command::run_to_completion] except it pipes `input` to the
     /// process stdin.
-    #[track_caller]
     pub async fn run_with_input_to_completion(self, input: &[u8]) -> Result<CommandResult> {
         let mut runner = self
             .run_with_stdin(Stdio::piped())
@@ -450,7 +465,6 @@ impl CommandRunner {
     // the exit status from `try_wait`, so keep the `_with_output` functions in case
     // we want a plain `wait` function
 
-    #[track_caller]
     async fn wait_with_output_internal(&mut self) -> Result<()> {
         let output = self
             .child_process
@@ -459,12 +473,6 @@ impl CommandRunner {
             .wait_with_output()
             .await
             .stack_err(|| format!("{self:?}.wait_with_output() -> failed when waiting on child"))?;
-        /*let stderr = String::from_utf8(output.stderr.clone()).map_add_err(|| {
-            format!("{self:?}.wait_with_output() -> failed to parse stderr as utf8")
-        })?;
-        let stdout = String::from_utf8(output.stdout.clone()).map_add_err(|| {
-            format!("{self:?}.wait_with_output() -> failed to parse stdout as utf8")
-        })?;*/
         while let Some(handle) = self.handles.pop() {
             handle
                 .await
@@ -489,7 +497,6 @@ impl CommandRunner {
     /// it does not mean that the command itself had a successful return
     /// status, use `assert_status` or check the `status` on
     /// the `CommandResult`.
-    #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
         self.wait_with_output_internal().await.stack()?;
         Ok(self.result.take().unwrap())
@@ -569,9 +576,6 @@ impl CommandResult {
         }
     }
 
-    /// Note: this uses `#[track_caller]` and pushes the caller's location to
-    /// the error stack.
-    #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {
@@ -586,6 +590,26 @@ impl CommandResult {
                 "{self:#?}.assert_success() -> termination was called before completion"
             )))
         }
+    }
+
+    /// Returns `str::from_utf8(&self.stdout)`
+    pub fn stdout_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stdout)
+    }
+
+    /// Returns `str::from_utf8(&self.stderr)`
+    pub fn stderr_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stderr)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stdout)`
+    pub fn stdout_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stdout)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stderr)`
+    pub fn stderr_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stderr)
     }
 }
 
@@ -606,7 +630,6 @@ impl CommandResultNoDbg {
         }
     }
 
-    #[track_caller]
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {

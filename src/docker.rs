@@ -11,6 +11,7 @@ use std::{
 use log::{info, warn};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
+use uuid::Uuid;
 
 use crate::{
     acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
@@ -40,6 +41,8 @@ pub struct Container {
     pub name: String,
     /// Usually should be the same as the tag
     pub host_name: String,
+    /// If true, `host_name` is used directly without appending a UUID
+    pub no_uuid_for_host_name: bool,
     /// The dockerfile arguments
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
@@ -58,7 +61,8 @@ pub struct Container {
 }
 
 impl Container {
-    /// Note: `name` is also used for the hostname
+    /// Creates the information needed to describe a `Container`. `name` is used
+    /// for both the `name` and `hostname`.
     pub fn new(
         name: &str,
         dockerfile: Dockerfile,
@@ -68,6 +72,7 @@ impl Container {
         Self {
             name: name.to_owned(),
             host_name: name.to_owned(),
+            no_uuid_for_host_name: false,
             dockerfile,
             build_args: vec![],
             create_args: vec![],
@@ -105,6 +110,12 @@ impl Container {
         });
         self
     }
+
+    /// Turns of the default behavior of attaching the UUID to the hostname
+    pub fn no_uuid_for_host_name(mut self) -> Self {
+        self.no_uuid_for_host_name = false;
+        self
+    }
 }
 
 /// A complete network of one or more containers, a more programmable
@@ -119,6 +130,7 @@ impl Container {
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
+    uuid: Uuid,
     network_name: String,
     containers: BTreeMap<String, Container>,
     dockerfile_write_dir: Option<String>,
@@ -128,25 +140,41 @@ pub struct ContainerNetwork {
     active_container_ids: BTreeMap<String, String>,
     container_runners: BTreeMap<String, CommandRunner>,
     pub container_results: BTreeMap<String, Result<CommandResult>>,
-    // true if the network has been recreated
-    network_recreated: bool,
+    network_active: bool,
 }
 
 impl Drop for ContainerNetwork {
     fn drop(&mut self) {
-        // we purposely parenthesize in this way to avoid calling `panicking` in the
+        // we purposely order in this way to avoid calling `panicking` in the
         // normal case
-        if (!self.container_runners.is_empty()) && (!std::thread::panicking()) {
+        if !self.container_runners.is_empty() {
+            if !std::thread::panicking() {
+                warn!(
+                    "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
+                     running (a termination function needs to be called",
+                    self.network_name_with_uuid()
+                )
+            }
+        } else if self.network_active && (!std::thread::panicking()) {
+            // we can't call async/await in a `drop` function, and it would be suspicious
+            // anyway
             warn!(
-                "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
-                 running",
-                self.network_name
+                "`ContainerNetwork` \"{}\" was dropped with the network still active \
+                 (`ContainerNetwork::terminate_all` needs to be called)",
+                self.network_name_with_uuid()
             )
         }
     }
 }
 
 impl ContainerNetwork {
+    /// Creates a new `ContainerNetwork`.
+    ///
+    /// This function generates a `Uuid` used for enabling multiple
+    /// `ContainerNetwork`s with the same names and ids to run simultaneously.
+    /// The uuid is appended to network names, container names, and hostnames.
+    /// Arguments involving container names automatically append the uuid.
+    ///
     /// `network_name` sets the name of the docker network that containers will
     /// be attached to, `containers` is the set of containers that can be
     /// referred to later by name, `dockerfile_write_dir` is the directory in
@@ -195,6 +223,7 @@ impl ContainerNetwork {
             map.insert(container.name.clone(), container);
         }
         Ok(Self {
+            uuid: Uuid::new_v4(),
             network_name: network_name.to_owned(),
             containers: map,
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
@@ -203,16 +232,67 @@ impl ContainerNetwork {
             active_container_ids: BTreeMap::new(),
             container_runners: BTreeMap::new(),
             container_results: BTreeMap::new(),
-            network_recreated: false,
+            network_active: false,
         })
     }
 
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
+    }
+
+    pub fn uuid_as_string(&self) -> String {
+        self.uuid.to_string()
+    }
+
+    pub fn network_name_with_uuid(&self) -> String {
+        format!("{}_{}", self.network_name, self.uuid)
+    }
+
+    /// Returns an error if the container with the name could not be found
+    pub fn container_name_with_uuid(&self, container_name: &str) -> Result<String> {
+        if let Some(container) = self.containers.get(container_name) {
+            Ok(format!("{}_{}", container.name, self.uuid))
+        } else {
+            Err(Error::from(format!(
+                "container_name_with_uuid({container_name}): could not find container with given \
+                 name"
+            )))
+        }
+    }
+
+    /// If `no_uuid_for_host_name` is true for the container, this just returns
+    /// the `host_name` Returns an error if the container with the name
+    /// could not be found
+    pub fn hostname_with_uuid(&self, container_name: &str) -> Result<String> {
+        if let Some(container) = self.containers.get(container_name) {
+            if container.no_uuid_for_host_name {
+                Ok(container.host_name.clone())
+            } else {
+                Ok(format!("{}_{}", container.host_name, self.uuid))
+            }
+        } else {
+            Err(Error::from(format!(
+                "hostname_with_uuid({container_name}): could not find container with given name"
+            )))
+        }
+    }
+
     /// Adds the volumes to every container
-    pub fn add_common_volumes(mut self, volumes: &[(&str, &str)]) -> Self {
+    pub fn add_common_volumes(&mut self, volumes: &[(&str, &str)]) -> &mut Self {
         for container in self.containers.values_mut() {
             container
                 .volumes
                 .extend(volumes.iter().map(|x| (x.0.to_owned(), x.1.to_owned())))
+        }
+        self
+    }
+
+    /// Adds the arguments to every container
+    pub fn add_common_entrypoint_args(&mut self, args: &[&str]) -> &mut Self {
+        for container in self.containers.values_mut() {
+            container
+                .entrypoint_args
+                .extend(args.iter().map(|x| x.to_string()))
         }
         self
     }
@@ -258,7 +338,7 @@ impl ContainerNetwork {
     }
 
     /// Force removes all active containers.
-    pub async fn terminate_all(&mut self) {
+    pub async fn terminate_containers(&mut self) {
         for name in self.active_names() {
             if let Some(docker_id) = self.active_container_ids.remove(&name) {
                 // TODO we should parse errors to differentiate whether it is
@@ -276,8 +356,25 @@ impl ContainerNetwork {
         }
     }
 
+    /// Force removes all active containers and removes the network
+    pub async fn terminate_all(&mut self) {
+        self.terminate_containers().await;
+        if self.network_active {
+            let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
+                .run_to_completion()
+                .await;
+            self.network_active = false;
+        }
+    }
+
     /// Runs only the given `names`
     pub async fn run(&mut self, names: &[&str], ci_mode: bool) -> Result<()> {
+        if ci_mode {
+            info!(
+                "`ContainerNetwork::run(ci_mode: true, ..)` with UUID {}",
+                self.uuid_as_string()
+            )
+        }
         // relatively cheap preverification should be done first to prevent much more
         // expensive later undos
         let mut set = BTreeSet::new();
@@ -347,7 +444,7 @@ impl ContainerNetwork {
             dockerfile_write_file = Some(path.to_str().unwrap().to_owned());
         }
 
-        // do this last
+        /*
         for name in names {
             // remove potentially previously existing container with same name
             let _ = Command::new("docker rm -f", &[name])
@@ -357,35 +454,38 @@ impl ContainerNetwork {
                 .run_to_completion()
                 .await?;
         }
+        */
 
-        if !self.network_recreated {
+        if !self.network_active {
             // remove old network if it exists (there is no option to ignore nonexistent
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
-            let _ = Command::new("docker network rm", &[&self.network_name])
-                .ci_mode(false)
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log)
-                .run_to_completion()
-                .await;
+            /*let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
+            .ci_mode(false)
+            .stdout_log(&debug_log)
+            .stderr_log(&debug_log)
+            .run_to_completion()
+            .await;*/
             let comres = if self.is_not_internal {
-                Command::new("docker network create", &[&self.network_name])
+                Command::new("docker network create", &[&self.network_name_with_uuid()])
                     .ci_mode(false)
                     .stdout_log(&debug_log)
                     .stderr_log(&debug_log)
                     .run_to_completion()
                     .await?
             } else {
-                Command::new("docker network create --internal", &[&self.network_name])
-                    .ci_mode(false)
-                    .stdout_log(&debug_log)
-                    .stderr_log(&debug_log)
-                    .run_to_completion()
-                    .await?
+                Command::new("docker network create --internal", &[
+                    &self.network_name_with_uuid()
+                ])
+                .ci_mode(false)
+                .stdout_log(&debug_log)
+                .stderr_log(&debug_log)
+                .run_to_completion()
+                .await?
             };
             // TODO we can get the network id
-            comres.assert_success()?;
-            self.network_recreated = true;
+            comres.assert_success().stack()?;
+            self.network_active = true;
         }
 
         // run all the creation first so that everything is pulled and prepared
@@ -401,15 +501,18 @@ impl ContainerNetwork {
             let bin_s = bin_s.as_ref();
 
             // baseline args
+            let network_name = self.network_name_with_uuid();
+            let hostname = self.hostname_with_uuid(name).unwrap();
+            let full_name = self.container_name_with_uuid(name).unwrap();
             let mut args = vec![
                 "create",
                 "--rm",
                 "--network",
-                &self.network_name,
+                &network_name,
                 "--hostname",
-                name,
+                &hostname,
                 "--name",
-                name,
+                &full_name,
             ];
 
             // volumes
@@ -447,13 +550,13 @@ impl ContainerNetwork {
                 Dockerfile::Path(ref path) => {
                     // tag
                     args.push("-t");
-                    args.push(&container.name);
+                    args.push(&full_name);
 
                     let mut dockerfile = acquire_file_path(path).await?;
                     // yes we do need to do this because of the weird way docker build works
                     let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
                     let mut build_args =
-                        vec!["build", "-t", &container.name, "--file", &dockerfile_full];
+                        vec!["build", "-t", &full_name, "--file", &dockerfile_full];
                     dockerfile.pop();
                     let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
                     let mut tmp = vec![];
@@ -476,14 +579,14 @@ impl ContainerNetwork {
                 Dockerfile::Contents(ref contents) => {
                     // tag
                     args.push("-t");
-                    args.push(&container.name);
+                    args.push(&full_name);
 
                     FileOptions::write_str(dockerfile_write_file.as_ref().unwrap(), contents)
                         .await?;
                     let mut build_args = vec![
                         "build",
                         "-t",
-                        &container.name,
+                        &full_name,
                         "--file",
                         dockerfile_write_file.as_ref().unwrap(),
                     ];
@@ -528,7 +631,7 @@ impl ContainerNetwork {
                 .stdout_log(&debug_log)
                 .stderr_log(&debug_log);
             if ci_mode {
-                info!("ci_mode command debug: {command:#?}");
+                info!("`Container` creation command: {command:#?}");
             }
             match command.run_to_completion().await {
                 Ok(output) => {
@@ -537,8 +640,13 @@ impl ContainerNetwork {
                             let mut docker_id = output.stdout;
                             // remove trailing '\n'
                             docker_id.pop();
-                            self.active_container_ids
-                                .insert(name.to_string(), docker_id);
+                            match String::from_utf8(docker_id) {
+                                Ok(docker_id) => {
+                                    self.active_container_ids
+                                        .insert(name.to_string(), docker_id);
+                                }
+                                Err(e) => return Err(Error::from(e)),
+                            }
                         }
                         Err(e) => {
                             self.terminate_all().await;
@@ -601,22 +709,23 @@ impl ContainerNetwork {
                 Ok(comres) => {
                     if !comres.successful() {
                         let mut encountered = false;
-                        if let Some(start) = comres.stdout.rfind(error_stack) {
-                            if !comres.stdout.contains(not_root_cause) {
+                        let stdout = comres.stdout_as_utf8_lossy();
+                        if let Some(start) = stdout.rfind(error_stack) {
+                            if !stdout.contains(not_root_cause) {
                                 encountered = true;
                                 res = res.add_kind_locationless(format!(
                                     "Error stack from container \"{name}\":\n{}\n",
-                                    &comres.stdout[start..]
+                                    &stdout[start..]
                                 ));
                             }
                         }
 
-                        if let Some(i) = comres.stdout.rfind(panicked_at) {
-                            if let Some(i) = comres.stdout[0..i].rfind("thread") {
+                        if let Some(i) = stdout.rfind(panicked_at) {
+                            if let Some(i) = stdout[0..i].rfind("thread") {
                                 encountered = true;
                                 res = res.add_kind_locationless(format!(
                                     "Panic message from container \"{name}\":\n{}\n",
-                                    &comres.stdout[i..]
+                                    &stdout[i..]
                                 ));
                             }
                         }
