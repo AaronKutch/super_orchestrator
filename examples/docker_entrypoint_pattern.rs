@@ -26,8 +26,13 @@ const TIMEOUT: Duration = Duration::from_secs(300);
 struct Args {
     /// If left `None`, the container runner program runs, otherwise this
     /// specifies the entrypoint to run
-    #[arg(short, long)]
+    #[arg(long)]
     entry_name: Option<String>,
+    /// In order to enable simultaneous `super_orchestrator` uses with the same
+    /// names, UUIDs are appended to some things such as the hostname. This
+    /// is used to pass the information around.
+    #[arg(long)]
+    uuid: Option<String>,
 }
 
 #[tokio::main]
@@ -37,13 +42,13 @@ async fn main() -> Result<()> {
 
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
-            "container0" => container0_runner().await,
-            "container1" => container1_runner().await,
+            "container0" => container0_runner(&args).await.stack(),
+            "container1" => container1_runner().await.stack(),
             "container2" => Ok(()),
             _ => Err(Error::from(format!("entrypoint \"{s}\" is not recognized"))),
         }
     } else {
-        container_runner().await
+        container_runner().await.stack()
     }
 }
 
@@ -59,7 +64,7 @@ async fn container_runner() -> Result<()> {
     //    "--target",
     //    container_target,
     //])
-    //.await?;
+    //.await.stack()?;
     //let entrypoint =
     // &format!("./target/{container_target}/release/{bin_entrypoint}");
 
@@ -69,7 +74,8 @@ async fn container_runner() -> Result<()> {
         "--target",
         container_target,
     ])
-    .await?;
+    .await
+    .stack()?;
     let entrypoint = Some(format!(
         "./target/{container_target}/release/examples/{bin_entrypoint}"
     ));
@@ -107,25 +113,37 @@ async fn container_runner() -> Result<()> {
         // TODO see issue on `ContainerNetwork` struct documentation
         true,
         logs_dir,
-    )?
+    )
+    .stack()?;
     // check the local ./logs directory
-    .add_common_volumes(&[(logs_dir, "/logs")]);
-    cn.run_all(true).await?;
+    cn.add_common_volumes(&[(logs_dir, "/logs")]);
+    let uuid = cn.uuid_as_string();
+    // passing UUID information through common arguments
+    cn.add_common_entrypoint_args(&["--uuid", &uuid]);
+    cn.run_all(true).await.stack()?;
 
     // container2 ends early
     cn.wait_with_timeout(&mut vec!["container2".to_owned()], true, TIMEOUT)
-        .await?;
+        .await
+        .stack()?;
     assert_eq!(cn.active_names(), &["container0", "container1"]);
     assert_eq!(cn.inactive_names(), &["container2"]);
 
     info!("waiting on rest of containers to finish");
-    cn.wait_with_timeout_all(true, TIMEOUT).await?;
+    cn.wait_with_timeout_all(true, TIMEOUT).await.stack()?;
+    // there will be a warning if we do not properly terminate the container network
+    // and there are still running containers or docker networks when the
+    // `ContainerNetwork` is dropped
+    cn.terminate_all().await;
     Ok(())
 }
 
-async fn container0_runner() -> Result<()> {
-    let host = "container1:26000";
-    let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, host)
+async fn container0_runner(args: &Args) -> Result<()> {
+    // it might seem annoying to use `stack` at every fallible point, but this is
+    // more than worth it when trying to decipher where an error is coming from
+    let uuid = args.uuid.clone().stack()?;
+    let container1_host = &format!("container1_{}:26000", uuid);
+    let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, container1_host)
         .await
         .stack()?;
     let s = "hello world".to_owned();
@@ -138,18 +156,24 @@ async fn container0_runner() -> Result<()> {
     // check out the results of a panic
     //panic!("uh oh");
 
-    info!("container 0 runner is waiting for 20 seconds");
+    info!("container 0 runner is waiting for 20 seconds before sending");
     sleep(Duration::from_secs(20)).await;
-    nm.send::<String>(&s).await?;
+    nm.send::<String>(&s).await.stack()?;
+
     Ok(())
 }
 
 async fn container1_runner() -> Result<()> {
     let host = "0.0.0.0:26000";
-    let mut nm = NetMessenger::listen_single_connect(host, TIMEOUT).await?;
+    let mut nm = NetMessenger::listen_single_connect(host, TIMEOUT)
+        .await
+        .stack()?;
+
     info!("container 1 runner is waiting to get something from container 0");
-    let s: String = nm.recv().await?;
+    let s: String = nm.recv().await.stack()?;
     info!("container 1 received \"{s}\"");
+
     assert_eq!(&s, "hello world");
+
     Ok(())
 }
