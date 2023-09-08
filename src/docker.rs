@@ -41,6 +41,8 @@ pub struct Container {
     pub name: String,
     /// Usually should be the same as the tag
     pub host_name: String,
+    /// If true, `host_name` is used directly without appending a UUID
+    pub no_uuid_for_host_name: bool,
     /// The dockerfile arguments
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
@@ -70,6 +72,7 @@ impl Container {
         Self {
             name: name.to_owned(),
             host_name: name.to_owned(),
+            no_uuid_for_host_name: false,
             dockerfile,
             build_args: vec![],
             create_args: vec![],
@@ -105,6 +108,12 @@ impl Container {
             acc.push(e.to_string());
             acc
         });
+        self
+    }
+
+    /// Turns of the default behavior of attaching the UUID to the hostname
+    pub fn no_uuid_for_host_name(mut self) -> Self {
+        self.no_uuid_for_host_name = false;
         self
     }
 }
@@ -251,10 +260,16 @@ impl ContainerNetwork {
         }
     }
 
-    /// Returns an error if the container with the name could not be found
+    /// If `no_uuid_for_host_name` is true for the container, this just returns
+    /// the `host_name` Returns an error if the container with the name
+    /// could not be found
     pub fn hostname_with_uuid(&self, container_name: &str) -> Result<String> {
         if let Some(container) = self.containers.get(container_name) {
-            Ok(format!("{}_{}", container.host_name, self.uuid))
+            if container.no_uuid_for_host_name {
+                Ok(container.host_name.clone())
+            } else {
+                Ok(format!("{}_{}", container.host_name, self.uuid))
+            }
         } else {
             Err(Error::from(format!(
                 "hostname_with_uuid({container_name}): could not find container with given name"
