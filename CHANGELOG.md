@@ -10,7 +10,7 @@
 - `Command` and `CommandResult` stdout and stderr are now `Vec<u8>` instead of `String`
 - `ContainerNetwork` now adds on a UUID suffix to docker names and hostnames in order to allow
   running them in parallel
-- `assert_success` is no longer `track_caller`
+- there are no more `track_caller` functions, use `stacked_errors`
 - Many dependency updates, use `postcard` internally instead of `bincode`
 
 ### Additions

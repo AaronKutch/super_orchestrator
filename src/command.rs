@@ -221,7 +221,6 @@ impl Command {
         command
     }
 
-    #[track_caller]
     pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
         let mut cmd = process::Command::new(&self.command);
         if self.env_clear {
@@ -363,12 +362,10 @@ impl Command {
     }
 
     /// Calls [Command::run_with_stdin] with `Stdio::null()`
-    #[track_caller]
     pub async fn run(self) -> Result<CommandRunner> {
         self.run_with_stdin(Stdio::null()).await
     }
 
-    #[track_caller]
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
@@ -379,7 +376,6 @@ impl Command {
 
     /// Same as [Command::run_to_completion] except it pipes `input` to the
     /// process stdin.
-    #[track_caller]
     pub async fn run_with_input_to_completion(self, input: &[u8]) -> Result<CommandResult> {
         let mut runner = self
             .run_with_stdin(Stdio::piped())
@@ -469,7 +465,6 @@ impl CommandRunner {
     // the exit status from `try_wait`, so keep the `_with_output` functions in case
     // we want a plain `wait` function
 
-    #[track_caller]
     async fn wait_with_output_internal(&mut self) -> Result<()> {
         let output = self
             .child_process
@@ -502,7 +497,6 @@ impl CommandRunner {
     /// it does not mean that the command itself had a successful return
     /// status, use `assert_status` or check the `status` on
     /// the `CommandResult`.
-    #[track_caller]
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
         self.wait_with_output_internal().await.stack()?;
         Ok(self.result.take().unwrap())

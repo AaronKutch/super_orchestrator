@@ -126,7 +126,6 @@ pub const STD_DELAY: Duration = Duration::from_millis(300);
 ///     wait_for_ok(num_retries, delay, || f(host)).await
 /// }
 /// ```
-#[track_caller]
 pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
     num_retries: u64,
     delay: Duration,
@@ -176,7 +175,6 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
 ///     "\"hello world\""
 /// );
 /// ```
-#[track_caller]
 pub fn get_separated_val(
     input: &str,
     separate: &str,
