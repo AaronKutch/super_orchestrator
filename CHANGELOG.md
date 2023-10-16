@@ -1,8 +1,11 @@
 # Changelog
 
-## [0.7.1] - TODO
+## [0.8.0] - TODO
 ### Fixes
 - Fixed that `no_uuid_for_host_name` was doing the opposite of what it was supposed to
+
+### Additions
+- Added environment variable args and some more methods to `Container`
 
 ## [0.7.0] - 2023-09-08
 ### Fixes
