@@ -113,7 +113,7 @@ impl Container {
 
     /// Turns of the default behavior of attaching the UUID to the hostname
     pub fn no_uuid_for_host_name(mut self) -> Self {
-        self.no_uuid_for_host_name = false;
+        self.no_uuid_for_host_name = true;
         self
     }
 }

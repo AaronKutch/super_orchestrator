@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.7.0] - TODO
+## [0.7.1] - TODO
+### Fixes
+- Fixed that `no_uuid_for_host_name` was doing the opposite of what it was supposed to
+
+## [0.7.0] - 2023-09-08
 ### Fixes
 - Fixed that `ContainerNetwork`s were using the `name` for hostnames instead of the `host_name` that
   was meant for that purpose
