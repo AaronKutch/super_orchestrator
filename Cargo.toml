@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/AaronKutch/super_orchestrator"
 documentation = "https://docs.rs/super_orchestrator"
 keywords = ["container", "docker"]
-description = "advanced container orchestration tools"
+description = "programmable container orchestration tools"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
