@@ -53,6 +53,8 @@ pub struct Container {
     /// note that the entrypoint binary is automatically included if
     /// `extrypoint_path` is set
     pub volumes: Vec<(String, String)>,
+    /// Environment variable pairs passed to docker
+    pub environment_vars: Vec<(String, String)>,
     /// Path to the entrypoint binary locally
     pub entrypoint_path: Option<String>,
     /// passed in as ["arg1", "arg2", ...] with the bracket and quotations being
@@ -77,6 +79,7 @@ impl Container {
             build_args: vec![],
             create_args: vec![],
             volumes: vec![],
+            environment_vars: vec![],
             entrypoint_path: entrypoint_path.map(|s| s.to_owned()),
             entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
                 acc.push(e.to_string());
@@ -111,9 +114,25 @@ impl Container {
         self
     }
 
+    pub fn environment_vars(mut self, environment_vars: &[(&str, &str)]) -> Self {
+        self.environment_vars = environment_vars.iter().fold(Vec::new(), |mut acc, e| {
+            acc.push((e.0.to_string(), e.1.to_string()));
+            acc
+        });
+        self
+    }
+
+    pub fn entrypoint_args(mut self, entrypoint_args: &[&str]) -> Self {
+        self.entrypoint_args = entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
+            acc.push(e.to_string());
+            acc
+        });
+        self
+    }
+
     /// Turns of the default behavior of attaching the UUID to the hostname
     pub fn no_uuid_for_host_name(mut self) -> Self {
-        self.no_uuid_for_host_name = false;
+        self.no_uuid_for_host_name = true;
         self
     }
 }
@@ -275,6 +294,25 @@ impl ContainerNetwork {
                 "hostname_with_uuid({container_name}): could not find container with given name"
             )))
         }
+    }
+
+    pub fn add_container(&mut self, container: Container) -> Result<&mut Self> {
+        if self.dockerfile_write_dir.is_none()
+            && matches!(container.dockerfile, Dockerfile::Contents(_))
+        {
+            return Err(Error::from(
+                "ContainerNetwork::new() a container is built with `Dockerfile::Contents`, but \
+                 `dockerfile_write_dir` is unset",
+            ))
+        }
+        if self.containers.contains_key(&container.name) {
+            return Err(Error::from(format!(
+                "ContainerNetwork::new() two containers were supplied with the same name \"{}\"",
+                container.name
+            )))
+        }
+        self.containers.insert(container.name.clone(), container);
+        Ok(self)
     }
 
     /// Adds the volumes to every container
@@ -514,6 +552,15 @@ impl ContainerNetwork {
                 "--name",
                 &full_name,
             ];
+
+            let mut tmp = vec![];
+            for var in &container.environment_vars {
+                tmp.push(format!("{}={}", var.0, var.1));
+            }
+            for tmp in &tmp {
+                args.push("-e");
+                args.push(tmp);
+            }
 
             // volumes
             let mut volumes = container.volumes.clone();

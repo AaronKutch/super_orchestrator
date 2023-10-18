@@ -192,6 +192,12 @@ impl Command {
         self
     }
 
+    /// Adds an environment variable
+    pub fn env(mut self, env_key: &str, env_val: &str) -> Self {
+        self.envs.push((env_key.to_owned(), env_val.to_owned()));
+        self
+    }
+
     pub fn ci_mode(mut self, ci_mode: bool) -> Self {
         self.ci = ci_mode;
         self
