@@ -4,7 +4,9 @@ use stacked_errors::{Error, Result, StackableErr};
 use tokio::fs;
 
 /// Canonicalizes and checks the existence of a path. Also adds on better
-/// information to errors. Note: may introduce TOCTOU bugs.
+/// information to errors.
+///
+/// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_path(path_str: &str) -> Result<PathBuf> {
     // note: we don't need fs::try_exists because the canonicalization deals with
     // testing for existence and the symbolic links
@@ -15,7 +17,9 @@ pub async fn acquire_path(path_str: &str) -> Result<PathBuf> {
 }
 
 /// Canonicalizes and checks the existence of a file path. Also adds on better
-/// information to errors. Note: may introduce TOCTOU bugs.
+/// information to errors.
+///
+/// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_file_path(file_path_str: &str) -> Result<PathBuf> {
     let path = PathBuf::from(file_path_str);
     let path = fs::canonicalize(&path)
@@ -31,7 +35,9 @@ pub async fn acquire_file_path(file_path_str: &str) -> Result<PathBuf> {
 }
 
 /// Canonicalizes and checks the existence of a directory path. Also adds on
-/// better information to errors. Note: may introduce TOCTOU bugs.
+/// better information to errors.
+///
+/// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_dir_path(dir_path_str: &str) -> Result<PathBuf> {
     let path = PathBuf::from(dir_path_str);
     let path = fs::canonicalize(&path)
