@@ -30,7 +30,8 @@ struct Args {
     entry_name: Option<String>,
     /// In order to enable simultaneous `super_orchestrator` uses with the same
     /// names, UUIDs are appended to some things such as the hostname. This
-    /// is used to pass the information around.
+    /// is used to pass the information around. This behavior can be overridden
+    /// by `no_uuid_...` on individual containers or the whole network.
     #[arg(long)]
     uuid: Option<String>,
 }
@@ -84,21 +85,25 @@ async fn container_runner() -> Result<()> {
     let mut cn = ContainerNetwork::new(
         "test",
         vec![
+            // a container with a plain fedora:38 image
             Container::new(
                 "container0",
                 Dockerfile::NameTag("fedora:38".to_owned()),
                 entrypoint,
                 &["--entry-name", "container0"],
             ),
+            // uses the example dockerfile
             Container::new(
                 "container1",
                 Dockerfile::Path(format!("{dockerfiles_dir}/example.dockerfile")),
                 entrypoint,
                 &["--entry-name", "container1"],
             ),
+            // uses the literal string, allowing for self-contained complicated systems in a single
+            // file
             Container::new(
                 "container2",
-                // note: when adding from a local file, the file must be located in the same
+                // note: when adding from a local file, the file must be located under the same
                 // directory as the temporary dockerfile, which is why ".../dockerfile_resources"
                 // is under the `dockerfile_write_dir`
                 Dockerfile::Contents(
@@ -129,7 +134,7 @@ async fn container_runner() -> Result<()> {
     ensure_eq!(cn.active_names(), &["container0", "container1"]);
     ensure_eq!(cn.inactive_names(), &["container2"]);
 
-    info!("waiting on rest of containers to finish");
+    info!("waiting on rest of the containers to finish");
     cn.wait_with_timeout_all(true, TIMEOUT).await.stack()?;
     // there will be a warning if we do not properly terminate the container network
     // and there are still running containers or docker networks when the

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::fs;
@@ -7,29 +7,29 @@ use tokio::fs;
 /// information to errors.
 ///
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
-pub async fn acquire_path(path_str: &str) -> Result<PathBuf> {
+pub async fn acquire_path(path_str: impl AsRef<Path>) -> Result<PathBuf> {
     // note: we don't need fs::try_exists because the canonicalization deals with
     // testing for existence and the symbolic links
-    let path = PathBuf::from(path_str);
+    let path = path_str.as_ref();
     fs::canonicalize(&path)
         .await
-        .stack_err(|| format!("acquire_path(path_str: \"{path_str}\")"))
+        .stack_err(|| format!("acquire_path(path_str: \"{path:?}\")"))
 }
 
 /// Canonicalizes and checks the existence of a file path. Also adds on better
 /// information to errors.
 ///
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
-pub async fn acquire_file_path(file_path_str: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(file_path_str);
+pub async fn acquire_file_path(file_path_str: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = file_path_str.as_ref();
     let path = fs::canonicalize(&path)
         .await
-        .stack_err(|| format!("acquire_file_path(file_path_str: \"{file_path_str}\")"))?;
+        .stack_err(|| format!("acquire_file_path(file_path_str: \"{path:?}\")"))?;
     if path.is_file() {
         Ok(path)
     } else {
         Err(Error::from(format!(
-            "acquire_file_path(file_path_str: \"{file_path_str}\") -> is not a file"
+            "acquire_file_path(file_path_str: \"{path:?}\") -> is not a file"
         )))
     }
 }
@@ -38,16 +38,16 @@ pub async fn acquire_file_path(file_path_str: &str) -> Result<PathBuf> {
 /// better information to errors.
 ///
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
-pub async fn acquire_dir_path(dir_path_str: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(dir_path_str);
+pub async fn acquire_dir_path(dir_path_str: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = dir_path_str.as_ref();
     let path = fs::canonicalize(&path)
         .await
-        .stack_err(|| format!("acquire_dir_path(dir_path_str: \"{dir_path_str}\")"))?;
+        .stack_err(|| format!("acquire_dir_path(dir_path_str: \"{path:?}\")"))?;
     if path.is_dir() {
         Ok(path)
     } else {
         Err(Error::from(format!(
-            "acquire_dir_path(dir_path_str: \"{dir_path_str}\") -> is not a directory"
+            "acquire_dir_path(dir_path_str: \"{path:?}\") -> is not a directory"
         )))
     }
 }

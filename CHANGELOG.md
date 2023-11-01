@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.0] - TODO
+### Changes
+- used `impl AsRef<Path>` in several signatures
+
 ## [0.8.0] - 2023-10-18
 ### Fixes
 - Fixed that `no_uuid_for_host_name` was doing the opposite of what it was supposed to
