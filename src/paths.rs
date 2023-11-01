@@ -13,7 +13,7 @@ pub async fn acquire_path(path_str: impl AsRef<Path>) -> Result<PathBuf> {
     let path = path_str.as_ref();
     fs::canonicalize(path)
         .await
-        .stack_err(|| format!("acquire_path(path_str: \"{path:?}\")"))
+        .stack_err(|| format!("acquire_path(path_str: {path:?})"))
 }
 
 /// Canonicalizes and checks the existence of a file path. Also adds on better
@@ -21,15 +21,15 @@ pub async fn acquire_path(path_str: impl AsRef<Path>) -> Result<PathBuf> {
 ///
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_file_path(file_path_str: impl AsRef<Path>) -> Result<PathBuf> {
-    let path = file_path_str.as_ref();
-    let path = fs::canonicalize(path)
+    let file_path_str = file_path_str.as_ref();
+    let path = fs::canonicalize(file_path_str)
         .await
-        .stack_err(|| format!("acquire_file_path(file_path_str: \"{path:?}\")"))?;
+        .stack_err(|| format!("acquire_file_path(file_path_str: {file_path_str:?})"))?;
     if path.is_file() {
         Ok(path)
     } else {
         Err(Error::from(format!(
-            "acquire_file_path(file_path_str: \"{path:?}\") -> is not a file"
+            "acquire_file_path(file_path_str: {file_path_str:?}) -> is not a file"
         )))
     }
 }
@@ -39,15 +39,15 @@ pub async fn acquire_file_path(file_path_str: impl AsRef<Path>) -> Result<PathBu
 ///
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_dir_path(dir_path_str: impl AsRef<Path>) -> Result<PathBuf> {
-    let path = dir_path_str.as_ref();
-    let path = fs::canonicalize(path)
+    let file_path_str = dir_path_str.as_ref();
+    let path = fs::canonicalize(file_path_str)
         .await
-        .stack_err(|| format!("acquire_dir_path(dir_path_str: \"{path:?}\")"))?;
+        .stack_err(|| format!("acquire_dir_path(dir_path_str: {file_path_str:?})"))?;
     if path.is_dir() {
         Ok(path)
     } else {
         Err(Error::from(format!(
-            "acquire_dir_path(dir_path_str: \"{path:?}\") -> is not a directory"
+            "acquire_dir_path(dir_path_str: {file_path_str:?}) -> is not a directory"
         )))
     }
 }

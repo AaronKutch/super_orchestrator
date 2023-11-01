@@ -160,10 +160,10 @@ impl Command {
     /// other things as their default values. `cmd_with_args` is separated by
     /// whitespace, and the first part becomes the command the the others are
     /// extra prefixed args.
-    pub fn new(cmd_with_args: &str, args: &[&str]) -> Self {
+    pub fn new(cmd_with_args: impl AsRef<str>, args: &[&str]) -> Self {
         let mut true_args = vec![];
         let mut command = String::new();
-        for (i, part) in cmd_with_args.split_whitespace().enumerate() {
+        for (i, part) in cmd_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
                 command = part.to_owned();
             } else {
@@ -187,14 +187,15 @@ impl Command {
     }
 
     /// Sets `self.cwd`
-    pub fn cwd(mut self, cwd: &str) -> Self {
-        self.cwd = Some(cwd.to_owned());
+    pub fn cwd(mut self, cwd: impl AsRef<str>) -> Self {
+        self.cwd = Some(cwd.as_ref().to_owned());
         self
     }
 
     /// Adds an environment variable
-    pub fn env(mut self, env_key: &str, env_val: &str) -> Self {
-        self.envs.push((env_key.to_owned(), env_val.to_owned()));
+    pub fn env(mut self, env_key: impl AsRef<str>, env_val: impl AsRef<str>) -> Self {
+        self.envs
+            .push((env_key.as_ref().to_owned(), env_val.as_ref().to_owned()));
         self
     }
 
