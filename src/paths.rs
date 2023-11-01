@@ -11,7 +11,7 @@ pub async fn acquire_path(path_str: impl AsRef<Path>) -> Result<PathBuf> {
     // note: we don't need fs::try_exists because the canonicalization deals with
     // testing for existence and the symbolic links
     let path = path_str.as_ref();
-    fs::canonicalize(&path)
+    fs::canonicalize(path)
         .await
         .stack_err(|| format!("acquire_path(path_str: \"{path:?}\")"))
 }
@@ -22,7 +22,7 @@ pub async fn acquire_path(path_str: impl AsRef<Path>) -> Result<PathBuf> {
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_file_path(file_path_str: impl AsRef<Path>) -> Result<PathBuf> {
     let path = file_path_str.as_ref();
-    let path = fs::canonicalize(&path)
+    let path = fs::canonicalize(path)
         .await
         .stack_err(|| format!("acquire_file_path(file_path_str: \"{path:?}\")"))?;
     if path.is_file() {
@@ -40,7 +40,7 @@ pub async fn acquire_file_path(file_path_str: impl AsRef<Path>) -> Result<PathBu
 /// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
 pub async fn acquire_dir_path(dir_path_str: impl AsRef<Path>) -> Result<PathBuf> {
     let path = dir_path_str.as_ref();
-    let path = fs::canonicalize(&path)
+    let path = fs::canonicalize(path)
         .await
         .stack_err(|| format!("acquire_dir_path(dir_path_str: \"{path:?}\")"))?;
     if path.is_dir() {

@@ -434,7 +434,7 @@ impl ContainerNetwork {
 
         let debug_log = FileOptions::write2(
             &self.log_dir,
-            &format!("container_network_{}.log", self.network_name),
+            format!("container_network_{}.log", self.network_name),
         );
         // prechecking the log directory
         debug_log
