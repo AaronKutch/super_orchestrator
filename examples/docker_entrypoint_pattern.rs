@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use log::info;
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
@@ -126,8 +126,8 @@ async fn container_runner() -> Result<()> {
     cn.wait_with_timeout(&mut vec!["container2".to_owned()], true, TIMEOUT)
         .await
         .stack()?;
-    assert_eq!(cn.active_names(), &["container0", "container1"]);
-    assert_eq!(cn.inactive_names(), &["container2"]);
+    ensure_eq!(cn.active_names(), &["container0", "container1"]);
+    ensure_eq!(cn.inactive_names(), &["container2"]);
 
     info!("waiting on rest of containers to finish");
     cn.wait_with_timeout_all(true, TIMEOUT).await.stack()?;
@@ -173,7 +173,8 @@ async fn container1_runner() -> Result<()> {
     let s: String = nm.recv().await.stack()?;
     info!("container 1 received \"{s}\"");
 
-    assert_eq!(&s, "hello world");
+    // use `ensure` macros instead of of panicking assertions
+    ensure_eq!(&s, "hello world");
 
     Ok(())
 }

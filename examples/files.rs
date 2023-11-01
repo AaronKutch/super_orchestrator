@@ -1,4 +1,4 @@
-use stacked_errors::StackableErr;
+use stacked_errors::{ensure, ensure_eq, StackableErr};
 use super_orchestrator::{
     acquire_dir_path, acquire_file_path, acquire_path, stacked_errors::Result,
 };
@@ -11,19 +11,19 @@ async fn main() -> Result<()> {
     acquire_path("./examples/").await.stack()?;
     acquire_path("./examples/files.rs").await.stack()?;
 
-    assert!(acquire_path("./examples/files.rs")
+    ensure!(acquire_path("./examples/files.rs")
         .await
         .unwrap()
         .ends_with("super_orchestrator/examples/files.rs"));
 
     // normalization is performed, note it always returns an absolute path but we
     // are testing only the ends for testing purposes.
-    assert!(acquire_path("./examples/../examples/../examples/files.rs")
+    ensure!(acquire_path("./examples/../examples/../examples/files.rs")
         .await
         .unwrap()
         .ends_with("super_orchestrator/examples/files.rs"));
 
-    assert_eq!(
+    ensure_eq!(
         format!(
             "{}",
             acquire_path("./examples/nonexistent.rs").await.unwrap_err()
@@ -38,17 +38,17 @@ BoxedError(Os { code: 2, kind: NotFound, message: "No such file or directory" })
     // the `_dir_` version insures it is only a directory
     acquire_dir_path("./examples/").await.stack()?;
 
-    assert!(acquire_dir_path("./examples")
+    ensure!(acquire_dir_path("./examples")
         .await
         .unwrap()
         .ends_with("super_orchestrator/examples"));
 
-    assert!(acquire_path("./examples/../examples/../examples/")
+    ensure!(acquire_path("./examples/../examples/../examples/")
         .await
         .unwrap()
         .ends_with("super_orchestrator/examples/"));
 
-    assert_eq!(
+        ensure_eq!(
         format!("{}", acquire_dir_path("./nonexistent").await.unwrap_err()),
         r#"Error { stack: [
 acquire_dir_path(dir_path_str: "./nonexistent")
@@ -57,7 +57,7 @@ BoxedError(Os { code: 2, kind: NotFound, message: "No such file or directory" })
 ] }"#
     );
 
-    assert_eq!(
+    ensure_eq!(
         format!(
             "{}",
             acquire_dir_path("./examples/files.rs").await.unwrap_err()
@@ -71,19 +71,19 @@ acquire_dir_path(dir_path_str: "./examples/files.rs") -> is not a directory
     // the `_file_` version insures it is only a file
     acquire_file_path("./examples/files.rs").await.stack()?;
 
-    assert!(acquire_file_path("./examples/files.rs")
+    ensure!(acquire_file_path("./examples/files.rs")
         .await
         .unwrap()
         .ends_with("super_orchestrator/examples/files.rs"));
 
-    assert!(
+    ensure!(
         acquire_file_path("./examples/../examples/../examples/files.rs")
             .await
             .unwrap()
             .ends_with("super_orchestrator/examples/files.rs")
     );
 
-    assert_eq!(
+    ensure_eq!(
         format!("{}", acquire_file_path("./nonexistent").await.unwrap_err()),
         r#"Error { stack: [
 acquire_file_path(file_path_str: "./nonexistent")
@@ -92,7 +92,7 @@ BoxedError(Os { code: 2, kind: NotFound, message: "No such file or directory" })
 ] }"#
     );
 
-    assert_eq!(
+    ensure_eq!(
         format!("{}", acquire_file_path("./examples").await.unwrap_err()),
         r#"Error { stack: [
 Location { file: "/home/admin/Documents/GitHub/super_orchestrator/src/paths.rs", line: 31, col: 13 },
