@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{
-    borrow::Cow,
+    borrow::{Borrow, Cow},
+    collections::VecDeque,
     fmt::{Debug, Display},
     process::{ExitStatus, Stdio},
     str::Utf8Error,
@@ -23,7 +24,7 @@ use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Command {
     pub command: String,
     pub args: Vec<String>,
@@ -35,10 +36,21 @@ pub struct Command {
     pub cwd: Option<String>,
     /// If set, the command will copy the `stdout` to a file
     pub stdout_log: Option<FileOptions>,
-    /// If set, the command will copy the `stderr` to a file
+    /// If set, the command will copy the `stderr` to a file. If equal to
+    /// `stdout_log`, both will copy to the same file.
     pub stderr_log: Option<FileOptions>,
-    /// Forward stdouts and stderrs to the current processes stdout and stderr
-    pub ci: bool,
+    /// Forward stdout to the current processes stdout
+    pub stdout_debug: bool,
+    /// Forward stderr to the current processes stderr
+    pub stderr_debug: bool,
+    /// Sets a limit on the number of bytes recorded by the stdout and stderr
+    /// records separately, after which the records become circular buffers.
+    /// This limits the potential memory used by a long running command. `None`
+    /// means there is no limit.
+    pub record_limit: Option<u64>,
+    /// Sets a limit on the size of log files. Each time the limit is reached,
+    /// the file is truncated.
+    pub log_limit: Option<u64>,
     /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
     /// false should not be relied upon in normal program operation,
     /// `CommandRunner`s should be properly finished so that the child
@@ -49,23 +61,38 @@ pub struct Command {
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
-            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, stdout_log: {:?}, \
-             stderr_log: {:?}, ci: {}, forget_on_drop: {}}}",
+            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, log: ({:?}, \
+             {:?}), debug: ({}, {}), record_limit: {:?}, log_limit: {:?}, forget_on_drop: {}}}",
             DisplayStr(&self.get_unified_command()),
             self.env_clear,
             self.envs,
             self.cwd,
             self.stdout_log.as_ref().map(|x| &x.path),
             self.stderr_log.as_ref().map(|x| &x.path),
-            self.ci,
+            self.stdout_debug,
+            self.stderr_debug,
+            self.record_limit,
+            self.log_limit,
             self.forget_on_drop
         ))
     }
 }
 
-/// Note: if the `log` crate is used and an implementor active, warnings from
+/// Detached `Commands` are represented by this struct.
+///
+/// # Note
+///
+/// Locks on `stdout_record` and `stderr_record` should only be held long enough
+/// to make a quick copy or other operation, because the task to record command
+/// outputs needs the lock to progress.
+///
+/// If the `log` crate is used and an implementor is active, warnings from
 /// bad `Drop`s can be issued
+///
+/// The `Default` impl is for if an empty runner not attached to anything is
+/// needed for some reason.
 #[must_use]
+#[derive(Default)]
 pub struct CommandRunner {
     // this information is kept around for failures
     /// The command this runner was started with
@@ -77,8 +104,8 @@ pub struct CommandRunner {
     // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
     // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
     // copying it to here in order to not lose the data.
-    stdout: Arc<Mutex<Vec<u8>>>,
-    stderr: Arc<Mutex<Vec<u8>>>,
+    pub stdout_record: Arc<Mutex<VecDeque<u8>>>,
+    pub stderr_record: Arc<Mutex<VecDeque<u8>>>,
     result: Option<CommandResult>,
 }
 
@@ -115,9 +142,9 @@ impl Drop for CommandRunner {
 }
 
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CommandResult {
-    // this information is kept around for failures
+    // the command information is kept around for failures
     pub command: Command,
     pub status: Option<ExitStatus>,
     pub stdout: Vec<u8>,
@@ -141,7 +168,7 @@ impl Display for CommandResult {
     }
 }
 
-/// Used for avoiding printing out lengthy stdouts
+/// Used for avoiding printing out lengthy standard streams
 #[must_use]
 #[derive(Debug, Clone)]
 pub struct CommandResultNoDbg {
@@ -176,13 +203,7 @@ impl Command {
         Self {
             command,
             args: true_args,
-            env_clear: false,
-            envs: vec![],
-            cwd: None,
-            stdout_log: None,
-            stderr_log: None,
-            ci: false,
-            forget_on_drop: false,
+            ..Default::default()
         }
     }
 
@@ -199,21 +220,64 @@ impl Command {
         self
     }
 
-    pub fn ci_mode(mut self, ci_mode: bool) -> Self {
-        self.ci = ci_mode;
+    /// Sets `stdout_debug` and `stderr_debug` for passing command standard
+    /// streams to the standard streams of this process.
+    pub fn debug(mut self, std_stream_debug: bool) -> Self {
+        self.stdout_debug = std_stream_debug;
+        self.stderr_debug = std_stream_debug;
         self
     }
 
-    pub fn stdout_log(mut self, log_file_options: &FileOptions) -> Self {
-        self.stdout_log = Some(log_file_options.clone());
+    /// Sets `stdout_debug` for passing command stdout to the stdout of this
+    /// process.
+    pub fn stdout_debug(mut self, stdout_debug: bool) -> Self {
+        self.stdout_debug = stdout_debug;
         self
     }
 
-    pub fn stderr_log(mut self, log_file_options: &FileOptions) -> Self {
-        self.stderr_log = Some(log_file_options.clone());
+    /// Sets `stderr_debug` for passing command stderr to the stderr of this
+    /// process.
+    pub fn stderr_debug(mut self, stderr_debug: bool) -> Self {
+        self.stderr_debug = stderr_debug;
         self
     }
 
+    /// Sets `stdout_log` and `stderr_log` for copying command standard streams
+    /// to the same file
+    pub fn log<F: Borrow<FileOptions>>(mut self, std_stream_log: Option<F>) -> Self {
+        if let Some(f) = std_stream_log {
+            let f = f.borrow();
+            self.stdout_log = Some(f.clone());
+            self.stderr_log = Some(f.clone());
+        }
+        self
+    }
+
+    /// Sets `stdout_log` for copying command stdout to a file
+    pub fn stdout_log<F: Borrow<FileOptions>>(mut self, stdout_log: Option<F>) -> Self {
+        self.stdout_log = stdout_log.map(|f| f.borrow().clone());
+        self
+    }
+
+    /// Sets `stderr_log` for copying command stderr to a file
+    pub fn stderr_log<F: Borrow<FileOptions>>(mut self, stderr_log: Option<F>) -> Self {
+        self.stderr_log = stderr_log.map(|f| f.borrow().clone());
+        self
+    }
+
+    /// Sets `record_limit` for limiting stdout and stderr record byte lengths
+    pub fn record_limit(mut self, record_limit: Option<u64>) -> Self {
+        self.record_limit = record_limit;
+        self
+    }
+
+    /// Sets `log_limit` for limiting stdout and stderr log file byte lengths
+    pub fn log_limit(mut self, log_limit: Option<u64>) -> Self {
+        self.log_limit = log_limit;
+        self
+    }
+
+    /// Gets the command and args interspersed with spaces
     pub(crate) fn get_unified_command(&self) -> String {
         let mut command = self.command.clone();
         if !self.args.is_empty() {
@@ -228,6 +292,7 @@ impl Command {
         command
     }
 
+    /// Runs the command with a standard input, returning a `CommandRunner`
     pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
         let mut cmd = process::Command::new(&self.command);
         if self.env_clear {
@@ -241,13 +306,13 @@ impl Command {
             cmd.current_dir(cwd);
         }
         // do as much as possible before spawning the process
-        let mut stdout_file = if let Some(ref log_file_options) = self.stdout_log {
-            Some(log_file_options.acquire_file().await?)
+        let mut stdout_log = if let Some(ref options) = self.stdout_log {
+            Some(options.acquire_file().await?)
         } else {
             None
         };
-        let mut stderr_file = if let Some(ref log_file_options) = self.stderr_log {
-            Some(log_file_options.acquire_file().await?)
+        let mut stderr_log = if let Some(ref options) = self.stderr_log {
+            Some(options.acquire_file().await?)
         } else {
             None
         };
@@ -263,21 +328,29 @@ impl Command {
         let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
-        let stdout = Arc::new(Mutex::new(vec![]));
-        let stdout_arc_copy = Arc::clone(&stdout);
-        let stderr = Arc::new(Mutex::new(vec![]));
-        let stderr_arc_copy = Arc::clone(&stderr);
-        let mut stdout_forward0 = if self.ci {
+        let stdout_record = Arc::new(Mutex::new(VecDeque::new()));
+        let mut stdout_record_arc_clone = if self.record_limit != Some(0) {
+            Some(Arc::clone(&stdout_record))
+        } else {
+            None
+        };
+        let stderr_record = Arc::new(Mutex::new(VecDeque::new()));
+        let mut stderr_record_arc_clone = if self.record_limit != Some(0) {
+            Some(Arc::clone(&stderr_record))
+        } else {
+            None
+        };
+        let mut stdout_forward_stdout = if self.stdout_debug {
             Some(tokio::io::stdout())
         } else {
             None
         };
-        let mut stdout_forward1 = if self.ci {
-            Some(tokio::io::stdout())
+        let mut stdout_forward_stderr = if self.stderr_debug {
+            Some(tokio::io::stderr())
         } else {
             None
         };
-        let terminal_color = if stdout_forward0.is_some() || stdout_forward1.is_some() {
+        let terminal_color = if stdout_forward_stdout.is_some() || stdout_forward_stderr.is_some() {
             next_terminal_color()
         } else {
             owo_colors::AnsiColors::Default
@@ -294,18 +367,20 @@ impl Command {
                 match stdout_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
-                        // copying for the `CommandResult`
-                        stdout_arc_copy.lock().await.extend_from_slice(&line);
+                        // copying to record
+                        if let Some(ref mut arc) = stdout_record_arc_clone {
+                            arc.lock().await.extend(&line);
+                        }
                         // copying to file
-                        if let Some(ref mut stdout_file) = stdout_file {
-                            stdout_file
+                        if let Some(ref mut stdout_log) = stdout_log {
+                            stdout_log
                                 .write_all(&line)
                                 .await
                                 .expect("command stdout to file copier failed");
                         }
                         let line_string = String::from_utf8_lossy(&line);
-                        // forward stdout to stdout
-                        if let Some(ref mut stdout_forward) = stdout_forward0 {
+                        // copying to stdout
+                        if let Some(ref mut stdout_forward) = stdout_forward_stdout {
                             let s = format!("{} {}  |", command_name, child_id);
                             let _ = stdout_forward
                                 .write(
@@ -328,28 +403,29 @@ impl Command {
                 match stderr_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
-                        // copying for the `CommandResult`
-                        stderr_arc_copy.lock().await.extend_from_slice(&line);
+                        // copying to record
+                        if let Some(ref mut arc) = stderr_record_arc_clone {
+                            arc.lock().await.extend(&line);
+                        }
                         // copying to file
-                        if let Some(ref mut stdout_file) = stderr_file {
-                            stdout_file
+                        if let Some(ref mut stderr_log) = stderr_log {
+                            stderr_log
                                 .write_all(&line)
                                 .await
                                 .expect("command stderr to file copier failed");
                         }
-                        // use the lossy version for
                         let line_string = String::from_utf8_lossy(&line);
                         // forward stderr to stdout
-                        if let Some(ref mut stdout_forward) = stdout_forward1 {
+                        if let Some(ref mut stderr_forward) = stdout_forward_stderr {
                             let s = format!("{} {} E|", command_name, child_id);
-                            let _ = stdout_forward
+                            let _ = stderr_forward
                                 .write(
                                     format!("{} {}", s.color(terminal_color), line_string)
                                         .as_bytes(),
                                 )
                                 .await
                                 .expect("command stderr to stdout copier failed");
-                            stdout_forward.flush().await.unwrap();
+                            stderr_forward.flush().await.unwrap();
                         }
                     }
                     Ok(None) => break,
@@ -362,8 +438,8 @@ impl Command {
             child_process: Some(child),
             handles,
             stdin,
-            stdout,
-            stderr,
+            stdout_record,
+            stderr_record,
             result: None,
         })
     }
@@ -373,6 +449,8 @@ impl Command {
         self.run_with_stdin(Stdio::null()).await
     }
 
+    /// Calls [Command::run] and waits for it to complete, returning the command
+    /// result
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
@@ -403,7 +481,7 @@ impl Command {
 
 impl CommandRunner {
     /// Attempts to force the command to exit, but does not wait for the request
-    /// to take effect. This does not set `self.result`
+    /// to take effect. This does not set `self.result`.
     pub fn start_terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.start_kill().stack()
@@ -422,8 +500,8 @@ impl CommandRunner {
         if let Some(child_process) = self.child_process.as_mut() {
             child_process.kill().await.stack()?;
             drop(self.child_process.take().unwrap());
-            let stdout = self.stdout.lock().await.clone();
-            let stderr = self.stderr.lock().await.clone();
+            let stdout = self.stdout_record.lock().await.iter().cloned().collect();
+            let stderr = self.stderr_record.lock().await.iter().cloned().collect();
             self.result = Some(CommandResult {
                 command: self.command.take().unwrap(),
                 status: None,
@@ -485,10 +563,8 @@ impl CommandRunner {
                 .await
                 .stack_err(|| format!("{self:?}.wait_with_output() -> `Command` task panicked"))?;
         }
-        // note: the handles should be cleaned up first to make sure copies are finished
-        // and no locks are being held
-        let stdout = self.stdout.lock().await.clone();
-        let stderr = self.stderr.lock().await.clone();
+        let stdout = self.stdout_record.lock().await.iter().copied().collect();
+        let stderr = self.stderr_record.lock().await.iter().copied().collect();
         self.result = Some(CommandResult {
             command: self.command.take().unwrap(),
             status: Some(output.status),

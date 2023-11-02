@@ -56,7 +56,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
 
 pub async fn docker_exec_i(container_id: &str) -> Result<()> {
     let mut runner = Command::new("docker exec -i", &[container_id, "bash"])
-        .ci_mode(true)
+        .debug(true)
         .run_with_stdin(Stdio::inherit())
         .await
         .stack()?;

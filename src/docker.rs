@@ -486,8 +486,8 @@ impl ContainerNetwork {
         for name in names {
             // remove potentially previously existing container with same name
             let _ = Command::new("docker rm -f", &[name])
-                // never put in CI mode or put in debug file, error on nonexistent container is
-                // confusing, actual errors will be returned
+                // never put in debug_log mode or put in debug file, error on
+                // nonexistent container is confusing, actual errors will be returned
                 .ci_mode(false)
                 .run_to_completion()
                 .await?;
@@ -506,18 +506,14 @@ impl ContainerNetwork {
             .await;*/
             let comres = if self.is_not_internal {
                 Command::new("docker network create", &[&self.network_name_with_uuid()])
-                    .ci_mode(false)
-                    .stdout_log(&debug_log)
-                    .stderr_log(&debug_log)
+                    .log(Some(&debug_log))
                     .run_to_completion()
                     .await?
             } else {
                 Command::new("docker network create --internal", &[
                     &self.network_name_with_uuid()
                 ])
-                .ci_mode(false)
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log)
+                .log(Some(&debug_log))
                 .run_to_completion()
                 .await?
             };
@@ -615,9 +611,8 @@ impl ContainerNetwork {
                     }
                     build_args.push(&dockerfile_dir);
                     Command::new("docker", &build_args)
-                        .ci_mode(ci_mode)
-                        .stdout_log(&debug_log)
-                        .stderr_log(&debug_log)
+                        .debug(ci_mode)
+                        .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
                         .assert_success()
@@ -646,9 +641,8 @@ impl ContainerNetwork {
                     }
                     build_args.push(dockerfile_write_dir.as_ref().unwrap());
                     Command::new("docker", &build_args)
-                        .ci_mode(ci_mode)
-                        .stdout_log(&debug_log)
-                        .stderr_log(&debug_log)
+                        .debug(ci_mode)
+                        .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
                         .assert_success()
@@ -674,9 +668,8 @@ impl ContainerNetwork {
                 args.push(s);
             }
             let command = Command::new("docker", &args)
-                .ci_mode(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log);
+                .debug(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
+                .log(Some(&debug_log));
             if ci_mode {
                 info!("`Container` creation command: {command:#?}");
             }
@@ -712,15 +705,15 @@ impl ContainerNetwork {
         for name in names {
             let docker_id = &self.active_container_ids[*name];
             let command = Command::new("docker start --attach", &[docker_id])
-                .stdout_log(&FileOptions::write2(
+                .stdout_log(Some(&FileOptions::write2(
                     &self.log_dir,
                     &format!("container_{}_stdout.log", name),
-                ))
-                .stderr_log(&FileOptions::write2(
+                )))
+                .stderr_log(Some(&FileOptions::write2(
                     &self.log_dir,
                     &format!("container_{}_stderr.log", name),
-                ));
-            match command.ci_mode(ci_mode).run().await {
+                )));
+            match command.debug(ci_mode).run().await {
                 Ok(runner) => {
                     self.container_runners.insert(name.to_string(), runner);
                 }

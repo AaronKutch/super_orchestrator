@@ -3,6 +3,7 @@
 ## [0.9.0] - TODO
 ### Changes
 - used `impl AsRef<Path>` in several signatures
+- Changed many things about how `Commands` handle debug and log files
 
 ## [0.8.0] - 2023-10-18
 ### Fixes

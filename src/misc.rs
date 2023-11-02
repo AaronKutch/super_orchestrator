@@ -67,7 +67,7 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
 /// utf-8)
 pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     let comres = Command::new(cmd_with_args, args)
-        .ci_mode(true)
+        .debug(true)
         .run_to_completion()
         .await?;
     comres.assert_success()?;
@@ -77,7 +77,7 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
         .stack_err_locationless(|| "`Command` output was not UTF-8")
 }
 
-/// [sh] but without CI mode
+/// [sh] but without debug_log mode
 pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     let comres = Command::new(cmd_with_args, args)
         .run_to_completion()

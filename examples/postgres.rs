@@ -193,7 +193,7 @@ async fn test_runner(args: &Args) -> Result<()> {
     // check that no uuid host works
     let comres = Command::new("psql --host=postgres -U postgres --command=\\l", &[])
         .env("PGPASSWORD", "root")
-        .ci_mode(true)
+        .debug(true)
         .run_to_completion()
         .await
         .stack()?;
