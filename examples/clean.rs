@@ -1,7 +1,9 @@
-use stacked_errors::ensure;
+use stacked_errors::{ensure, StackableErr};
 use super_orchestrator::{
-    acquire_file_path, remove_files_in_dir, stacked_errors::Result, std_init, FileOptions,
+    acquire_dir_path, acquire_file_path, remove_files_in_dir, stacked_errors::Result, std_init,
+    FileOptions,
 };
+use tokio::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -69,6 +71,10 @@ async fn main() -> Result<()> {
     ensure!(acquire_file_path("./logs/ex2.tar.gz").await.is_err());
     ensure!(acquire_file_path("./logs/ex3.tar.gz.other").await.is_err());
     ensure!(acquire_file_path("./logs/tar.gz").await.is_err());
+
+    if let Ok(pg_data_dir) = acquire_dir_path("./logs/pg_data").await {
+        fs::remove_dir_all(pg_data_dir).await.stack()?;
+    }
 
     Ok(())
 }

@@ -21,6 +21,7 @@ jobs:
         run: |
           cargo r --example files
           cargo r --example docker_entrypoint_pattern
+          cargo r --example postgres
           cargo r --example clean
           cargo test --all-features
           cargo test --release --all-features
