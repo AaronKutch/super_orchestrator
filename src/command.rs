@@ -36,12 +36,11 @@ pub struct Command {
     pub cwd: Option<String>,
     /// If set, the command will copy the `stdout` to a file
     pub stdout_log: Option<FileOptions>,
-    /// If set, the command will copy the `stderr` to a file. If equal to
-    /// `stdout_log`, both will copy to the same file.
+    /// If set, the command will copy the `stderr` to a file
     pub stderr_log: Option<FileOptions>,
-    /// Forward stdout to the current processes stdout
+    /// Forward stdout to the current process stdout
     pub stdout_debug: bool,
-    /// Forward stderr to the current processes stderr
+    /// Forward stderr to the current process stderr
     pub stderr_debug: bool,
     /// Sets a limit on the number of bytes recorded by the stdout and stderr
     /// records separately, after which the records become circular buffers.
@@ -51,10 +50,10 @@ pub struct Command {
     /// Sets a limit on the size of log files. Each time the limit is reached,
     /// the file is truncated.
     pub log_limit: Option<u64>,
-    /// If `false`, then `kill_on_drop` is enabled. NOTE: this being true or
-    /// false should not be relied upon in normal program operation,
-    /// `CommandRunner`s should be properly finished so that the child
-    /// process is cleaned up properly.
+    /// If `false`, then killing the command on drop is enabled. NOTE: this
+    /// being true or false should not be relied upon in normal program
+    /// operation, `CommandRunner`s should be properly finished so that the
+    /// child process is cleaned up properly.
     pub forget_on_drop: bool,
 }
 
@@ -359,24 +358,56 @@ impl Command {
         // has not been finished
         let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).split(b'\n');
         let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).split(b'\n');
+        let record_limit = self.record_limit;
+        let log_limit = self.log_limit;
         let command_name = self.command.clone();
         let child_id = child.id().unwrap();
         let mut handles: Vec<JoinHandle<()>> = vec![];
         handles.push(task::spawn(async move {
+            let mut log_len = 0;
             loop {
                 match stdout_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
                         // copying to record
                         if let Some(ref mut arc) = stdout_record_arc_clone {
-                            arc.lock().await.extend(&line);
+                            let mut deque = arc.lock().await;
+                            if let Some(limit) = record_limit {
+                                let limit = usize::try_from(limit).unwrap();
+                                if deque.len().saturating_add(line.len()) > limit {
+                                    if line.len() >= limit {
+                                        deque.clear();
+                                        deque.extend(line[(line.len() - limit)..].iter());
+                                    } else {
+                                        // use saturation because the record is public
+                                        let start = deque.len() + line.len() - limit;
+                                        deque.drain(start..);
+                                        deque.extend(line.iter());
+                                    }
+                                } else {
+                                    deque.extend(&line);
+                                }
+                            } else {
+                                deque.extend(&line);
+                            }
                         }
                         // copying to file
                         if let Some(ref mut stdout_log) = stdout_log {
-                            stdout_log
-                                .write_all(&line)
-                                .await
-                                .expect("command stdout to file copier failed");
+                            log_len += line.len();
+                            let mut reset = false;
+                            if let Some(limit) = log_limit {
+                                if (log_len as u64) > limit {
+                                    stdout_log.set_len(0).await.unwrap();
+                                    log_len = 0;
+                                    reset = true;
+                                }
+                            }
+                            if !reset {
+                                stdout_log
+                                    .write_all(&line)
+                                    .await
+                                    .expect("command stdout to file copier failed");
+                            }
                         }
                         let line_string = String::from_utf8_lossy(&line);
                         // copying to stdout
@@ -399,20 +430,50 @@ impl Command {
         }));
         let command_name = self.command.clone();
         handles.push(task::spawn(async move {
+            let mut log_len = 0;
             loop {
                 match stderr_read.next_segment().await {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
                         // copying to record
                         if let Some(ref mut arc) = stderr_record_arc_clone {
-                            arc.lock().await.extend(&line);
+                            let mut deque = arc.lock().await;
+                            if let Some(limit) = record_limit {
+                                let limit = usize::try_from(limit).unwrap();
+                                if deque.len().saturating_add(line.len()) > limit {
+                                    if line.len() >= limit {
+                                        deque.clear();
+                                        deque.extend(line[(line.len() - limit)..].iter());
+                                    } else {
+                                        // use saturation because the record is public
+                                        let start = deque.len() + line.len() - limit;
+                                        deque.drain(start..);
+                                        deque.extend(line.iter());
+                                    }
+                                } else {
+                                    deque.extend(&line);
+                                }
+                            } else {
+                                deque.extend(&line);
+                            }
                         }
                         // copying to file
                         if let Some(ref mut stderr_log) = stderr_log {
-                            stderr_log
-                                .write_all(&line)
-                                .await
-                                .expect("command stderr to file copier failed");
+                            log_len += line.len();
+                            let mut reset = false;
+                            if let Some(limit) = log_limit {
+                                if (log_len as u64) > limit {
+                                    stderr_log.set_len(0).await.unwrap();
+                                    log_len = 0;
+                                    reset = true;
+                                }
+                            }
+                            if !reset {
+                                stderr_log
+                                    .write_all(&line)
+                                    .await
+                                    .expect("command stderr to file copier failed");
+                            }
                         }
                         let line_string = String::from_utf8_lossy(&line);
                         // forward stderr to stdout
