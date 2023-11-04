@@ -354,6 +354,10 @@ impl Command {
     /// other things as their default values. `cmd_with_args` is separated by
     /// whitespace, and the first part becomes the command the the others are
     /// extra prefixed args.
+    ///
+    /// In case an argument has spaces, it should be put into `args` as an
+    /// unbroken `&str`. In case the command name has spaces, `self.command`
+    /// can be changed directly.
     pub fn new(cmd_with_args: impl AsRef<str>, args: &[&str]) -> Self {
         let mut true_args = vec![];
         let mut command = String::new();
