@@ -10,21 +10,24 @@ use std::{
 };
 
 use log::warn;
-use owo_colors::OwoColorize;
+use owo_colors::AnsiColors;
 use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    fs::File,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     process::{self, Child, ChildStdin},
     sync::Mutex,
     task::{self, JoinHandle},
-    time::sleep,
+    time::{sleep, timeout},
 };
 
 use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
+const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
+
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Command {
     pub command: String,
     pub args: Vec<String>,
@@ -50,11 +53,37 @@ pub struct Command {
     /// Sets a limit on the size of log files. Each time the limit is reached,
     /// the file is truncated.
     pub log_limit: Option<u64>,
+    /// When recording the standard streams for a long running command, reading
+    /// buffers should be paused periodically to copy data to records, debug,
+    /// and log files, or else they will not update in real time and the task
+    /// memory can increase without bound for cases that should be limited. This
+    /// defaults to 300 ms.
+    pub read_loop_timeout: Duration,
     /// If `false`, then killing the command on drop is enabled. NOTE: this
     /// being true or false should not be relied upon in normal program
     /// operation, `CommandRunner`s should be properly finished so that the
     /// child process is cleaned up properly.
     pub forget_on_drop: bool,
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Self {
+            command: Default::default(),
+            args: Default::default(),
+            env_clear: Default::default(),
+            envs: Default::default(),
+            cwd: Default::default(),
+            stdout_log: Default::default(),
+            stderr_log: Default::default(),
+            stdout_debug: Default::default(),
+            stderr_debug: Default::default(),
+            record_limit: Default::default(),
+            log_limit: Default::default(),
+            read_loop_timeout: DEFAULT_READ_LOOP_TIMEOUT,
+            forget_on_drop: Default::default(),
+        }
+    }
 }
 
 impl Debug for Command {
@@ -181,6 +210,118 @@ impl Display for CommandResultNoDbg {
     }
 }
 
+/// Used as the engine in the stdout and stderr recording tasks.
+#[allow(clippy::too_many_arguments)]
+async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    read_loop_timeout: Duration,
+    mut std_read: BufReader<R>,
+    mut std_record: Option<Arc<Mutex<VecDeque<u8>>>>,
+    record_limit: Option<u64>,
+    mut std_log: Option<File>,
+    log_limit: Option<u64>,
+    mut std_forward: Option<W>,
+    command_name: String,
+    child_id: u32,
+    terminal_color: AnsiColors,
+) {
+    // for tracking how much has been written to the filez
+    let mut log_len = 0;
+    let mut previous_newline = false;
+    let mut nonempty = false;
+    // 8 KB, like BufReader
+    let mut buf = [0u8; 8 * 1024];
+    loop {
+        match timeout(read_loop_timeout, std_read.read(&mut buf)).await {
+            Ok(Ok(bytes_read)) => {
+                if bytes_read == 0 {
+                    // if there has been nonempty output and the last line had no newline, insert
+                    // one upon completion
+                    if nonempty && (!previous_newline) {
+                        if let Some(ref mut stdout_forward) = std_forward {
+                            let _ = stdout_forward
+                                .write(b"\n")
+                                .await
+                                .expect("command recorder forwarding failed");
+                            stdout_forward.flush().await.unwrap();
+                        }
+                    }
+                    break
+                }
+                let bytes = &buf[..bytes_read];
+                // copying to record
+                if let Some(ref mut arc) = std_record {
+                    let mut deque = arc.lock().await;
+                    if let Some(limit) = record_limit {
+                        let limit = usize::try_from(limit).unwrap();
+                        if deque.len().saturating_add(bytes.len()) > limit {
+                            if bytes.len() >= limit {
+                                deque.clear();
+                                deque.extend(bytes[(bytes.len() - limit)..].iter());
+                            } else {
+                                // use saturation because the record is public
+                                let start = deque.len() + bytes.len() - limit;
+                                deque.drain(start..);
+                                deque.extend(bytes.iter());
+                            }
+                        } else {
+                            deque.extend(bytes);
+                        }
+                    } else {
+                        deque.extend(bytes);
+                    }
+                }
+                // copying to file
+                if let Some(ref mut std_log) = std_log {
+                    log_len += bytes.len();
+                    let mut reset = false;
+                    if let Some(limit) = log_limit {
+                        if (log_len as u64) > limit {
+                            std_log.set_len(0).await.unwrap();
+                            log_len = 0;
+                            reset = true;
+                        }
+                    }
+                    if !reset {
+                        std_log
+                            .write_all(bytes)
+                            .await
+                            .expect("command recorder to file failed");
+                    }
+                }
+                // copying to std stream
+                if let Some(ref mut std_forward) = std_forward {
+                    // TODO handle cases where a utf8 codepoint is cut up, use from_utf8 and call
+                    // valid_up_to on the Utf8Error. This is not critical, the records and logs need
+                    // to be exact for arbitrary cases, the forwarding debug is for debug only.
+                    let line_string = String::from_utf8_lossy(bytes).into_owned();
+                    if previous_newline || !(nonempty) {
+                        let s = format!("{} {}  |", command_name, child_id);
+                        let _ = std_forward
+                            .write(
+                                format!("{}", owo_colors::OwoColorize::color(&s, terminal_color))
+                                    .as_bytes(),
+                            )
+                            .await
+                            .expect("command recorder forwarding failed");
+                    }
+                    let _ = std_forward
+                        .write(line_string.as_bytes())
+                        .await
+                        .expect("command recorder forwarding failed");
+                    std_forward.flush().await.unwrap();
+                    previous_newline = line_string.bytes().last() == Some(b'\n');
+                    nonempty = true;
+                }
+            }
+            Ok(Err(e)) => {
+                panic!("command recorder buffer read failed with {}", e)
+            }
+            // timeout
+            Err(_) => (),
+        }
+    }
+}
+
 impl Command {
     /// Creates a `Command` that only sets the `command` and `args` and leaves
     /// other things as their default values. `cmd_with_args` is separated by
@@ -276,6 +417,12 @@ impl Command {
         self
     }
 
+    /// Sets `read_loop_timeout`
+    pub fn read_loop_timeout(mut self, read_loop_timeout: Duration) -> Self {
+        self.read_loop_timeout = read_loop_timeout;
+        self
+    }
+
     /// Gets the command and args interspersed with spaces
     pub(crate) fn get_unified_command(&self) -> String {
         let mut command = self.command.clone();
@@ -305,12 +452,12 @@ impl Command {
             cmd.current_dir(cwd);
         }
         // do as much as possible before spawning the process
-        let mut stdout_log = if let Some(ref options) = self.stdout_log {
+        let stdout_log = if let Some(ref options) = self.stdout_log {
             Some(options.acquire_file().await?)
         } else {
             None
         };
-        let mut stderr_log = if let Some(ref options) = self.stderr_log {
+        let stderr_log = if let Some(ref options) = self.stderr_log {
             Some(options.acquire_file().await?)
         } else {
             None
@@ -328,172 +475,67 @@ impl Command {
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
         let stdout_record = Arc::new(Mutex::new(VecDeque::new()));
-        let mut stdout_record_arc_clone = if self.record_limit != Some(0) {
+        let stdout_record_clone = if self.record_limit != Some(0) {
             Some(Arc::clone(&stdout_record))
         } else {
             None
         };
         let stderr_record = Arc::new(Mutex::new(VecDeque::new()));
-        let mut stderr_record_arc_clone = if self.record_limit != Some(0) {
+        let stderr_record_clone = if self.record_limit != Some(0) {
             Some(Arc::clone(&stderr_record))
         } else {
             None
         };
-        let mut stdout_forward_stdout = if self.stdout_debug {
+        let stdout_forward_stdout = if self.stdout_debug {
             Some(tokio::io::stdout())
         } else {
             None
         };
-        let mut stdout_forward_stderr = if self.stderr_debug {
+        let stderr_forward_stderr = if self.stderr_debug {
             Some(tokio::io::stderr())
         } else {
             None
         };
-        let terminal_color = if stdout_forward_stdout.is_some() || stdout_forward_stderr.is_some() {
+        let terminal_color = if stdout_forward_stdout.is_some() || stderr_forward_stderr.is_some() {
             next_terminal_color()
         } else {
             owo_colors::AnsiColors::Default
         };
         // TODO have some kind of delay system that outputs after a delay if the line
         // has not been finished
-        let mut stdout_read = BufReader::new(child.stdout.take().unwrap()).split(b'\n');
-        let mut stderr_read = BufReader::new(child.stderr.take().unwrap()).split(b'\n');
+        let stdout_read = BufReader::new(child.stdout.take().unwrap());
+        let stderr_read = BufReader::new(child.stderr.take().unwrap());
         let record_limit = self.record_limit;
         let log_limit = self.log_limit;
         let command_name = self.command.clone();
         let child_id = child.id().unwrap();
+        let read_loop_timeout = self.read_loop_timeout;
         let mut handles: Vec<JoinHandle<()>> = vec![];
-        handles.push(task::spawn(async move {
-            let mut log_len = 0;
-            loop {
-                match stdout_read.next_segment().await {
-                    Ok(Some(mut line)) => {
-                        line.push(b'\n');
-                        // copying to record
-                        if let Some(ref mut arc) = stdout_record_arc_clone {
-                            let mut deque = arc.lock().await;
-                            if let Some(limit) = record_limit {
-                                let limit = usize::try_from(limit).unwrap();
-                                if deque.len().saturating_add(line.len()) > limit {
-                                    if line.len() >= limit {
-                                        deque.clear();
-                                        deque.extend(line[(line.len() - limit)..].iter());
-                                    } else {
-                                        // use saturation because the record is public
-                                        let start = deque.len() + line.len() - limit;
-                                        deque.drain(start..);
-                                        deque.extend(line.iter());
-                                    }
-                                } else {
-                                    deque.extend(&line);
-                                }
-                            } else {
-                                deque.extend(&line);
-                            }
-                        }
-                        // copying to file
-                        if let Some(ref mut stdout_log) = stdout_log {
-                            log_len += line.len();
-                            let mut reset = false;
-                            if let Some(limit) = log_limit {
-                                if (log_len as u64) > limit {
-                                    stdout_log.set_len(0).await.unwrap();
-                                    log_len = 0;
-                                    reset = true;
-                                }
-                            }
-                            if !reset {
-                                stdout_log
-                                    .write_all(&line)
-                                    .await
-                                    .expect("command stdout to file copier failed");
-                            }
-                        }
-                        let line_string = String::from_utf8_lossy(&line);
-                        // copying to stdout
-                        if let Some(ref mut stdout_forward) = stdout_forward_stdout {
-                            let s = format!("{} {}  |", command_name, child_id);
-                            let _ = stdout_forward
-                                .write(
-                                    format!("{} {}", s.color(terminal_color), line_string)
-                                        .as_bytes(),
-                                )
-                                .await
-                                .expect("command stdout to stdout copier failed");
-                            stdout_forward.flush().await.unwrap();
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => panic!("command stdout line copier failed with {}", e),
-                }
-            }
-        }));
+        handles.push(task::spawn(recorder(
+            read_loop_timeout,
+            stdout_read,
+            stdout_record_clone,
+            record_limit,
+            stdout_log,
+            log_limit,
+            stdout_forward_stdout,
+            command_name,
+            child_id,
+            terminal_color,
+        )));
         let command_name = self.command.clone();
-        handles.push(task::spawn(async move {
-            let mut log_len = 0;
-            loop {
-                match stderr_read.next_segment().await {
-                    Ok(Some(mut line)) => {
-                        line.push(b'\n');
-                        // copying to record
-                        if let Some(ref mut arc) = stderr_record_arc_clone {
-                            let mut deque = arc.lock().await;
-                            if let Some(limit) = record_limit {
-                                let limit = usize::try_from(limit).unwrap();
-                                if deque.len().saturating_add(line.len()) > limit {
-                                    if line.len() >= limit {
-                                        deque.clear();
-                                        deque.extend(line[(line.len() - limit)..].iter());
-                                    } else {
-                                        // use saturation because the record is public
-                                        let start = deque.len() + line.len() - limit;
-                                        deque.drain(start..);
-                                        deque.extend(line.iter());
-                                    }
-                                } else {
-                                    deque.extend(&line);
-                                }
-                            } else {
-                                deque.extend(&line);
-                            }
-                        }
-                        // copying to file
-                        if let Some(ref mut stderr_log) = stderr_log {
-                            log_len += line.len();
-                            let mut reset = false;
-                            if let Some(limit) = log_limit {
-                                if (log_len as u64) > limit {
-                                    stderr_log.set_len(0).await.unwrap();
-                                    log_len = 0;
-                                    reset = true;
-                                }
-                            }
-                            if !reset {
-                                stderr_log
-                                    .write_all(&line)
-                                    .await
-                                    .expect("command stderr to file copier failed");
-                            }
-                        }
-                        let line_string = String::from_utf8_lossy(&line);
-                        // forward stderr to stdout
-                        if let Some(ref mut stderr_forward) = stdout_forward_stderr {
-                            let s = format!("{} {} E|", command_name, child_id);
-                            let _ = stderr_forward
-                                .write(
-                                    format!("{} {}", s.color(terminal_color), line_string)
-                                        .as_bytes(),
-                                )
-                                .await
-                                .expect("command stderr to stdout copier failed");
-                            stderr_forward.flush().await.unwrap();
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => panic!("command stderr line copier failed with {}", e),
-                }
-            }
-        }));
+        handles.push(task::spawn(recorder(
+            read_loop_timeout,
+            stderr_read,
+            stderr_record_clone,
+            record_limit,
+            stderr_log,
+            log_limit,
+            stderr_forward_stderr,
+            command_name,
+            child_id,
+            terminal_color,
+        )));
         Ok(CommandRunner {
             command: Some(self),
             child_process: Some(child),

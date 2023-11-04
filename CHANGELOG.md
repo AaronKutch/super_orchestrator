@@ -1,6 +1,11 @@
 # Changelog
 
 ## [0.9.0] - TODO
+### Fixes
+- Fixed that `Command`s and all downstream constructs would add an extra newline byte at the end of
+  standard stream copying even if there wasn't one in actuality
+- Fixed debug outputs freezing if a newline did not come
+
 ### Changes
 - used `impl AsRef<Path>` in several signatures
 - Changed many things about how `Commands` handle debug and log files
