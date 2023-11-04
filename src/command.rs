@@ -234,6 +234,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     command_name: String,
     child_id: u32,
     terminal_color: AnsiColors,
+    std_err: bool,
 ) {
     // for tracking how much has been written to the filez
     let mut log_len = 0;
@@ -245,9 +246,9 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         match timeout(read_loop_timeout, std_read.read(&mut buf)).await {
             Ok(Ok(bytes_read)) => {
                 if bytes_read == 0 {
-                    // if there has been nonempty output and the last line had no newline, insert
+                    // if there has been nonempty output insert
                     // one upon completion
-                    if nonempty && (!previous_newline) {
+                    if nonempty {
                         if let Some(ref mut stdout_forward) = std_forward {
                             let _ = stdout_forward
                                 .write(b"\n")
@@ -305,20 +306,35 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     // valid_up_to on the Utf8Error. This is not critical, the records and logs need
                     // to be exact for arbitrary cases, the forwarding debug is for debug only.
                     let line_string = String::from_utf8_lossy(bytes).into_owned();
-                    if previous_newline || !(nonempty) {
-                        let s = format!("{} {}  |", command_name, child_id);
-                        let _ = std_forward
-                            .write(
-                                format!("{}", owo_colors::OwoColorize::color(&s, terminal_color))
+                    let mut first_iter = true;
+                    for line in line_string.lines() {
+                        if (!first_iter) || previous_newline || (!nonempty) {
+                            // need to format together otherwise stdout running into stderr is too
+                            // common
+                            let s = if std_err {
+                                format!("\n{} {} E|", command_name, child_id)
+                            } else {
+                                format!("\n{} {}  |", command_name, child_id)
+                            };
+                            let _ = std_forward
+                                .write(
+                                    format!(
+                                        "{} {}",
+                                        owo_colors::OwoColorize::color(&s, terminal_color),
+                                        line
+                                    )
                                     .as_bytes(),
-                            )
-                            .await
-                            .expect("command recorder forwarding failed");
+                                )
+                                .await
+                                .expect("command recorder forwarding failed");
+                            first_iter = false;
+                        } else {
+                            let _ = std_forward
+                                .write(line.as_bytes())
+                                .await
+                                .expect("command recorder forwarding failed");
+                        }
                     }
-                    let _ = std_forward
-                        .write(line_string.as_bytes())
-                        .await
-                        .expect("command recorder forwarding failed");
                     std_forward.flush().await.unwrap();
                     previous_newline = line_string.bytes().last() == Some(b'\n');
                     nonempty = true;
@@ -533,6 +549,7 @@ impl Command {
             command_name,
             child_id,
             terminal_color,
+            false,
         )));
         let command_name = self.command.clone();
         handles.push(task::spawn(recorder(
@@ -546,6 +563,7 @@ impl Command {
             command_name,
             child_id,
             terminal_color,
+            true,
         )));
         Ok(CommandRunner {
             command: Some(self),

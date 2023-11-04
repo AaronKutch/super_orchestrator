@@ -82,8 +82,7 @@ async fn main() -> Result<()> {
     test_copying(Some("hello".to_owned()), None).await.stack()?;
     test_copying(None, Some("world".to_owned())).await.stack()?;
     // note that the debug forwarders can outrun each other's ending newlines, won't
-    // fix because it only effects debug  and is only observable in practically rare
-    // circumstances
+    // fix because it only effects debug and is only observable in a few programs
     test_copying(Some("hello".to_owned()), Some("world".to_owned()))
         .await
         .stack()?;
