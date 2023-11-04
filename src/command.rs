@@ -192,21 +192,32 @@ impl Debug for CommandResult {
 
 impl Display for CommandResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
+        f.write_fmt(format_args!("{:#?}", self))
     }
 }
 
 /// Used for avoiding printing out lengthy standard streams
 #[must_use]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CommandResultNoDbg {
     pub command: Command,
     pub status: Option<ExitStatus>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+impl Debug for CommandResultNoDbg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandResult")
+            .field("command", &self.command)
+            .field("status", &self.status)
+            .finish()
+    }
 }
 
 impl Display for CommandResultNoDbg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
+        f.write_fmt(format_args!("{:#?}", self))
     }
 }
 
@@ -739,13 +750,18 @@ impl CommandRunner {
 }
 
 impl CommandResult {
-    pub fn no_dbg(&self) -> CommandResultNoDbg {
+    /// Returns a `CommandResultNoDbg` version of `self`
+    pub fn no_dbg(self) -> CommandResultNoDbg {
         CommandResultNoDbg {
             command: self.command.clone(),
             status: self.status,
+            stdout: self.stdout,
+            stderr: self.stderr,
         }
     }
 
+    /// Returns if the command completed (not terminated early) with a
+    /// successful return status
     pub fn successful(&self) -> bool {
         if let Some(status) = self.status.as_ref() {
             status.success()
@@ -754,6 +770,8 @@ impl CommandResult {
         }
     }
 
+    /// Returns if the command completed with a successful return status or was
+    /// terminated early
     pub fn successful_or_terminated(&self) -> bool {
         if let Some(status) = self.status.as_ref() {
             status.success()
@@ -762,6 +780,8 @@ impl CommandResult {
         }
     }
 
+    /// Returns a formatted error with relevant information if the command was
+    /// not successful
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {
@@ -800,6 +820,8 @@ impl CommandResult {
 }
 
 impl CommandResultNoDbg {
+    /// Returns if the command completed (not terminated early) with a
+    /// successful return status
     pub fn successful(&self) -> bool {
         if let Some(status) = self.status.as_ref() {
             status.success()
@@ -808,6 +830,8 @@ impl CommandResultNoDbg {
         }
     }
 
+    /// Returns if the command completed with a successful return status or was
+    /// terminated early
     pub fn successful_or_terminated(&self) -> bool {
         if let Some(status) = self.status.as_ref() {
             status.success()
@@ -816,6 +840,8 @@ impl CommandResultNoDbg {
         }
     }
 
+    /// Returns a formatted error with relevant information if the command was
+    /// not successful
     pub fn assert_success(&self) -> Result<()> {
         if let Some(status) = self.status.as_ref() {
             if status.success() {

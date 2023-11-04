@@ -7,4 +7,5 @@ First, see the documentation of `stacked_errors`
 (https://docs.rs/stacked_errors/latest/stacked_errors/) to understand the error strategy.
 
 The main useful constructs of `super_orchestrator` are `Containers`s, `ContainerNetwork`s,
-`Dockerfile`, `Command`, and `FileOptions`
+`Dockerfile`, `Command`, and `FileOptions`. You should look at and run the examples progams under
+`examples/`.

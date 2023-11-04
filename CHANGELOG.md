@@ -9,6 +9,9 @@
 ### Changes
 - used `impl AsRef<Path>` in several signatures
 - Changed many things about how `Commands` handle debug and log files
+- `CommandResultNoDbg` now has the stream data fields (still not including them in the debug impls)
+  since they can be limited in several ways now
+- `CommandResult::no_dbg` now takes by value
 
 ## [0.8.0] - 2023-10-18
 ### Fixes
