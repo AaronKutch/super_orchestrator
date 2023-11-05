@@ -4,7 +4,9 @@ use log::{info, warn};
 use stacked_errors::{Result, StackableErr};
 use tokio::time::sleep;
 
-use crate::{ctrlc_issued_reset, sh, Command, STD_DELAY};
+use crate::{ctrlc_issued_reset, sh, Command};
+
+const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Intended to be called from the main() of a standalone binary, or run from
 /// this repo `cargo r --example auto_exec_i -- --container-name main`

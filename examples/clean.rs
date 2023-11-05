@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
     ensure!(acquire_file_path("./logs/ex3.tar.gz.other").await.is_err());
     ensure!(acquire_file_path("./logs/tar.gz").await.is_err());
 
+    // may need to sudo remove because of docker
     if let Ok(pg_data_dir) = acquire_dir_path("./logs/pg_data").await {
         fs::remove_dir_all(pg_data_dir).await.stack()?;
     }

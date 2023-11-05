@@ -14,11 +14,13 @@ use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
-    sh, std_init, FileOptions, STD_DELAY, STD_TRIES,
+    sh, std_init, FileOptions,
 };
 use tokio::time::sleep;
 
 const TIMEOUT: Duration = Duration::from_secs(300);
+const STD_TRIES: u64 = 300;
+const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Runs `docker_entrypoint_pattern`
 #[derive(Parser, Debug)]

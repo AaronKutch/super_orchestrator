@@ -13,6 +13,7 @@
   since they can be limited in several ways now
 - `CommandResult::no_dbg` now takes by value
 - renamed `CommandResultNoDbg` to `CommandResultNoDebug`
+- many other changes
 
 ## [0.8.0] - 2023-10-18
 ### Fixes

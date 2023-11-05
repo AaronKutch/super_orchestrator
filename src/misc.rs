@@ -3,7 +3,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     future::Future,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -62,7 +62,7 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
 }
 
 /// Equivalent to calling `Command::new(cmd_with_args,
-/// &[args...]).ci_mode(true).run_to_completion().await?.assert_success()?;` and
+/// &[args...]).debug(true).run_to_completion().await?.assert_success()?;` and
 /// returning the stdout as a `String` (returns an error if the stdout was not
 /// utf-8)
 pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
@@ -77,8 +77,8 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
         .stack_err_locationless(|| "`Command` output was not UTF-8")
 }
 
-/// [sh] but without debug_log mode
-pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
+/// [sh] but without debug mode
+pub async fn sh_no_debug(cmd_with_args: &str, args: &[&str]) -> Result<String> {
     let comres = Command::new(cmd_with_args, args)
         .run_to_completion()
         .await?;
@@ -88,9 +88,6 @@ pub async fn sh_no_dbg(cmd_with_args: &str, args: &[&str]) -> Result<String> {
         .map(|s| s.to_owned())
         .stack_err_locationless(|| "`Command` output was not UTF-8")
 }
-
-pub const STD_TRIES: u64 = 300;
-pub const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Repeatedly polls `f` until it returns an `Ok` which is returned, or
 /// `num_retries` is reached in which a timeout error is returned.
@@ -282,15 +279,18 @@ pub async fn close_file(mut file: File) -> Result<()> {
 ///   any '/' or '\\')
 ///
 /// - If `acquire_dir_path(dir)` fails
-pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
+pub async fn remove_files_in_dir(dir: impl AsRef<Path>, ends_with: &[&str]) -> Result<()> {
     let mut file_name_set: HashSet<OsString> = HashSet::new();
     let mut extension_set: HashSet<OsString> = HashSet::new();
     for (i, s) in ends_with.iter().enumerate() {
         let mut s = *s;
         if s.is_empty() {
             return Err(Error::from(format!(
-                "remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?}) -> `ends_with` element \
-                 {i} is empty"
+                "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} is \
+                 empty",
+                dir.as_ref(),
+                ends_with,
+                i
             )))
         }
         let is_extension = s.starts_with('.');
@@ -301,14 +301,20 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
         let mut iter = path.components();
         let component = iter.next().stack_err(|| {
             format!(
-                "remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?}) -> `ends_with` element \
-                 {i} has no component"
+                "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} has no \
+                 component",
+                dir.as_ref(),
+                ends_with,
+                i
             )
         })?;
         if iter.next().is_some() {
             return Err(Error::from(format!(
-                "remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?}) -> `ends_with` element \
-                 {i} has more than one component"
+                "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} has \
+                 more than one component",
+                dir.as_ref(),
+                ends_with,
+                i
             )))
         }
         if is_extension {
@@ -318,51 +324,50 @@ pub async fn remove_files_in_dir(dir: &str, ends_with: &[&str]) -> Result<()> {
         }
     }
 
-    let dir = acquire_dir_path(dir)
-        .await
-        .stack_err(|| format!("remove_files_in_dir(dir: {dir}, ends_with: {ends_with:?})"))?;
-    let mut iter = read_dir(dir.clone()).await.stack()?;
+    let dir_path_buf = acquire_dir_path(dir.as_ref()).await.stack_err(|| {
+        format!(
+            "remove_files_in_dir(dir: {:?}, ends_with: {:?})",
+            dir.as_ref(),
+            ends_with
+        )
+    })?;
+    let mut iter = read_dir(dir_path_buf.clone()).await.stack()?;
     loop {
         let entry = iter.next_entry().await.stack()?;
         if let Some(entry) = entry {
             let file_type = entry.file_type().await.stack()?;
             if file_type.is_file() {
-                if let Some(name) = entry.file_name().as_os_str().to_str() {
-                    let file_only_path = PathBuf::from(name.to_owned());
+                let file_only_path = PathBuf::from(entry.file_name());
+                // check against the whole file name
+                let mut rm_file = file_name_set.contains(file_only_path.as_os_str());
+                if !rm_file {
+                    // now check against suffixes
+                    // the way we do this is check with every possible extension suffix
+                    let mut subtracting = file_only_path.clone();
+                    let mut suffix = OsString::new();
+                    while let Some(extension) = subtracting.extension() {
+                        let mut tmp = extension.to_owned();
+                        tmp.push(&suffix);
+                        suffix = tmp;
 
-                    // check against the whole file name
-                    let mut rm_file = file_name_set.contains(file_only_path.as_os_str());
-                    if !rm_file {
-                        // now check against suffixes
-                        // the way we do this is check with every possible extension suffix
-                        let mut subtracting = file_only_path.clone();
-                        let mut suffix = OsString::new();
-                        while let Some(extension) = subtracting.extension() {
-                            let mut tmp = extension.to_owned();
-                            tmp.push(&suffix);
-                            suffix = tmp;
-
-                            if extension_set.contains(&suffix) {
-                                rm_file = true;
-                                break
-                            }
-
-                            // remove very last extension as we add on extensions fo `suffix
-                            subtracting =
-                                PathBuf::from(subtracting.file_stem().unwrap().to_owned());
-
-                            // prepare "." prefix
-                            let mut tmp = OsString::from_str(".").unwrap();
-                            tmp.push(&suffix);
-                            suffix = tmp;
+                        if extension_set.contains(&suffix) {
+                            rm_file = true;
+                            break
                         }
-                    }
 
-                    if rm_file {
-                        let mut combined = dir.clone();
-                        combined.push(file_only_path);
-                        remove_file(combined).await.stack()?;
+                        // remove very last extension as we add on extensions fo `suffix
+                        subtracting = PathBuf::from(subtracting.file_stem().unwrap().to_owned());
+
+                        // prepare "." prefix
+                        let mut tmp = OsString::from_str(".").unwrap();
+                        tmp.push(&suffix);
+                        suffix = tmp;
                     }
+                }
+                if rm_file {
+                    let mut combined = dir_path_buf.clone();
+                    combined.push(file_only_path);
+                    remove_file(combined).await.stack()?;
                 }
             }
         } else {
