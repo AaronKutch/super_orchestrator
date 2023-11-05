@@ -1,5 +1,10 @@
-use stacked_errors::{ensure, StackableErr};
-use super_orchestrator::{sh, stacked_errors::Result, Command, CommandResult, CommandResultNoDbg};
+use std::time::Duration;
+
+use stacked_errors::{ensure, ensure_eq, StackableErr};
+use super_orchestrator::{
+    sh, stacked_errors::Result, Command, CommandResult, CommandResultNoDbg, FileOptions,
+};
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,7 +50,7 @@ async fn main() -> Result<()> {
 
     // debug mode forwards the standard streams of the command to the current
     // process
-    let comres: CommandResult = Command::new("ls", &[])
+    let comres = Command::new("ls", &[])
         .debug(true)
         .run_to_completion()
         .await
@@ -96,6 +101,102 @@ async fn main() -> Result<()> {
         .stack()?;
     // but rather at this stage
     ensure!(comres.assert_success().is_err());
+
+    println!("\n\nexample 2\n");
+
+    // in the case of long running programs that we want to detach to the
+    // background, we can use `run`
+    let mut ls_runner = Command::new("sleep 1", &[])
+        .debug(true)
+        .run()
+        .await
+        .stack()?;
+    // we can do this on Linux to emulate a Ctrl+C from commandline
+    //ls_runner.send_unix_sigterm()
+    // do this to go back to blocking like `run_to_completion` does
+    //ls_runner.wait_with_output();
+    // do this to be able to write poll loops
+    loop {
+        match ls_runner
+            .wait_with_timeout(Duration::from_millis(200))
+            .await
+        {
+            Ok(()) => break,
+            Err(e) => {
+                if e.is_timeout() {
+                    dbg!()
+                } else {
+                    e.stack()?;
+                }
+            }
+        }
+    }
+    // use this once after a termination function is successful
+    let comres = ls_runner.get_command_result().unwrap();
+    comres.assert_success().stack()?;
+
+    // also note that for very long running commands, you may want to set
+    // `record_limit` and `log_limit`, or disable recording and logging altogether
+
+    println!("\n\nexample 3\n");
+
+    // changing the current working directory of the command
+    let comres = Command::new("ls", &[])
+        .debug(true)
+        .cwd("./examples")
+        .run_to_completion()
+        .await
+        .stack()?;
+    comres.assert_success().stack()?;
+
+    // Sending output to a file, debugging, and using the records simultaneously.
+    // This is the main utility of the `super_orchestrator` `Command` struct v.s.
+    // many others for which you can only do one at a time for a long running
+    // program.
+    let ls_runner = Command::new("ls", &[])
+        .debug(true)
+        .stdout_log(Some(FileOptions::write(
+            "./logs/basic_commands_stdout_ex.log",
+        )))
+        .stderr_log(Some(FileOptions::write(
+            "./logs/basic_commands_stderr_ex.log",
+        )))
+        .run()
+        .await
+        .stack()?;
+    sleep(Duration::from_millis(10)).await;
+    let record = ls_runner.stdout_record.lock().await;
+    let len = record.len();
+    // drop mutex guards immediately after using them
+    drop(record);
+    let comres = ls_runner.wait_with_output().await.stack()?;
+    comres.assert_success().stack()?;
+    ensure_eq!(
+        FileOptions::read_to_string("./logs/basic_commands_stdout_ex.log")
+            .await
+            .stack()?
+            .len(),
+        len
+    );
+
+    println!("\n\nexample 4\n");
+
+    if Command::new("grep", &[]).run_to_completion().await.is_err() {
+        println!("grep not found, last example cannot be run");
+        return Ok(())
+    }
+
+    // Now suppose we want to pipe input to the "echo" command. The `echo
+    // "hello\nworld" | grep h` line that would be typed into a commandline also has
+    // special interpreting that is equivalent to:
+
+    let comres = Command::new("grep h", &[])
+        .debug(true)
+        .run_with_input_to_completion(b"hello\nworld")
+        .await
+        .stack()?;
+    comres.assert_success().stack()?;
+    ensure_eq!(comres.stdout_as_utf8().unwrap(), "hello\n");
 
     Ok(())
 }

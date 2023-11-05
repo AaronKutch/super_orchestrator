@@ -37,6 +37,14 @@ pub struct Command {
     pub envs: Vec<(String, String)>,
     /// Working directory for process
     pub cwd: Option<String>,
+    /// Set to true by default, this enables recording of the `stdout` which can
+    /// be accessed from `stdout_record` in the runner or `stdout` in the
+    /// command result later
+    pub stdout_recording: bool,
+    /// Set to true by default, this enables recording of the `stderr` which can
+    /// be accessed from `stderr_record` in the runner or `stderr` in the
+    /// command result later
+    pub stderr_recording: bool,
     /// If set, the command will copy the `stdout` to a file
     pub stdout_log: Option<FileOptions>,
     /// If set, the command will copy the `stderr` to a file
@@ -74,6 +82,8 @@ impl Default for Command {
             env_clear: Default::default(),
             envs: Default::default(),
             cwd: Default::default(),
+            stderr_recording: true,
+            stdout_recording: true,
             stdout_log: Default::default(),
             stderr_log: Default::default(),
             stdout_debug: Default::default(),
@@ -89,12 +99,15 @@ impl Default for Command {
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
-            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, log: ({:?}, \
-             {:?}), debug: ({}, {}), record_limit: {:?}, log_limit: {:?}, forget_on_drop: {}}}",
+            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, recording: ({}, \
+             {}), log: ({:?}, {:?}), debug: ({}, {}), record_limit: {:?}, log_limit: {:?}, \
+             forget_on_drop: {}}}",
             DisplayStr(&self.get_unified_command()),
             self.env_clear,
             self.envs,
             self.cwd,
+            self.stdout_recording,
+            self.stderr_recording,
             self.stdout_log.as_ref().map(|x| &x.path),
             self.stderr_log.as_ref().map(|x| &x.path),
             self.stdout_debug,
@@ -384,6 +397,12 @@ impl Command {
         self
     }
 
+    /// Adds an argument
+    pub fn arg(mut self, arg: impl AsRef<str>) -> Self {
+        self.args.push(arg.as_ref().to_owned());
+        self
+    }
+
     /// Adds an environment variable
     pub fn env(mut self, env_key: impl AsRef<str>, env_val: impl AsRef<str>) -> Self {
         self.envs
@@ -396,6 +415,25 @@ impl Command {
     pub fn debug(mut self, std_stream_debug: bool) -> Self {
         self.stdout_debug = std_stream_debug;
         self.stderr_debug = std_stream_debug;
+        self
+    }
+
+    /// Sets `stdout_recording`
+    pub fn stdout_recording(mut self, stdout_recording: bool) -> Self {
+        self.stdout_recording = stdout_recording;
+        self
+    }
+
+    /// Sets `stderr_recording`
+    pub fn stderr_recording(mut self, stderr_recording: bool) -> Self {
+        self.stderr_recording = stderr_recording;
+        self
+    }
+
+    /// Sets `stdout_recording` and `stderr_recording`
+    pub fn recording(mut self, recording: bool) -> Self {
+        self.stdout_recording = recording;
+        self.stderr_recording = recording;
         self
     }
 
@@ -448,6 +486,13 @@ impl Command {
         self
     }
 
+    /// Sets both `record_limit` and `log_limit`
+    pub fn limit(mut self, limit: Option<u64>) -> Self {
+        self.record_limit = limit;
+        self.log_limit = limit;
+        self
+    }
+
     /// Sets `read_loop_timeout`
     pub fn read_loop_timeout(mut self, read_loop_timeout: Duration) -> Self {
         self.read_loop_timeout = read_loop_timeout;
@@ -493,26 +538,16 @@ impl Command {
         } else {
             None
         };
-        cmd.args(&self.args)
-            .envs(self.envs.iter().map(|x| (&x.0, &x.1)))
-            .kill_on_drop(!self.forget_on_drop);
-        let mut child = cmd
-            .stdin(stdin_cfg)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .stack_err(|| format!("{self:?}.run()"))?;
-        let stdin = child.stdin.take();
         // TODO if we are going to do this we should allow getting active stdout from
         // the mutex
         let stdout_record = Arc::new(Mutex::new(VecDeque::new()));
-        let stdout_record_clone = if self.record_limit != Some(0) {
+        let stdout_record_clone = if self.stdout_recording && (self.record_limit != Some(0)) {
             Some(Arc::clone(&stdout_record))
         } else {
             None
         };
         let stderr_record = Arc::new(Mutex::new(VecDeque::new()));
-        let stderr_record_clone = if self.record_limit != Some(0) {
+        let stderr_record_clone = if self.stderr_recording && (self.record_limit != Some(0)) {
             Some(Arc::clone(&stderr_record))
         } else {
             None
@@ -532,16 +567,26 @@ impl Command {
         } else {
             owo_colors::AnsiColors::Default
         };
-        // TODO have some kind of delay system that outputs after a delay if the line
-        // has not been finished
-        let stdout_read = BufReader::new(child.stdout.take().unwrap());
-        let stderr_read = BufReader::new(child.stderr.take().unwrap());
         let record_limit = self.record_limit;
         let log_limit = self.log_limit;
         let command_name = self.command.clone();
-        let child_id = child.id().unwrap();
         let read_loop_timeout = self.read_loop_timeout;
         let mut handles: Vec<JoinHandle<()>> = vec![];
+        cmd.args(&self.args)
+            .envs(self.envs.iter().map(|x| (&x.0, &x.1)))
+            .kill_on_drop(!self.forget_on_drop);
+        let mut child = cmd
+            .stdin(stdin_cfg)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .stack_err(|| format!("{self:?}.run()"))?;
+        let stdin = child.stdin.take();
+        // TODO: If all recording is disabled do we drop the ChildStdout or do we need
+        // to drop the output in a loop like we currently do?
+        let stdout_read = BufReader::new(child.stdout.take().unwrap());
+        let stderr_read = BufReader::new(child.stderr.take().unwrap());
+        let child_id = child.id().unwrap();
         handles.push(task::spawn(recorder(
             read_loop_timeout,
             stdout_read,
