@@ -1,7 +1,6 @@
-//! Functions for managing Docker containers
+//! Docker container management
 //!
-//! See the `docker_entrypoint_pattern` example for how to use all of this
-//! together.
+//! See the `docker_entrypoint_pattern` and `postgres` crate examples
 
 use std::{
     collections::{BTreeMap, BTreeSet},
