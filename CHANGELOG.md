@@ -9,9 +9,10 @@
 ### Changes
 - used `impl AsRef<Path>` in several signatures
 - Changed many things about how `Commands` handle debug and log files
-- `CommandResultNoDbg` now has the stream data fields (still not including them in the debug impls)
+- `CommandResultNoDebug` now has the stream data fields (still not including them in the debug impls)
   since they can be limited in several ways now
 - `CommandResult::no_dbg` now takes by value
+- renamed `CommandResultNoDbg` to `CommandResultNoDebug`
 
 ## [0.8.0] - 2023-10-18
 ### Fixes
@@ -53,7 +54,7 @@
 ### Changes
 - `stacked_errors` 0.3.0
 - Derived `Clone` for `CommandResult`
-- Added `CommandResultNoDbg`
+- Added `CommandResultNoDebug`
 - Termination now will set the results it can for `Command`s and `ContainerNetwork`s
 - Docker networks with `NetMessenger`s now have much cleaner errors
 

@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use stacked_errors::{ensure, ensure_eq, StackableErr};
 use super_orchestrator::{
-    sh, stacked_errors::Result, Command, CommandResult, CommandResultNoDbg, FileOptions,
+    sh, stacked_errors::Result, std_init, Command, CommandResult, CommandResultNoDebug, FileOptions,
 };
 use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // logging to detect bad drops
+    std_init()?;
+
     println!("example 0\n");
 
     // this runs the "ls" command just like how it would if run from command line
@@ -38,7 +41,7 @@ async fn main() -> Result<()> {
 
     // with some commands with a huge output, we may not want the std streams in the
     // debug or display outputs
-    let comres: CommandResultNoDbg = comres.no_dbg();
+    let comres: CommandResultNoDebug = comres.no_debug();
     // these will not have the std streams in their output, only command and status
     // information
     comres.assert_success().stack()?;
@@ -152,7 +155,8 @@ async fn main() -> Result<()> {
     // Sending output to a file, debugging, and using the records simultaneously.
     // This is the main utility of the `super_orchestrator` `Command` struct v.s.
     // many others for which you can only do one at a time for a long running
-    // program.
+    // program. Note that `FileOptions::write` creates and truncates by default, but
+    // this can be changed.
     let ls_runner = Command::new("ls", &[])
         .debug(true)
         .stdout_log(Some(FileOptions::write(

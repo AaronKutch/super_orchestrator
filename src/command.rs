@@ -182,6 +182,7 @@ impl Drop for CommandRunner {
     }
 }
 
+/// The result of a [Command](crate::Command)
 #[must_use]
 #[derive(Clone, Default)]
 pub struct CommandResult {
@@ -209,17 +210,18 @@ impl Display for CommandResult {
     }
 }
 
-/// Used for avoiding printing out lengthy standard streams
+/// The same as a [CommandResult](crate::CommandResult), but the stdout and
+/// stderr are not included in the debug info
 #[must_use]
 #[derive(Clone)]
-pub struct CommandResultNoDbg {
+pub struct CommandResultNoDebug {
     pub command: Command,
     pub status: Option<ExitStatus>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }
 
-impl Debug for CommandResultNoDbg {
+impl Debug for CommandResultNoDebug {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CommandResult")
             .field("command", &self.command)
@@ -228,7 +230,7 @@ impl Debug for CommandResultNoDbg {
     }
 }
 
-impl Display for CommandResultNoDbg {
+impl Display for CommandResultNoDebug {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{:#?}", self))
     }
@@ -817,9 +819,9 @@ impl CommandRunner {
 }
 
 impl CommandResult {
-    /// Returns a `CommandResultNoDbg` version of `self`
-    pub fn no_dbg(self) -> CommandResultNoDbg {
-        CommandResultNoDbg {
+    /// Returns a `CommandResultNoDebug` version of `self`
+    pub fn no_debug(self) -> CommandResultNoDebug {
+        CommandResultNoDebug {
             command: self.command.clone(),
             status: self.status,
             stdout: self.stdout,
@@ -886,7 +888,16 @@ impl CommandResult {
     }
 }
 
-impl CommandResultNoDbg {
+impl CommandResultNoDebug {
+    pub fn with_debug(self) -> CommandResult {
+        CommandResult {
+            command: self.command,
+            status: self.status,
+            stdout: self.stdout,
+            stderr: self.stderr,
+        }
+    }
+
     /// Returns if the command completed (not terminated early) with a
     /// successful return status
     pub fn successful(&self) -> bool {
