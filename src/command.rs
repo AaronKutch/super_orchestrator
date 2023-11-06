@@ -3,6 +3,7 @@ use std::{
     borrow::{Borrow, Cow},
     collections::VecDeque,
     fmt::{Debug, Display},
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     str::Utf8Error,
     sync::Arc,
@@ -36,7 +37,7 @@ pub struct Command {
     /// Environment variable mappings
     pub envs: Vec<(String, String)>,
     /// Working directory for process
-    pub cwd: Option<String>,
+    pub cwd: Option<PathBuf>,
     /// Set to true by default, this enables recording of the `stdout` which can
     /// be accessed from `stdout_record` in the runner or `stdout` in the
     /// command result later
@@ -394,7 +395,7 @@ impl Command {
     }
 
     /// Sets `self.cwd`
-    pub fn cwd(mut self, cwd: impl AsRef<str>) -> Self {
+    pub fn cwd(mut self, cwd: impl AsRef<Path>) -> Self {
         self.cwd = Some(cwd.as_ref().to_owned());
         self
     }
