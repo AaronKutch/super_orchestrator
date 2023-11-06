@@ -140,11 +140,15 @@ macro_rules! stacked_get {
 ///     *stacked_get_mut!(value["State"]["Status"]) = "stopped".into();
 ///     *stacked_get_mut!(value["State"]["Running"]) = false.into();
 ///
+///     // when creating a new field
+///     stacked_get_mut!(value["State"])["OtherField"] = "hello".into();
+///
 ///     ensure_eq!(stacked_get!(value["Id"]), "other");
 ///     ensure_eq!(stacked_get!(value["Created"]), 0);
 ///     ensure_eq!(stacked_get!(value["Args"][1]), "--other");
 ///     ensure_eq!(stacked_get!(value["State"]["Status"]), "stopped");
 ///     ensure_eq!(stacked_get!(value["State"]["Running"]), false);
+///     ensure_eq!(stacked_get!(value["State"]["OtherField"]), "hello");
 ///
 ///     Ok(())
 /// }
