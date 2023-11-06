@@ -93,18 +93,26 @@ pub fn get_separated_val(
 /// ```
 #[macro_export]
 macro_rules! stacked_get {
-    ($value:ident $([$inx:expr])*) => {{
-        let mut tmp = &$value;
+    ($value:ident [$inx0:expr] $([$inx1:expr])*) => {{
+        // this is unrolled once to allow multiple kinds of borrowing
+        let mut tmp = $crate::stacked_errors::StackableErr::stack_err(
+            $value.get($inx0),
+            || format!(
+                "stacked_get({} ... [{:?}] ...) -> indexing failed",
+                $crate::stacked_errors::__private::stringify!($value),
+                $inx0
+            )
+        )?;
         $(
             tmp = $crate::stacked_errors::StackableErr::stack_err(
-                tmp.get($inx),
+                tmp.get($inx1),
                 || format!(
                     "stacked_get({} ... [{:?}] ...) -> indexing failed",
                     $crate::stacked_errors::__private::stringify!($value),
-                    $inx
+                    $inx1
                 )
             )?;
-        )+
+        )*
         tmp
     }};
 }
@@ -167,18 +175,25 @@ macro_rules! stacked_get {
 /// ```
 #[macro_export]
 macro_rules! stacked_get_mut {
-    ($value:ident $([$inx:expr])*) => {{
-        let mut tmp = &mut $value;
+    ($value:ident [$inx0:expr] $([$inx1:expr])*) => {{
+        let mut tmp = $crate::stacked_errors::StackableErr::stack_err(
+            $value.get_mut($inx0),
+            || format!(
+                "stacked_get_mut({} ... [{:?}] ...) -> indexing failed",
+                $crate::stacked_errors::__private::stringify!($value),
+                $inx0
+            )
+        )?;
         $(
             tmp = $crate::stacked_errors::StackableErr::stack_err(
-                tmp.get_mut($inx),
+                tmp.get_mut($inx1),
                 || format!(
                     "stacked_get_mut({} ... [{:?}] ...) -> indexing failed",
                     $crate::stacked_errors::__private::stringify!($value),
-                    $inx
+                    $inx1
                 )
             )?;
-        )+
+        )*
         tmp
     }};
 }
