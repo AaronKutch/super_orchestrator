@@ -3,12 +3,15 @@ use stacked_errors::{Result, StackableErr};
 /// First, this splits by `separate`, trims outer whitespace, sees if `key` is
 /// prefixed, if so it also strips `inter_key_val` and returns the stripped and
 /// trimmed value.
+///
 ///```
 /// use super_orchestrator::get_separated_val;
 ///
-/// let s = "\
-///     address:    0x2b4e4d79e3e9dBBB170CCD78419520d1DCBb4B3f\npublic  : 0x04b141241511b1\n  \
-///          private  :=\"hello world\" \n";
+/// let s = r#"
+///     address: 0x2b4e4d79e3e9dBBB170CCD78419520d1DCBb4B3f
+///     public: 0x04b141241511b1
+///     private := "hello world"
+/// "#;
 /// assert_eq!(
 ///     &get_separated_val(s, "\n", "address", ":").unwrap(),
 ///     "0x2b4e4d79e3e9dBBB170CCD78419520d1DCBb4B3f"
@@ -38,4 +41,81 @@ pub fn get_separated_val(
         }
     }
     value.stack_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
+}
+
+/// Applies `get` and `stack_err(...)?` in a chain
+///
+/// ```
+/// use serde_json::Value;
+/// use super_orchestrator::{
+///     stacked_errors::{ensure_eq, Result, StackableErr},
+///     stacked_get,
+/// };
+///
+/// let s = r#"{
+///     "Id": "id example",
+///     "Created": 2023,
+///     "Args": [
+///         "--entry-name",
+///         "--uuid"
+///     ],
+///     "State": {
+///         "Status": "running",
+///         "Running": true
+///     }
+/// }"#;
+///
+/// fn ex0(s: &str) -> Result<()> {
+///     let value: Value = serde_json::from_str(s).stack()?;
+///
+///     // the normal `Index`ing of `Values` panics, this
+///     // returns a formatted error
+///     ensure_eq!(stacked_get!(value["Id"]), "id example");
+///     ensure_eq!(stacked_get!(value["Created"]), 2023);
+///     ensure_eq!(stacked_get!(value["Args"][1]), "--uuid");
+///     ensure_eq!(stacked_get!(value["State"]["Status"]), "running");
+///     ensure_eq!(stacked_get!(value["State"]["Running"]), true);
+///
+///     Ok(())
+/// }
+///
+/// ex0(s).unwrap();
+///
+/// fn ex1(s: &str) -> Result<()> {
+///     let value: Value = serde_json::from_str(s).stack()?;
+///
+///     let _ = stacked_get!(value["State"]["nonexistent"]);
+///
+///     Ok(())
+/// }
+///
+/// assert!(ex1(s).is_err());
+/// ```
+#[macro_export]
+macro_rules! stacked_get {
+    ($value:ident $([$inx:expr])*) => {{
+        let mut tmp = &$value;
+        $(
+            tmp = $crate::stacked_errors::StackableErr::stack_err(
+                tmp.get($inx),
+                || format!("indexing value failed on {}", $inx)
+            )?;
+        )+
+        tmp
+    }};
+}
+
+/// Applies `get_mut` and `stack_err(...)?` in a chain
+#[macro_export]
+macro_rules! stacked_get_mut {
+    ($value:ident $([$inx:expr])*) => {{
+        let mut tmp = &mut $value;
+        $(
+            tmp = $crate::stacked_errors::StackableErr::stack_err(
+                tmp.get_mut($inx),
+                || format!("indexing value failed on {}", $inx)
+            )?;
+        )+
+        tmp
+    }};
 }
