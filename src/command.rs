@@ -262,9 +262,9 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         match timeout(read_loop_timeout, std_read.read(&mut buf)).await {
             Ok(Ok(bytes_read)) => {
                 if bytes_read == 0 {
-                    // if there has been nonempty output insert
-                    // one upon completion
-                    if nonempty {
+                    // if there has been nonempty output with no ending newline insert one upon
+                    // completion
+                    if nonempty && (!previous_newline) {
                         if let Some(ref mut stdout_forward) = std_forward {
                             let _ = stdout_forward
                                 .write(b"\n")
@@ -321,16 +321,16 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     // TODO handle cases where a utf8 codepoint is cut up, use from_utf8 and call
                     // valid_up_to on the Utf8Error. This is not critical, the records and logs need
                     // to be exact for arbitrary cases, the forwarding debug is for debug only.
-                    let line_string = String::from_utf8_lossy(bytes).into_owned();
+                    let string = String::from_utf8_lossy(bytes).into_owned();
                     let mut first_iter = true;
-                    for line in line_string.lines() {
+                    for line in string.split_inclusive('\n') {
                         if (!first_iter) || previous_newline || (!nonempty) {
                             // need to format together otherwise stdout running into stderr is too
                             // common
                             let s = if std_err {
-                                format!("\n{} {} E|", command_name, child_id)
+                                format!("{} {} E|", command_name, child_id)
                             } else {
-                                format!("\n{} {}  |", command_name, child_id)
+                                format!("{} {}  |", command_name, child_id)
                             };
                             let _ = std_forward
                                 .write(
@@ -352,7 +352,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                         }
                     }
                     std_forward.flush().await.unwrap();
-                    previous_newline = line_string.bytes().last() == Some(b'\n');
+                    previous_newline = string.bytes().last() == Some(b'\n');
                     nonempty = true;
                 }
             }
