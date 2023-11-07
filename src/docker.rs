@@ -8,6 +8,7 @@ use std::{
 };
 
 use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
 use uuid::Uuid;
@@ -17,8 +18,13 @@ use crate::{
     FileOptions,
 };
 
+// No `OsString`s or `PathBufs` for these structs, it introduces too many issues
+// (e.g. the commands get sent to docker and I don't know exactly what
+// normalization it performs). Besides, this should be as cross platform as
+// possible.
+
 /// Ways of using a dockerfile for building a container
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Dockerfile {
     /// Builds using an image in the format "name:tag" such as "fedora:38"
     /// (running will call something such as `docker pull name:tag`)
@@ -50,7 +56,7 @@ impl Dockerfile {
 }
 
 /// Container running information, put this into a `ContainerNetwork`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
     /// The name of the container, note the "name:tag" docker argument would go
     /// in [Dockerfile::NameTag]
@@ -106,7 +112,8 @@ impl Container {
 
     /// Adds a volume
     pub fn volume(mut self, volume: (impl AsRef<str>, impl AsRef<str>)) -> Self {
-        self.volumes.push((volume.0.as_ref().to_owned(), volume.1.as_ref().to_owned()));
+        self.volumes
+            .push((volume.0.as_ref().to_owned(), volume.1.as_ref().to_owned()));
         self
     }
 

@@ -2,6 +2,7 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     collections::VecDeque,
+    ffi::OsString,
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -12,6 +13,7 @@ use std::{
 
 use log::warn;
 use owo_colors::AnsiColors;
+use serde::{Deserialize, Serialize};
 use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
     fs::File,
@@ -26,16 +28,20 @@ use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
 const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 
+// note: the philosophy for functions like the acquire functions is to use
+// OsString and PathBuf, but for structs like this we will use `String`s and
+// "pure" data only.
+
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Command {
-    pub command: String,
-    pub args: Vec<String>,
+    pub command: OsString,
+    pub args: Vec<OsString>,
     /// Clears the environment variable map before applying `envs`
     pub env_clear: bool,
     /// Environment variable mappings
-    pub envs: Vec<(String, String)>,
+    pub envs: Vec<(OsString, OsString)>,
     /// Working directory for process
     pub cwd: Option<PathBuf>,
     /// Set to true by default, this enables recording of the `stdout` which can
@@ -247,7 +253,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut std_log: Option<File>,
     log_limit: Option<u64>,
     mut std_forward: Option<W>,
-    command_name: String,
+    command_name: OsString,
     child_id: u32,
     terminal_color: AnsiColors,
     std_err: bool,
@@ -328,9 +334,9 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             // need to format together otherwise stdout running into stderr is too
                             // common
                             let s = if std_err {
-                                format!("{} {} E|", command_name, child_id)
+                                format!("{:?} {} E|", command_name, child_id)
                             } else {
-                                format!("{} {}  |", command_name, child_id)
+                                format!("{:?} {}  |", command_name, child_id)
                             };
                             let _ = std_forward
                                 .write(
@@ -375,20 +381,20 @@ impl Command {
     /// unbroken `&str`. In case the command name has spaces, `self.command`
     /// can be changed directly.
     pub fn new(cmd_with_args: impl AsRef<str>, args: &[&str]) -> Self {
-        let mut true_args = vec![];
+        let mut true_args: Vec<OsString> = vec![];
         let mut command = String::new();
         for (i, part) in cmd_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
                 command = part.to_owned();
             } else {
-                true_args.push(part.to_owned());
+                true_args.push(part.into());
             }
         }
         for remaining_arg in args {
-            true_args.push((*remaining_arg).to_owned());
+            true_args.push(remaining_arg.into());
         }
         Self {
-            command,
+            command: command.into(),
             args: true_args,
             ..Default::default()
         }
@@ -402,14 +408,14 @@ impl Command {
 
     /// Adds an argument
     pub fn arg(mut self, arg: impl AsRef<str>) -> Self {
-        self.args.push(arg.as_ref().to_owned());
+        self.args.push(arg.as_ref().into());
         self
     }
 
     /// Adds an environment variable
     pub fn env(mut self, env_key: impl AsRef<str>, env_val: impl AsRef<str>) -> Self {
         self.envs
-            .push((env_key.as_ref().to_owned(), env_val.as_ref().to_owned()));
+            .push((env_key.as_ref().into(), env_val.as_ref().into()));
         self
     }
 
@@ -504,11 +510,11 @@ impl Command {
 
     /// Gets the command and args interspersed with spaces
     pub(crate) fn get_unified_command(&self) -> String {
-        let mut command = self.command.clone();
+        let mut command = self.command.to_string_lossy().into_owned();
         if !self.args.is_empty() {
             command += " ";
             for (i, arg) in self.args.iter().enumerate() {
-                command += arg;
+                command += arg.to_string_lossy().as_ref();
                 if i != (self.args.len() - 1) {
                     command += " ";
                 }

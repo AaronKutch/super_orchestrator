@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{
     fs::{File, OpenOptions},
@@ -8,7 +9,7 @@ use tokio::{
 
 use crate::{acquire_dir_path, acquire_file_path, close_file};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct WriteOptions {
     /// creates file if nonexistent
     pub create: bool,
@@ -16,7 +17,7 @@ pub struct WriteOptions {
     pub append: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ReadOrWrite {
     Read,
     Write(WriteOptions),
@@ -24,7 +25,7 @@ pub enum ReadOrWrite {
 
 /// A wrapper combining capabilities from `tokio::fs::{OpenOptions, File}` with
 /// a lot of opinionated defaults and `close_file`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileOptions {
     pub path: PathBuf,
     pub options: ReadOrWrite,
