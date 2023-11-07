@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     collections::VecDeque,
-    ffi::{OsString, OsStr},
+    ffi::{OsStr, OsString},
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -36,7 +36,7 @@ const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 /// helping functionality.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Command {
-    pub command: OsString,
+    pub program: OsString,
     pub args: Vec<OsString>,
     /// Clears the environment variable map before applying `envs`
     pub env_clear: bool,
@@ -84,7 +84,7 @@ pub struct Command {
 impl Default for Command {
     fn default() -> Self {
         Self {
-            command: Default::default(),
+            program: Default::default(),
             args: Default::default(),
             env_clear: Default::default(),
             envs: Default::default(),
@@ -106,7 +106,7 @@ impl Default for Command {
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
-            "Command {{\ncommand: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, recording: ({}, \
+            "Command {{\nprogram: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, recording: ({}, \
              {}), log: ({:?}, {:?}), debug: ({}, {}), record_limit: {:?}, log_limit: {:?}, \
              forget_on_drop: {}}}",
             DisplayStr(&self.get_unified_command()),
@@ -131,7 +131,7 @@ impl Debug for Command {
 /// # Note
 ///
 /// Locks on `stdout_record` and `stderr_record` should only be held long enough
-/// to make a quick copy or other operation, because the task to record command
+/// to make a quick copy or other operation, because the task to record program
 /// outputs needs the lock to progress.
 ///
 /// If the `log` crate is used and an implementor is active, warnings from
@@ -253,12 +253,12 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut std_log: Option<File>,
     log_limit: Option<u64>,
     mut std_forward: Option<W>,
-    command_name: OsString,
+    program_name: OsString,
     child_id: u32,
     terminal_color: AnsiColors,
     std_err: bool,
 ) {
-    let name = command_name.to_string_lossy();
+    let program_name = program_name.to_string_lossy();
     // for tracking how much has been written to the filez
     let mut log_len = 0;
     let mut previous_newline = false;
@@ -335,9 +335,9 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             // need to format together otherwise stdout running into stderr is too
                             // common
                             let s = if std_err {
-                                format!("{} {} E|", name, child_id)
+                                format!("{} {} E|", program_name, child_id)
                             } else {
-                                format!("{} {}  |", name, child_id)
+                                format!("{} {}  |", program_name, child_id)
                             };
                             let _ = std_forward
                                 .write(
@@ -373,6 +373,18 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 }
 
 impl Command {
+    /// Creates a new `Command` for launching the `program`. This has no
+    /// preprocessing of the input like [Command::new] does.
+    ///
+    /// The default configuration is to inherit the current process's
+    /// environment, and working directory.
+    pub fn new_os_str(program: impl AsRef<OsStr>) -> Self {
+        Self {
+            program: program.as_ref().into(),
+            ..Default::default()
+        }
+    }
+
     /// Creates a `Command` that only sets the `command` and `args` and leaves
     /// other things as their default values. `cmd_with_args` is separated by
     /// whitespace, and the first part becomes the command the the others are
@@ -383,10 +395,10 @@ impl Command {
     /// can be changed directly.
     pub fn new(cmd_with_args: impl AsRef<str>, args: &[&str]) -> Self {
         let mut true_args: Vec<OsString> = vec![];
-        let mut command = String::new();
+        let mut program = String::new();
         for (i, part) in cmd_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
-                command = part.to_owned();
+                program = part.to_owned();
             } else {
                 true_args.push(part.into());
             }
@@ -395,18 +407,20 @@ impl Command {
             true_args.push(remaining_arg.into());
         }
         Self {
-            command: command.into(),
+            program: program.into(),
             args: true_args,
             ..Default::default()
         }
     }
 
+    /// Adds arguments to be passed to the program
     pub fn args<I, S>(mut self, args: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.args.extend(args.into_iter().map(|s| s.as_ref().into()));
+        self.args
+            .extend(args.into_iter().map(|s| s.as_ref().into()));
         self
     }
 
@@ -518,9 +532,9 @@ impl Command {
         self
     }
 
-    /// Gets the command and args interspersed with spaces
+    /// Gets the program and args interspersed with spaces
     pub(crate) fn get_unified_command(&self) -> String {
-        let mut command = self.command.to_string_lossy().into_owned();
+        let mut command = self.program.to_string_lossy().into_owned();
         if !self.args.is_empty() {
             command += " ";
             for (i, arg) in self.args.iter().enumerate() {
@@ -535,7 +549,7 @@ impl Command {
 
     /// Runs the command with a standard input, returning a `CommandRunner`
     pub async fn run_with_stdin<C: Into<Stdio>>(self, stdin_cfg: C) -> Result<CommandRunner> {
-        let mut cmd = process::Command::new(&self.command);
+        let mut cmd = process::Command::new(&self.program);
         if self.env_clear {
             // must happen before the `envs` call
             cmd.env_clear();
@@ -588,7 +602,7 @@ impl Command {
         };
         let record_limit = self.record_limit;
         let log_limit = self.log_limit;
-        let command_name = self.command.clone();
+        let program_name = self.program.clone();
         let read_loop_timeout = self.read_loop_timeout;
         let mut handles: Vec<JoinHandle<()>> = vec![];
         cmd.args(&self.args)
@@ -614,12 +628,12 @@ impl Command {
             stdout_log,
             log_limit,
             stdout_forward_stdout,
-            command_name,
+            program_name,
             child_id,
             terminal_color,
             false,
         )));
-        let command_name = self.command.clone();
+        let program_name = self.program.clone();
         handles.push(task::spawn(recorder(
             read_loop_timeout,
             stderr_read,
@@ -628,7 +642,7 @@ impl Command {
             stderr_log,
             log_limit,
             stderr_forward_stderr,
-            command_name,
+            program_name,
             child_id,
             terminal_color,
             true,
