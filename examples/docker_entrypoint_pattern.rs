@@ -122,14 +122,14 @@ async fn container_runner(args: &Args) -> Result<()> {
             // a container with a plain fedora:38 image
             Container::new(
                 "container0",
-                Dockerfile::NameTag("fedora:38".to_owned()),
+                Dockerfile::name_tag("fedora:38"),
                 entrypoint,
                 &["--entry-name", "container0"],
             ),
             // uses the example dockerfile
             Container::new(
                 "container1",
-                Dockerfile::Path(format!("{dockerfiles_dir}/example.dockerfile")),
+                Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
                 entrypoint,
                 &["--entry-name", "container1"],
             ),
@@ -137,7 +137,7 @@ async fn container_runner(args: &Args) -> Result<()> {
             // file
             Container::new(
                 "container2",
-                Dockerfile::Contents(CONTAINER2_DOCKERFILE.to_owned()),
+                Dockerfile::contents(CONTAINER2_DOCKERFILE),
                 entrypoint,
                 &container2_args,
             ),

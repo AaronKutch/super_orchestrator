@@ -32,6 +32,23 @@ pub enum Dockerfile {
     Contents(String),
 }
 
+impl Dockerfile {
+    /// Returns `Self::NameTag` with the argument
+    pub fn name_tag(name_and_tag: impl AsRef<str>) -> Self {
+        Self::NameTag(name_and_tag.as_ref().to_owned())
+    }
+
+    /// Returns `Self::Path` with the argument
+    pub fn path(path_to_dockerfile: impl AsRef<str>) -> Self {
+        Self::Path(path_to_dockerfile.as_ref().to_owned())
+    }
+
+    /// Returns `Self::Contents` with the argument
+    pub fn contents(contents_of_dockerfile: impl AsRef<str>) -> Self {
+        Self::Contents(contents_of_dockerfile.as_ref().to_owned())
+    }
+}
+
 /// Container running information, put this into a `ContainerNetwork`
 #[derive(Debug, Clone)]
 pub struct Container {
@@ -85,6 +102,12 @@ impl Container {
                 acc
             }),
         }
+    }
+
+    /// Adds a volume
+    pub fn volume(mut self, volume: (impl AsRef<str>, impl AsRef<str>)) -> Self {
+        self.volumes.push((volume.0.as_ref().to_owned(), volume.1.as_ref().to_owned()));
+        self
     }
 
     pub fn volumes(mut self, volumes: &[(&str, &str)]) -> Self {
@@ -188,7 +211,7 @@ impl Drop for ContainerNetwork {
 impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
-    /// This function generates a `Uuid` used for enabling multiple
+    /// This function generates a UUID used for enabling multiple
     /// `ContainerNetwork`s with the same names and ids to run simultaneously.
     /// The uuid is appended to network names, container names, and hostnames.
     /// Arguments involving container names automatically append the uuid.
@@ -254,14 +277,17 @@ impl ContainerNetwork {
         })
     }
 
+    /// Returns the common UUID
     pub fn uuid(&self) -> Uuid {
         self.uuid
     }
 
+    /// Returns the common UUID as a string
     pub fn uuid_as_string(&self) -> String {
         self.uuid.to_string()
     }
 
+    /// Returns the full network name
     pub fn network_name_with_uuid(&self) -> String {
         format!("{}_{}", self.network_name, self.uuid)
     }
@@ -295,6 +321,7 @@ impl ContainerNetwork {
         }
     }
 
+    /// Adds the container to the inactive set
     pub fn add_container(&mut self, container: Container) -> Result<&mut Self> {
         if self.dockerfile_write_dir.is_none()
             && matches!(container.dockerfile, Dockerfile::Contents(_))
@@ -334,6 +361,7 @@ impl ContainerNetwork {
         self
     }
 
+    /// Get a map of active container names to ids
     pub fn get_active_container_ids(&self) -> &BTreeMap<String, String> {
         &self.active_container_ids
     }
@@ -405,10 +433,10 @@ impl ContainerNetwork {
     }
 
     /// Runs only the given `names`
-    pub async fn run(&mut self, names: &[&str], ci_mode: bool) -> Result<()> {
-        if ci_mode {
+    pub async fn run(&mut self, names: &[&str], debug: bool) -> Result<()> {
+        if debug {
             info!(
-                "`ContainerNetwork::run(ci_mode: true, ..)` with UUID {}",
+                "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
                 self.uuid_as_string()
             )
         }
@@ -453,7 +481,7 @@ impl ContainerNetwork {
                     // build time or else we should add a flag to do this step
                     // (which does update the image if it has new commits)
                     /*let comres = Command::new("docker pull", &[&name_tag])
-                        .ci_mode(ci_mode)
+                        .debug(debug)
                         .stdout_log(&debug_log)
                         .stderr_log(&debug_log)
                         .run_to_completion()
@@ -487,7 +515,7 @@ impl ContainerNetwork {
             let _ = Command::new("docker rm -f", &[name])
                 // never put in debug_log mode or put in debug file, error on
                 // nonexistent container is confusing, actual errors will be returned
-                .ci_mode(false)
+                .debug(false)
                 .run_to_completion()
                 .await?;
         }
@@ -498,7 +526,7 @@ impl ContainerNetwork {
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
             /*let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
-            .ci_mode(false)
+            .debug(false)
             .stdout_log(&debug_log)
             .stderr_log(&debug_log)
             .run_to_completion()
@@ -610,12 +638,12 @@ impl ContainerNetwork {
                     }
                     build_args.push(&dockerfile_dir);
                     Command::new("docker", &build_args)
-                        .debug(ci_mode)
+                        .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
                         .assert_success()
-                        .stack_err(|| format!("Failed when using the dockerfile at {path}"))?;
+                        .stack_err(|| format!("Failed when using the dockerfile at {path:?}"))?;
                 }
                 Dockerfile::Contents(ref contents) => {
                     // tag
@@ -640,7 +668,7 @@ impl ContainerNetwork {
                     }
                     build_args.push(dockerfile_write_dir.as_ref().unwrap());
                     Command::new("docker", &build_args)
-                        .debug(ci_mode)
+                        .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
@@ -667,9 +695,9 @@ impl ContainerNetwork {
                 args.push(s);
             }
             let command = Command::new("docker", &args)
-                .debug(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
+                .debug(debug && matches!(container.dockerfile, Dockerfile::NameTag(_)))
                 .log(Some(&debug_log));
-            if ci_mode {
+            if debug {
                 info!("`Container` creation command: {command:#?}");
             }
             match command.run_to_completion().await {
@@ -712,7 +740,7 @@ impl ContainerNetwork {
                     &self.log_dir,
                     &format!("container_{}_stderr.log", name),
                 )));
-            match command.debug(ci_mode).run().await {
+            match command.debug(debug).run().await {
                 Ok(runner) => {
                     self.container_runners.insert(name.to_string(), runner);
                 }
@@ -726,13 +754,13 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    pub async fn run_all(&mut self, ci_mode: bool) -> Result<()> {
+    pub async fn run_all(&mut self, debug: bool) -> Result<()> {
         let names = self.inactive_names();
         let mut v: Vec<&str> = vec![];
         for name in &names {
             v.push(name);
         }
-        self.run(&v, ci_mode).await.stack()
+        self.run(&v, debug).await.stack()
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:

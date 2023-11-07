@@ -7,6 +7,7 @@
 - Fixed debug outputs freezing if a newline did not come
 
 ### Changes
+- Updated dependecies, moved some into dev-dependencies
 - used `impl AsRef<Path>` in several signatures
 - Changed many things about how `Commands` handle debug and log files
 - `CommandResultNoDebug` now has the stream data fields (still not including them in the debug impls)
