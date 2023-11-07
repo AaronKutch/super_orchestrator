@@ -94,7 +94,8 @@ pub fn get_separated_val(
 #[macro_export]
 macro_rules! stacked_get {
     ($value:ident [$inx0:expr] $([$inx1:expr])*) => {{
-        // this is unrolled once to allow multiple kinds of borrowing
+        // this is unrolled once to avoid a let binding
+        // and allow multiple kinds of borrowing
         let mut tmp = $crate::stacked_errors::StackableErr::stack_err(
             $value.get($inx0),
             || format!(
