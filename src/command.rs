@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     collections::VecDeque,
-    ffi::OsString,
+    ffi::{OsString, OsStr},
     fmt::{Debug, Display},
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -258,6 +258,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     terminal_color: AnsiColors,
     std_err: bool,
 ) {
+    let name = command_name.to_string_lossy();
     // for tracking how much has been written to the filez
     let mut log_len = 0;
     let mut previous_newline = false;
@@ -334,9 +335,9 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             // need to format together otherwise stdout running into stderr is too
                             // common
                             let s = if std_err {
-                                format!("{:?} {} E|", command_name, child_id)
+                                format!("{} {} E|", name, child_id)
                             } else {
-                                format!("{:?} {}  |", command_name, child_id)
+                                format!("{} {}  |", name, child_id)
                             };
                             let _ = std_forward
                                 .write(
@@ -400,20 +401,29 @@ impl Command {
         }
     }
 
+    pub fn args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.args.extend(args.into_iter().map(|s| s.as_ref().into()));
+        self
+    }
+
+    /// Adds an argument
+    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
+        self.args.push(arg.as_ref().into());
+        self
+    }
+
     /// Sets `self.cwd`
     pub fn cwd(mut self, cwd: impl AsRef<Path>) -> Self {
         self.cwd = Some(cwd.as_ref().to_owned());
         self
     }
 
-    /// Adds an argument
-    pub fn arg(mut self, arg: impl AsRef<str>) -> Self {
-        self.args.push(arg.as_ref().into());
-        self
-    }
-
     /// Adds an environment variable
-    pub fn env(mut self, env_key: impl AsRef<str>, env_val: impl AsRef<str>) -> Self {
+    pub fn env(mut self, env_key: impl AsRef<OsStr>, env_val: impl AsRef<OsStr>) -> Self {
         self.envs
             .push((env_key.as_ref().into(), env_val.as_ref().into()));
         self
