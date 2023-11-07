@@ -382,18 +382,18 @@ impl Command {
         }
     }
 
-    /// Creates a `Command` that only sets the `command` and `args` and leaves
-    /// other things as their default values. `cmd_with_args` is separated by
-    /// whitespace, and the first part becomes the command the the others are
-    /// extra prefixed args.
+    /// Creates a `Command` that only sets the `program` and `args` and leaves
+    /// other things as their default values. `program_with_args` is separated
+    /// by whitespace, the first part becomes the progam, and the the others
+    /// are inserted as args.
     ///
     /// In case an argument has spaces, it should be put into `args` as an
     /// unbroken `&str`. In case the command name has spaces, `self.command`
     /// can be changed directly.
-    pub fn new(cmd_with_args: impl AsRef<str>, args: &[&str]) -> Self {
+    pub fn new(program_with_args: impl AsRef<str>, args: &[&str]) -> Self {
         let mut true_args: Vec<OsString> = vec![];
         let mut program = String::new();
-        for (i, part) in cmd_with_args.as_ref().split_whitespace().enumerate() {
+        for (i, part) in program_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
                 program = part.to_owned();
             } else {
@@ -410,6 +410,12 @@ impl Command {
         }
     }
 
+    /// Adds an argument
+    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
+        self.args.push(arg.as_ref().into());
+        self
+    }
+
     /// Adds arguments to be passed to the program
     pub fn args<I, S>(mut self, args: I) -> Self
     where
@@ -418,12 +424,6 @@ impl Command {
     {
         self.args
             .extend(args.into_iter().map(|s| s.as_ref().into()));
-        self
-    }
-
-    /// Adds an argument
-    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
-        self.args.push(arg.as_ref().into());
         self
     }
 
@@ -437,6 +437,20 @@ impl Command {
     pub fn env(mut self, env_key: impl AsRef<OsStr>, env_val: impl AsRef<OsStr>) -> Self {
         self.envs
             .push((env_key.as_ref().into(), env_val.as_ref().into()));
+        self
+    }
+
+    /// Adds environment variables
+    pub fn envs<I, K, V>(&mut self, envs: I) -> &mut Command
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.envs.extend(
+            envs.into_iter()
+                .map(|(k, v)| (k.as_ref().into(), v.as_ref().into())),
+        );
         self
     }
 
