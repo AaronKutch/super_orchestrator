@@ -48,7 +48,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
         if let Some((name, id)) = name_id {
             info!("Found container {name} with id {id}, forwarding stdin, stdout, stderr");
             docker_exec_i(&id).await.stack()?;
-            let _ = sh("docker rm -f", &[&id]).await;
+            let _ = sh(["docker rm -f", &id]).await;
             info!("\nTerminated container {id}\n");
         }
         sleep(STD_DELAY).await;

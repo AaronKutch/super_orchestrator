@@ -82,7 +82,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     // &format!("./target/{container_target}/release/{bin_entrypoint}");
 
     // for this example we need this command
-    sh("cargo build --release --example", &[
+    sh([
+        "cargo build --release --example",
         bin_entrypoint,
         "--target",
         container_target,

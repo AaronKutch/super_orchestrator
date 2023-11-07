@@ -61,41 +61,44 @@ async fn main() -> Result<()> {
     comres.assert_success().stack()?;
 
     // shorthand for the above
-    sh("ls", &[]).await.stack()?;
+    sh(["ls"]).await.stack()?;
 
     // add an argument to the command this is the same as `ls ./example` on a
     // command line
-    sh("ls", &["./examples"]).await.stack()?;
+    sh(["ls", "./examples"]).await.stack()?;
 
-    // `super_orchestrator::Command::new` has the feature that it splits
-    // `cmd_with_args` by whitespace, uses the first segment for the command, and
-    // prefixes the others as separate arguments
-    sh("ls ./examples", &[]).await.stack()?;
+    // `super_orchestrator::Command::new` and the first iterator element of
+    // `super_orchestrator::sh` have the feature that they are split by whitespace,
+    // using the first segment for the command, and prefixes the others as separate
+    // arguments
+    sh(["ls ./examples"]).await.stack()?;
 
     // Note: when trying to access the file "filename with spaces.txt", you would
     // type on a command line `ls "filename with spaces"`. However, it would not
     // mean the same thing to use
 
-    //sh("ls \"filename with spaces\"", &[])
+    //sh(["ls \"filename with spaces\""])
     // or
-    //sh("ls", &["filename", "with", "spaces"])
+    //sh(["ls", "filename", "with", "spaces"])
     // or
-    //sh("ls", &["\"filename with spaces\""])
+    //sh["ls", "\"filename with spaces\""])
 
     // because the quotation marks are for the commandline, a signal, to pass
     // "filename with spaces" as a single OS argument without the literal quotation
     // marks. The correct way is:
 
-    //sh("ls", &["filename with spaces.txt"]).await.stack()?;
+    //sh(["ls", "filename with spaces.txt"]).await.stack()?;
+    // or
+    //Command::new("ls").arg("filename with spaces.txt") ...
 
     // accounting for the right relative directory it is
-    sh("ls", &["examples/filename with spaces.txt"])
+    sh(["ls", "examples/filename with spaces.txt"])
         .await
         .stack()?;
 
     // This triggers the command to have an unsuccessful exit status.
     // Debug stderr lines have an 'E' in them to distinguish from stdout lines,
-    ensure!(sh("ls ./nonexistent", &[]).await.is_err());
+    ensure!(sh(["ls ./nonexistent"]).await.is_err());
 
     // there is not an error at the command running stage
     let comres = Command::new("ls ./nonexistent")

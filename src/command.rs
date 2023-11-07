@@ -391,8 +391,8 @@ impl Command {
     /// unbroken `&str`. In case the command name has spaces, `self.command`
     /// can be changed directly.
     pub fn new(program_with_args: impl AsRef<str>) -> Self {
-        let mut args: Vec<OsString> = vec![];
         let mut program = String::new();
+        let mut args: Vec<OsString> = vec![];
         for (i, part) in program_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
                 program = part.to_owned();

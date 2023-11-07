@@ -61,13 +61,29 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
     res
 }
 
-/// Equivalent to calling `Command::new(cmd_with_args,
-/// &[args...]).debug(true).run_to_completion().await?.assert_success()?;` and
-/// returning the stdout as a `String` (returns an error if the stdout was not
-/// utf-8)
-pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
-    let comres = Command::new(cmd_with_args)
-        .args(args)
+/// Equivalent to calling
+/// `Command::new(program_with_args[0]).args(program_with_args[1..])
+/// .debug(true).run_to_completion().await?.assert_success()?;` and
+/// returning the stdout as a `String`.
+///
+/// Returns an error if `program_with_args` is empty, there was a
+/// `run_to_completion` error, the command return status was unsuccessful, or
+/// the stdout was not utf-8.
+pub async fn sh<I, S>(program_with_args: I) -> Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut command = None;
+    for (i, part) in program_with_args.into_iter().enumerate() {
+        if i == 0 {
+            command = Some(Command::new(part.as_ref()));
+        } else {
+            command = Some(command.unwrap().arg(part.as_ref()));
+        }
+    }
+    let comres = command
+        .stack_err(|| "`sh` called with an empty iterator")?
         .debug(true)
         .run_to_completion()
         .await?;
@@ -79,9 +95,21 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
 }
 
 /// [sh] but without debug mode
-pub async fn sh_no_debug(cmd_with_args: &str, args: &[&str]) -> Result<String> {
-    let comres = Command::new(cmd_with_args)
-        .args(args)
+pub async fn sh_no_debug<I, S>(program_with_args: I) -> Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut command = None;
+    for (i, part) in program_with_args.into_iter().enumerate() {
+        if i == 0 {
+            command = Some(Command::new(part.as_ref()));
+        } else {
+            command = Some(command.unwrap().arg(part.as_ref()));
+        }
+    }
+    let comres = command
+        .stack_err(|| "`sh_no_debug` called with an empty iterator")?
         .run_to_completion()
         .await?;
     comres.assert_success()?;
