@@ -23,7 +23,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
         if ctrlc_issued_reset() {
             break
         }
-        let comres = Command::new("docker ps", &[])
+        let comres = Command::new("docker ps")
             .run_to_completion()
             .await
             .stack()?;
@@ -57,7 +57,8 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
 }
 
 pub async fn docker_exec_i(container_id: &str) -> Result<()> {
-    let mut runner = Command::new("docker exec -i", &[container_id, "bash"])
+    let mut runner = Command::new("docker exec -i")
+        .args([container_id, "bash"])
         .debug(true)
         .run_with_stdin(Stdio::inherit())
         .await

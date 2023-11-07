@@ -175,10 +175,9 @@ async fn test_runner(args: &Args) -> Result<()> {
     let uuid = &args.uuid.as_deref().stack()?;
 
     async fn postgres_health(uuid: &str) -> Result<()> {
-        let comres = Command::new(
-            &format!("psql --host=postgres_{uuid} -U postgres --command=\\l"),
-            &[],
-        )
+        let comres = Command::new(format!(
+            "psql --host=postgres_{uuid} -U postgres --command=\\l"
+        ))
         .env("PGPASSWORD", "root")
         .run_to_completion()
         .await
@@ -191,7 +190,7 @@ async fn test_runner(args: &Args) -> Result<()> {
         .stack()?;
 
     // check that no uuid host works
-    let comres = Command::new("psql --host=postgres -U postgres --command=\\l", &[])
+    let comres = Command::new("psql --host=postgres -U postgres --command=\\l")
         .env("PGPASSWORD", "root")
         .debug(true)
         .run_to_completion()

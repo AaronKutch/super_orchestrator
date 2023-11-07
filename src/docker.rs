@@ -397,7 +397,8 @@ impl ContainerNetwork {
                 // TODO we should parse errors to differentiate whether it is
                 // simply a race condition where the container finished before
                 // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f", &[&docker_id])
+                let _ = Command::new("docker rm -f")
+                    .arg(docker_id)
                     .run_to_completion()
                     .await;
                 if let Some(mut runner) = self.container_runners.remove(*name) {
@@ -416,7 +417,8 @@ impl ContainerNetwork {
                 // TODO we should parse errors to differentiate whether it is
                 // simply a race condition where the container finished before
                 // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f", &[&docker_id])
+                let _ = Command::new("docker rm -f")
+                    .arg(docker_id)
                     .run_to_completion()
                     .await;
                 if let Some(mut runner) = self.container_runners.remove(&name) {
@@ -432,7 +434,8 @@ impl ContainerNetwork {
     pub async fn terminate_all(&mut self) {
         self.terminate_containers().await;
         if self.network_active {
-            let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
+            let _ = Command::new("docker network rm")
+                .arg(self.network_name_with_uuid())
                 .run_to_completion()
                 .await;
             self.network_active = false;
@@ -539,17 +542,17 @@ impl ContainerNetwork {
             .run_to_completion()
             .await;*/
             let comres = if self.is_not_internal {
-                Command::new("docker network create", &[&self.network_name_with_uuid()])
+                Command::new("docker network create")
+                    .arg(self.network_name_with_uuid())
                     .log(Some(&debug_log))
                     .run_to_completion()
                     .await?
             } else {
-                Command::new("docker network create --internal", &[
-                    &self.network_name_with_uuid()
-                ])
-                .log(Some(&debug_log))
-                .run_to_completion()
-                .await?
+                Command::new("docker network create --internal")
+                    .arg(self.network_name_with_uuid())
+                    .log(Some(&debug_log))
+                    .run_to_completion()
+                    .await?
             };
             // TODO we can get the network id
             comres.assert_success().stack()?;
@@ -644,7 +647,8 @@ impl ContainerNetwork {
                         build_args.push(s);
                     }
                     build_args.push(&dockerfile_dir);
-                    Command::new("docker", &build_args)
+                    Command::new("docker")
+                        .args(build_args)
                         .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
@@ -674,7 +678,8 @@ impl ContainerNetwork {
                         build_args.push(s);
                     }
                     build_args.push(dockerfile_write_dir.as_ref().unwrap());
-                    Command::new("docker", &build_args)
+                    Command::new("docker")
+                        .args(build_args)
                         .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
@@ -701,7 +706,8 @@ impl ContainerNetwork {
             for s in &tmp {
                 args.push(s);
             }
-            let command = Command::new("docker", &args)
+            let command = Command::new("docker")
+                .args(args)
                 .debug(debug && matches!(container.dockerfile, Dockerfile::NameTag(_)))
                 .log(Some(&debug_log));
             if debug {
@@ -738,7 +744,8 @@ impl ContainerNetwork {
         // start containers
         for name in names {
             let docker_id = &self.active_container_ids[*name];
-            let command = Command::new("docker start --attach", &[docker_id])
+            let command = Command::new("docker start --attach")
+                .arg(docker_id)
                 .stdout_log(Some(&FileOptions::write2(
                     &self.log_dir,
                     &format!("container_{}_stdout.log", name),

@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
 
     // this runs the "ls" command just like how it would if run from command line
     // from the same directory
-    let comres: CommandResult = Command::new("ls", &[]).run_to_completion().await.stack()?;
+    let comres: CommandResult = Command::new("ls").run_to_completion().await.stack()?;
     // The result from the `run_to_completion` command only returns if OS calls or
     // other infrastructure failed. The status of the `CommandResult` needs to be
     // checked to see if the return status of the command was actually ok or not.
@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
 
     // debug mode forwards the standard streams of the command to the current
     // process
-    let comres = Command::new("ls", &[])
+    let comres = Command::new("ls")
         .debug(true)
         .run_to_completion()
         .await
@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
     ensure!(sh("ls ./nonexistent", &[]).await.is_err());
 
     // there is not an error at the command running stage
-    let comres = Command::new("ls ./nonexistent", &[])
+    let comres = Command::new("ls ./nonexistent")
         .run_to_completion()
         .await
         .stack()?;
@@ -109,11 +109,7 @@ async fn main() -> Result<()> {
 
     // in the case of long running programs that we want to detach to the
     // background, we can use `run`
-    let mut ls_runner = Command::new("sleep 1", &[])
-        .debug(true)
-        .run()
-        .await
-        .stack()?;
+    let mut ls_runner = Command::new("sleep 1").debug(true).run().await.stack()?;
     // we can do this on Linux to emulate a Ctrl+C from commandline
     //ls_runner.send_unix_sigterm()
     // do this to go back to blocking like `run_to_completion` does
@@ -144,7 +140,7 @@ async fn main() -> Result<()> {
     println!("\n\nexample 3\n");
 
     // changing the current working directory of the command
-    let comres = Command::new("ls", &[])
+    let comres = Command::new("ls")
         .debug(true)
         .cwd("./examples")
         .run_to_completion()
@@ -157,7 +153,7 @@ async fn main() -> Result<()> {
     // many others for which you can only do one at a time for a long running
     // program. Note that `FileOptions::write` creates and truncates by default, but
     // this can be changed.
-    let ls_runner = Command::new("ls", &[])
+    let ls_runner = Command::new("ls")
         .debug(true)
         .stdout_log(Some(FileOptions::write(
             "./logs/basic_commands_stdout_ex.log",
@@ -185,7 +181,7 @@ async fn main() -> Result<()> {
 
     println!("\n\nexample 4\n");
 
-    if Command::new("grep", &[]).run_to_completion().await.is_err() {
+    if Command::new("grep").run_to_completion().await.is_err() {
         println!("grep not found, last example cannot be run");
         return Ok(())
     }
@@ -194,7 +190,7 @@ async fn main() -> Result<()> {
     // "hello\nworld" | grep h` line that would be typed into a commandline also has
     // special interpreting that is equivalent to:
 
-    let comres = Command::new("grep h", &[])
+    let comres = Command::new("grep h")
         .debug(true)
         .run_with_input_to_completion(b"hello\nworld")
         .await

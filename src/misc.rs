@@ -66,7 +66,8 @@ pub fn type_hash<T: ?Sized>() -> [u8; 16] {
 /// returning the stdout as a `String` (returns an error if the stdout was not
 /// utf-8)
 pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
-    let comres = Command::new(cmd_with_args, args)
+    let comres = Command::new(cmd_with_args)
+        .args(args)
         .debug(true)
         .run_to_completion()
         .await?;
@@ -79,7 +80,8 @@ pub async fn sh(cmd_with_args: &str, args: &[&str]) -> Result<String> {
 
 /// [sh] but without debug mode
 pub async fn sh_no_debug(cmd_with_args: &str, args: &[&str]) -> Result<String> {
-    let comres = Command::new(cmd_with_args, args)
+    let comres = Command::new(cmd_with_args)
+        .args(args)
         .run_to_completion()
         .await?;
     comres.assert_success()?;

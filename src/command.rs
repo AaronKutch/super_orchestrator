@@ -390,22 +390,19 @@ impl Command {
     /// In case an argument has spaces, it should be put into `args` as an
     /// unbroken `&str`. In case the command name has spaces, `self.command`
     /// can be changed directly.
-    pub fn new(program_with_args: impl AsRef<str>, args: &[&str]) -> Self {
-        let mut true_args: Vec<OsString> = vec![];
+    pub fn new(program_with_args: impl AsRef<str>) -> Self {
+        let mut args: Vec<OsString> = vec![];
         let mut program = String::new();
         for (i, part) in program_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
                 program = part.to_owned();
             } else {
-                true_args.push(part.into());
+                args.push(part.into());
             }
-        }
-        for remaining_arg in args {
-            true_args.push(remaining_arg.into());
         }
         Self {
             program: program.into(),
-            args: true_args,
+            args,
             ..Default::default()
         }
     }

@@ -30,7 +30,8 @@ async fn test_copying(stdout: Option<String>, stderr: Option<String>) -> Result<
     }
 
     // create and run the command
-    let comres = Command::new("cargo r --example commands --quiet -- --print", &args)
+    let comres = Command::new("cargo r --example commands --quiet -- --print")
+        .args(args)
         .debug(true)
         .stdout_log(Some(FileOptions::write("./logs/stdout.log")))
         .stderr_log(Some(FileOptions::write("./logs/stderr.log")))
