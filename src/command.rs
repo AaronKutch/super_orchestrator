@@ -28,14 +28,11 @@ use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
 const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 
-// note: the philosophy for functions like the acquire functions is to use
-// OsString and PathBuf, but for structs like this we will use `String`s and
-// "pure" data only.
-
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Command {
+    /// The program to run.
     pub program: OsString,
     pub args: Vec<OsString>,
     /// Clears the environment variable map before applying `envs`
