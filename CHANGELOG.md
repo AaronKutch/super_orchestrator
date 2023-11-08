@@ -7,12 +7,13 @@
 - Fixed debug outputs freezing if a newline did not come
 
 ### Changes
+- Overhaul of many function signatures
+- new `external_entrypoint` that volumes to the root of the container
 - Updated dependecies, moved some into dev-dependencies
-- used `impl AsRef<Path>` in several signatures
 - Changed many things about how `Commands` handle debug and log files
 - `CommandResultNoDebug` now has the stream data fields (still not including them in the debug impls)
   since they can be limited in several ways now
-- `CommandResult::no_dbg` now takes by value
+- `CommandResult::no_debug` now takes by value
 - renamed `CommandResultNoDbg` to `CommandResultNoDebug`
 - many other changes
 

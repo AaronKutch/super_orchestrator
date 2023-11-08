@@ -67,25 +67,27 @@ pub struct Container {
     /// The name of the container, note the "name:tag" docker argument would go
     /// in [Dockerfile::NameTag]
     pub name: String,
-    /// Usually should be the same as the tag
+    /// Hostname of the URL that could access the container (the container can
+    /// alternatively be accessed by an ip address). Usually, this should be the
+    /// same as `name``.
     pub host_name: String,
     /// If true, `host_name` is used directly without appending a UUID
     pub no_uuid_for_host_name: bool,
-    /// The dockerfile arguments
+    /// The dockerfile
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
     pub build_args: Vec<String>,
-    /// Any flags and args passed to to `docker create`. Volumes by `volumes
-    /// have the advantage of being canonicalized and prechecked.
+    /// Any flags and args passed to to `docker create`
     pub create_args: Vec<String>,
-    /// note that the entrypoint binary is automatically included if
-    /// `extrypoint_path` is set
+    /// Passed as `--volume` to the create args, but these have the advantage of
+    /// being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
     /// Environment variable pairs passed to docker
     pub environment_vars: Vec<(String, String)>,
-    /// Path to the entrypoint binary locally
-    pub entrypoint_path: Option<String>,
-    /// passed in as ["arg1", "arg2", ...] with the bracket and quotations being
+    /// When set, this indicates that the container should run an entrypoint
+    /// using this path to a binary in the container
+    pub entrypoint_file: Option<String>,
+    /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
 }
@@ -103,20 +105,44 @@ impl Container {
             create_args: vec![],
             volumes: vec![],
             environment_vars: vec![],
-            entrypoint_path: None,
+            entrypoint_file: None,
             entrypoint_args: vec![],
         }
     }
 
-    pub fn entrypoint<I, S>(mut self, entrypoint_path: impl AsRef<str>, entrypoint_args: I) -> Self
+    /// This is used in the entrypoint pattern where an externally compiled
+    /// binary is used as the entrypoint for the container. This adds a volume
+    /// from `entrypoint_binary` to "/{binary_file_name}", sets
+    /// `entrypoint_file` to that, and also adds the
+    /// `entrypoint_args`. Returns an error if the binary file path cannot be
+    /// acquired.
+    pub async fn external_entrypoint<I, S>(
+        mut self,
+        entrypoint_binary: impl AsRef<str>,
+        entrypoint_args: I,
+    ) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.entrypoint_path = Some(entrypoint_path.as_ref().to_owned());
+        let binary_path = acquire_file_path(entrypoint_binary.as_ref())
+            .await
+            .stack_err(|| "external_entrypoint could not acquire the external entrypoint binary")?;
+        let binary_file_name = binary_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let entrypoint_file = format!("/{binary_file_name}");
+        self.entrypoint_file = Some(entrypoint_file.clone());
+        self.volumes.push((
+            binary_path.as_os_str().to_str().unwrap().to_owned(),
+            entrypoint_file,
+        ));
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
-        self
+        Ok(self)
     }
 
     /// Adds a volume
@@ -522,9 +548,6 @@ impl ContainerNetwork {
         let mut get_dockerfile_write_dir = false;
         for name in names {
             let container = &self.containers[*name];
-            if let Some(ref path) = container.entrypoint_path {
-                acquire_file_path(path).await?;
-            }
             match container.dockerfile {
                 Dockerfile::NameTag(_) => {
                     // adds unnecessary time to common case, just catch it at
@@ -603,14 +626,6 @@ impl ContainerNetwork {
         for name in names {
             let container = &self.containers[*name];
 
-            let bin_path = if let Some(ref path) = container.entrypoint_path {
-                Some(acquire_file_path(path).await?)
-            } else {
-                None
-            };
-            let bin_s = bin_path.map(|p| p.file_name().unwrap().to_str().unwrap().to_owned());
-            let bin_s = bin_s.as_ref();
-
             // baseline args
             let network_name = self.network_name_with_uuid();
             let hostname = self.hostname_with_uuid(name).unwrap();
@@ -636,16 +651,8 @@ impl ContainerNetwork {
             }
 
             // volumes
-            let mut volumes = container.volumes.clone();
-            // include the needed binary
-            if let Some(bin_s) = bin_s {
-                volumes.push((
-                    container.entrypoint_path.as_ref().unwrap().to_owned(),
-                    format!("/usr/bin/{bin_s}"),
-                ));
-            }
             let mut combined_volumes = vec![];
-            for volume in &volumes {
+            for volume in &container.volumes {
                 let path = acquire_path(&volume.0)
                     .await
                     .stack_err(|| "could not locate local part of volume argument")?;
@@ -735,8 +742,8 @@ impl ContainerNetwork {
             }
 
             // the binary
-            if let Some(bin_s) = bin_s.as_ref() {
-                args.push(bin_s);
+            if let Some(s) = container.entrypoint_file.as_ref() {
+                args.push(s);
             }
             // entrypoint args
             let mut tmp = vec![];

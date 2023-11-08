@@ -104,7 +104,9 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     let containers = vec![
         Container::new("test_runner", Dockerfile::contents(test_dockerfile()))
-            .entrypoint(entrypoint, ["--entry-name", "test_runner"])
+            .external_entrypoint(entrypoint, ["--entry-name", "test_runner"])
+            .await
+            .stack()?
             // if exposing a port beyond the machine, use something like this on the
             // container
             .create_args(["-p", "8000:8000"]),

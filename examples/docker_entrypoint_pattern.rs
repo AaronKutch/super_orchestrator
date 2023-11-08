@@ -119,17 +119,23 @@ async fn container_runner(args: &Args) -> Result<()> {
         vec![
             // a container with a plain fedora:38 image
             Container::new("container0", Dockerfile::name_tag("fedora:38"))
-                .entrypoint(entrypoint, ["--entry-name", "container0"]),
+                .external_entrypoint(entrypoint, ["--entry-name", "container0"])
+                .await
+                .stack()?,
             // uses the example dockerfile
             Container::new(
                 "container1",
                 Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
             )
-            .entrypoint(entrypoint, ["--entry-name", "container1"]),
+            .external_entrypoint(entrypoint, ["--entry-name", "container1"])
+            .await
+            .stack()?,
             // uses the literal string, allowing for self-contained complicated systems in a single
             // file
             Container::new("container2", Dockerfile::contents(CONTAINER2_DOCKERFILE))
-                .entrypoint(entrypoint, container2_args),
+                .external_entrypoint(entrypoint, container2_args)
+                .await
+                .stack()?,
         ],
         Some(dockerfiles_dir),
         // TODO see issue on `ContainerNetwork` struct documentation
@@ -142,7 +148,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_common_volumes([(logs_dir, "/logs")]);
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
-    cn.add_common_entrypoint_args(&["--uuid", &uuid]);
+    cn.add_common_entrypoint_args(["--uuid", &uuid]);
     cn.run_all(true).await.stack()?;
 
     // container2 ends early
