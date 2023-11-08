@@ -56,6 +56,12 @@ impl Dockerfile {
 }
 
 /// Container running information, put this into a `ContainerNetwork`
+///
+/// # Note
+///
+/// Weird things happen if volumes to the same container overlap, e.g. if
+/// the directory used for logs is added as a volume, and a volume to another
+/// path contained within the directory is also added as a volume.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
     /// The name of the container, note the "name:tag" docker argument would go
@@ -87,12 +93,7 @@ pub struct Container {
 impl Container {
     /// Creates the information needed to describe a `Container`. `name` is used
     /// for both the `name` and `hostname`.
-    pub fn new(
-        name: &str,
-        dockerfile: Dockerfile,
-        entrypoint_path: Option<&str>,
-        entrypoint_args: &[&str],
-    ) -> Self {
+    pub fn new(name: &str, dockerfile: Dockerfile) -> Self {
         Self {
             name: name.to_owned(),
             host_name: name.to_owned(),
@@ -102,60 +103,89 @@ impl Container {
             create_args: vec![],
             volumes: vec![],
             environment_vars: vec![],
-            entrypoint_path: entrypoint_path.map(|s| s.to_owned()),
-            entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
-                acc.push(e.to_string());
-                acc
-            }),
+            entrypoint_path: None,
+            entrypoint_args: vec![],
         }
     }
 
+    pub fn entrypoint<I, S>(mut self, entrypoint_path: impl AsRef<str>, entrypoint_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.entrypoint_path = Some(entrypoint_path.as_ref().to_owned());
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
+        self
+    }
+
     /// Adds a volume
-    pub fn volume(mut self, volume: (impl AsRef<str>, impl AsRef<str>)) -> Self {
+    pub fn volume(mut self, key: impl AsRef<str>, val: impl AsRef<str>) -> Self {
         self.volumes
-            .push((volume.0.as_ref().to_owned(), volume.1.as_ref().to_owned()));
+            .push((key.as_ref().to_owned(), val.as_ref().to_owned()));
         self
     }
 
-    pub fn volumes(mut self, volumes: &[(&str, &str)]) -> Self {
-        self.volumes = volumes.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push((e.0.to_string(), e.1.to_string()));
-            acc
-        });
+    /// Adds multiple volumes
+    pub fn volumes<I, K, V>(mut self, volumes: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        self.volumes.extend(
+            volumes
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
+        );
         self
     }
 
-    /// Sets the `build_args`
-    pub fn build_args(mut self, build_args: &[&str]) -> Self {
-        self.build_args = build_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Add arguments to be passed to `docker build`
+    pub fn build_args<I, S>(mut self, build_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.build_args
+            .extend(build_args.into_iter().map(|s| s.as_ref().to_owned()));
         self
     }
 
-    /// Sets the `create_args`
-    pub fn create_args(mut self, create_args: &[&str]) -> Self {
-        self.create_args = create_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Add arguments to be passed to `docker create`
+    pub fn create_args<I, S>(mut self, create_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.create_args
+            .extend(create_args.into_iter().map(|s| s.as_ref().to_owned()));
         self
     }
 
-    pub fn environment_vars(mut self, environment_vars: &[(&str, &str)]) -> Self {
-        self.environment_vars = environment_vars.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push((e.0.to_string(), e.1.to_string()));
-            acc
-        });
+    /// Adds environment vars to be passed
+    pub fn environment_vars<I, K, V>(mut self, environment_vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        self.environment_vars.extend(
+            environment_vars
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
+        );
         self
     }
 
-    pub fn entrypoint_args(mut self, entrypoint_args: &[&str]) -> Self {
-        self.entrypoint_args = entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Add arguments to be passed to the entrypoint
+    pub fn entrypoint_args<I, S>(mut self, entrypoint_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_owned()));
         self
     }
 
@@ -348,22 +378,32 @@ impl ContainerNetwork {
         Ok(self)
     }
 
-    /// Adds the volumes to every container
-    pub fn add_common_volumes(&mut self, volumes: &[(&str, &str)]) -> &mut Self {
+    /// Adds the volumes to every container currently in the network
+    pub fn add_common_volumes<I, K, V>(&mut self, volumes: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let volumes: Vec<(String, String)> = volumes
+            .into_iter()
+            .map(|x| (x.0.as_ref().to_string(), x.1.as_ref().to_string()))
+            .collect();
         for container in self.containers.values_mut() {
-            container
-                .volumes
-                .extend(volumes.iter().map(|x| (x.0.to_owned(), x.1.to_owned())))
+            container.volumes.extend(volumes.iter().cloned())
         }
         self
     }
 
     /// Adds the arguments to every container
-    pub fn add_common_entrypoint_args(&mut self, args: &[&str]) -> &mut Self {
+    pub fn add_common_entrypoint_args<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
         for container in self.containers.values_mut() {
-            container
-                .entrypoint_args
-                .extend(args.iter().map(|x| x.to_string()))
+            container.entrypoint_args.extend(args.iter().cloned())
         }
         self
     }

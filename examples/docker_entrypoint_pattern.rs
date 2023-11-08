@@ -98,10 +98,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     ])
     .await
     .stack()?;
-    let entrypoint = Some(format!(
-        "./target/{container_target}/release/examples/{bin_entrypoint}"
-    ));
-    let entrypoint = entrypoint.as_deref();
+    let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
 
     // Container entrypoint binaries have no arguments passed to them by default. We
     // pass "--entry-name ..." to each of them to tell them what to specialize into,
@@ -121,27 +118,18 @@ async fn container_runner(args: &Args) -> Result<()> {
         "test",
         vec![
             // a container with a plain fedora:38 image
-            Container::new(
-                "container0",
-                Dockerfile::name_tag("fedora:38"),
-                entrypoint,
-                &["--entry-name", "container0"],
-            ),
+            Container::new("container0", Dockerfile::name_tag("fedora:38"))
+                .entrypoint(entrypoint, ["--entry-name", "container0"]),
             // uses the example dockerfile
             Container::new(
                 "container1",
                 Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
-                entrypoint,
-                &["--entry-name", "container1"],
-            ),
+            )
+            .entrypoint(entrypoint, ["--entry-name", "container1"]),
             // uses the literal string, allowing for self-contained complicated systems in a single
             // file
-            Container::new(
-                "container2",
-                Dockerfile::contents(CONTAINER2_DOCKERFILE),
-                entrypoint,
-                &container2_args,
-            ),
+            Container::new("container2", Dockerfile::contents(CONTAINER2_DOCKERFILE))
+                .entrypoint(entrypoint, container2_args),
         ],
         Some(dockerfiles_dir),
         // TODO see issue on `ContainerNetwork` struct documentation
@@ -149,8 +137,9 @@ async fn container_runner(args: &Args) -> Result<()> {
         logs_dir,
     )
     .stack()?;
-    // check the local ./logs directory
-    cn.add_common_volumes(&[(logs_dir, "/logs")]);
+    // check the local "./logs" directory, this gets mapped to "/logs" inside the
+    // containers
+    cn.add_common_volumes([(logs_dir, "/logs")]);
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
     cn.add_common_entrypoint_args(&["--uuid", &uuid]);

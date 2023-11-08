@@ -269,11 +269,19 @@ pub async fn close_file(mut file: File) -> Result<()> {
 ///   any '/' or '\\')
 ///
 /// - If `acquire_dir_path(dir)` fails
-pub async fn remove_files_in_dir(dir: impl AsRef<Path>, ends_with: &[&str]) -> Result<()> {
+pub async fn remove_files_in_dir<I, S>(dir: impl AsRef<Path>, ends_with: I) -> Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let mut file_name_set: HashSet<OsString> = HashSet::new();
     let mut extension_set: HashSet<OsString> = HashSet::new();
+    let ends_with: Vec<String> = ends_with
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .collect();
     for (i, s) in ends_with.iter().enumerate() {
-        let mut s = *s;
+        let mut s = s.as_str();
         if s.is_empty() {
             return Err(Error::from(format!(
                 "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} is \

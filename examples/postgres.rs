@@ -90,10 +90,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     ])
     .await
     .stack()?;
-    let entrypoint = Some(format!(
-        "./target/{container_target}/release/examples/{bin_entrypoint}"
-    ));
-    let entrypoint = entrypoint.as_deref();
+    let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
 
     // we can't put the directory in source control with the .gitignore trick,
     // because postgres doesn't like the .gitignore
@@ -105,21 +102,19 @@ async fn container_runner(args: &Args) -> Result<()> {
         fs::create_dir_all(&pg_data_path).await.stack()?;
     }
 
-    let containers = vec![Container::new(
-        "test_runner",
-        Dockerfile::Contents(test_dockerfile()),
-        entrypoint,
-        &["--entry-name", "test_runner"],
-    )];
-    // if exposing a port beyond the machine, use something like this on the
-    // container
-    //.create_args(&["-p", "8000:8000"])];
+    let containers = vec![
+        Container::new("test_runner", Dockerfile::contents(test_dockerfile()))
+            .entrypoint(entrypoint, ["--entry-name", "test_runner"])
+            // if exposing a port beyond the machine, use something like this on the
+            // container
+            .create_args(["-p", "8000:8000"]),
+    ];
 
     let mut cn =
         ContainerNetwork::new("test", containers, Some(dockerfiles_dir), true, logs_dir).stack()?;
-    cn.add_common_volumes(&[(logs_dir, "/logs")]);
+    cn.add_common_volumes([(logs_dir, "/logs")]);
     let uuid = cn.uuid_as_string();
-    cn.add_common_entrypoint_args(&["--uuid", &uuid]);
+    cn.add_common_entrypoint_args(["--uuid", &uuid]);
 
     // Adding the postgres container afterwards so that it doesn't receive all the
     // common flags.
@@ -131,15 +126,13 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_container(
         Container::new(
             "postgres",
-            Dockerfile::NameTag("postgres:16".to_owned()),
-            None,
-            &[],
+            Dockerfile::name_tag("postgres:16"),
         )
-        .volumes(&[(
-            &pg_data_path.to_str().stack()?,
+        .volume(
+            pg_data_path.to_str().stack()?,
             "/var/lib/postgresql/data",
-        )])
-        .environment_vars(&[
+        )
+        .environment_vars([
             ("POSTGRES_PASSWORD", "root"),
             ("POSTGRES_USER", "postgres"),
             // this conveniently causes postgres to create a
