@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
     fs::File,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufReader},
     process::{self, Child, ChildStdin},
     sync::Mutex,
     task::{self, JoinHandle},
@@ -256,8 +256,8 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     std_err: bool,
 ) {
     let program_name = program_name.to_string_lossy();
-    // for tracking how much has been written to the filez
-    let mut log_len = 0;
+    // for tracking how much has been written to the file
+    let mut log_len = 0u64;
     let mut previous_newline = false;
     let mut nonempty = false;
     // 8 KB, like BufReader
@@ -288,11 +288,11 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                         if deque.len().saturating_add(bytes.len()) > limit {
                             if bytes.len() >= limit {
                                 deque.clear();
-                                deque.extend(bytes[(bytes.len() - limit)..].iter());
+                                deque.extend(bytes[bytes.len().wrapping_sub(limit)..].iter());
                             } else {
-                                // use saturation because the record is public
-                                let start = deque.len() + bytes.len() - limit;
-                                deque.drain(start..);
+                                let start =
+                                    deque.len().wrapping_sub(limit).wrapping_add(bytes.len());
+                                deque.drain(..start);
                                 deque.extend(bytes.iter());
                             }
                         } else {
@@ -304,13 +304,24 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 }
                 // copying to file
                 if let Some(ref mut std_log) = std_log {
-                    log_len += bytes.len();
                     let mut reset = false;
+                    let len = u64::try_from(bytes.len()).unwrap();
+                    log_len = log_len.checked_add(len).unwrap();
                     if let Some(limit) = log_limit {
-                        if (log_len as u64) > limit {
-                            std_log.set_len(0).await.unwrap();
-                            log_len = 0;
+                        if log_len > limit {
                             reset = true;
+                            std_log.set_len(0).await.unwrap();
+                            std_log.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+                            let start = if len > limit {
+                                len.wrapping_sub(limit)
+                            } else {
+                                0
+                            };
+                            std_log
+                                .write_all(&bytes[usize::try_from(start).unwrap()..])
+                                .await
+                                .expect("command recorder to file failed");
+                            log_len = len.wrapping_sub(start);
                         }
                     }
                     if !reset {
