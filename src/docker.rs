@@ -145,6 +145,25 @@ impl Container {
         Ok(self)
     }
 
+    /// Sets `entrypoint_file` and adds to `entrypoint_args`
+    pub fn entrypoint<I, S>(mut self, entrypoint_file: impl AsRef<str>, entrypoint_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.entrypoint_file = Some(entrypoint_file.as_ref().to_owned());
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
+        self
+    }
+
+    /// Adds an entrypoint argument
+    pub fn entrypoint_arg(mut self, entrypoint_arg: impl AsRef<str>) -> Self {
+        self.entrypoint_args
+            .push(entrypoint_arg.as_ref().to_string());
+        self
+    }
+
     /// Adds a volume
     pub fn volume(mut self, key: impl AsRef<str>, val: impl AsRef<str>) -> Self {
         self.volumes
@@ -219,6 +238,28 @@ impl Container {
     pub fn no_uuid_for_host_name(mut self) -> Self {
         self.no_uuid_for_host_name = true;
         self
+    }
+
+    /// Runs this container by itself
+    pub async fn run(
+        self,
+        dockerfile_write_dir: Option<&str>,
+        timeout: Duration,
+        log_dir: &str,
+        debug: bool,
+    ) -> Result<CommandResult> {
+        let mut cn = ContainerNetwork::new(
+            "super_orchestrator",
+            vec![self],
+            dockerfile_write_dir,
+            true,
+            log_dir,
+        )
+        .stack()?;
+        cn.run_all(debug).await.stack()?;
+        cn.wait_with_timeout_all(true, timeout).await.stack()?;
+        cn.terminate_all().await;
+        Ok(cn.container_results.pop_first().unwrap().1.unwrap())
     }
 }
 
@@ -913,7 +954,7 @@ impl ContainerNetwork {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return Err(Error::from(format!(
+                        return Err(Error::timeout().add_kind_locationless(format!(
                             "ContainerNetwork::wait_with_timeout() timeout waiting for container \
                              names {names:?} to complete"
                         )))
