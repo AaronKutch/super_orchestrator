@@ -195,9 +195,7 @@ async fn container0_runner(args: &Args) -> Result<()> {
 
 async fn container1_runner() -> Result<()> {
     let host = "0.0.0.0:26000";
-    let mut nm = NetMessenger::listen_single_connect(host, TIMEOUT)
-        .await
-        .stack()?;
+    let mut nm = NetMessenger::listen(host, TIMEOUT).await.stack()?;
 
     info!("container 1 runner is waiting to get something from container 0");
     let s: String = nm.recv().await.stack()?;
