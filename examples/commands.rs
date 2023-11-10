@@ -85,6 +85,20 @@ async fn main() -> Result<()> {
     ensure!(file.len() <= 10 * 1024);
     ensure!(!file.chars().any(|c| c != 'e'));
 
+    // disable recording entirely if we don't need it
+    let comres = Command::new("cargo r --example commands --quiet -- --print")
+        .arg("--to-stdout")
+        .arg(&many_bytes)
+        .arg("--to-stderr")
+        .arg(&many_bytes)
+        .recording(false)
+        .run_to_completion()
+        .await
+        .stack()?;
+    comres.assert_success().stack()?;
+    ensure!(comres.stdout.is_empty());
+    ensure!(comres.stderr.is_empty());
+
     Ok(())
 }
 
