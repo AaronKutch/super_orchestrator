@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.0] - 2023-11-11
+### Fixes
+- Fixed that `Command`s and all downstream constructs would add an extra newline byte at the end of
+  standard stream copying even if there wasn't one in actuality
+- Fixed debug outputs freezing if a newline did not come
+
+### Changes
+- Overhaul of many function signatures
+- new `external_entrypoint` that volumes to the root of the container
+- Updated dependecies, moved some into dev-dependencies
+- Changed many things about how `Commands` handle debug and log files
+- `CommandResultNoDebug` now has the stream data fields (still not including them in the debug impls)
+  since they can be limited in several ways now
+- `CommandResult::no_debug` now takes by value
+- renamed `CommandResultNoDbg` to `CommandResultNoDebug`
+- many other changes
+
 ## [0.8.0] - 2023-10-18
 ### Fixes
 - Fixed that `no_uuid_for_host_name` was doing the opposite of what it was supposed to
@@ -40,7 +57,7 @@
 ### Changes
 - `stacked_errors` 0.3.0
 - Derived `Clone` for `CommandResult`
-- Added `CommandResultNoDbg`
+- Added `CommandResultNoDebug`
 - Termination now will set the results it can for `Command`s and `ContainerNetwork`s
 - Docker networks with `NetMessenger`s now have much cleaner errors
 

@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{
     fs::{File, OpenOptions},
@@ -8,15 +9,15 @@ use tokio::{
 
 use crate::{acquire_dir_path, acquire_file_path, close_file};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct WriteOptions {
-    // creates file if nonexistent
+    /// creates file if nonexistent
     pub create: bool,
-    // truncation by default, append otherwise
+    /// append rather than truncate
     pub append: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ReadOrWrite {
     Read,
     Write(WriteOptions),
@@ -24,23 +25,23 @@ pub enum ReadOrWrite {
 
 /// A wrapper combining capabilities from `tokio::fs::{OpenOptions, File}` with
 /// a lot of opinionated defaults and `close_file`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileOptions {
     pub path: PathBuf,
     pub options: ReadOrWrite,
 }
 
 impl FileOptions {
-    pub fn read(file_path: &str) -> Self {
+    pub fn read(file_path: impl AsRef<Path>) -> Self {
         Self {
-            path: PathBuf::from(file_path.to_owned()),
+            path: file_path.as_ref().to_owned(),
             options: ReadOrWrite::Read,
         }
     }
 
-    pub fn read2(directory: &str, file_name: &str) -> Self {
-        let mut path = PathBuf::from(directory.to_owned());
-        path.push(file_name);
+    pub fn read2(directory: impl AsRef<Path>, file_name: impl AsRef<Path>) -> Self {
+        let mut path = directory.as_ref().to_owned();
+        path.push(file_name.as_ref());
         Self {
             path,
             options: ReadOrWrite::Read,
@@ -48,9 +49,9 @@ impl FileOptions {
     }
 
     /// Sets `create` to true and `append` to false by default
-    pub fn write(file_path: &str) -> Self {
+    pub fn write(file_path: impl AsRef<Path>) -> Self {
         Self {
-            path: PathBuf::from(file_path.to_owned()),
+            path: file_path.as_ref().to_owned(),
             options: ReadOrWrite::Write(WriteOptions {
                 create: true,
                 append: false,
@@ -59,9 +60,9 @@ impl FileOptions {
     }
 
     /// Sets `create` to true and `append` to false by default
-    pub fn write2(directory: &str, file_name: &str) -> Self {
-        let mut path = PathBuf::from(directory.to_owned());
-        path.push(file_name);
+    pub fn write2(directory: impl AsRef<Path>, file_name: impl AsRef<Path>) -> Self {
+        let mut path = directory.as_ref().to_owned();
+        path.push(file_name.as_ref());
         Self {
             path,
             options: ReadOrWrite::Write(WriteOptions {
@@ -100,9 +101,7 @@ impl FileOptions {
         let dir = self
             .path
             .parent()
-            .stack_err(|| "FileOptions::preacquire() -> empty path")?
-            .to_str()
-            .stack_err(|| "bad OsStr conversion")?;
+            .stack_err(|| "FileOptions::preacquire() -> empty path")?;
         let mut path = acquire_dir_path(dir)
             .await
             .stack_err(|| format!("{self:?}.preacquire() could not acquire directory"))?;
@@ -119,14 +118,11 @@ impl FileOptions {
                 }
             }
         }
-        acquire_file_path(path.to_str().stack_err(|| "bad OsStr conversion")?)
-            .await
-            .stack_err(|| {
-                format!(
-                    "{self:?}.precheck() could not acquire path to combined directory and file \
-                     name"
-                )
-            })
+        acquire_file_path(path).await.stack_err(|| {
+            format!(
+                "{self:?}.precheck() could not acquire path to combined directory and file name"
+            )
+        })
     }
 
     pub async fn acquire_file(&self) -> Result<File> {
@@ -147,7 +143,7 @@ impl FileOptions {
                         .create(true)
                         .truncate(!append)
                         .append(append)
-                        .open(&path)
+                        .open(path)
                         .await
                         .stack_err(|| format!("{self:?}.acquire_file()"))?
                 } else {
@@ -163,7 +159,7 @@ impl FileOptions {
         })
     }
 
-    pub async fn read_to_string(file_path: &str) -> Result<String> {
+    pub async fn read_to_string(file_path: impl AsRef<Path>) -> Result<String> {
         let mut file = Self::read(file_path)
             .acquire_file()
             .await
@@ -173,7 +169,10 @@ impl FileOptions {
         Ok(s)
     }
 
-    pub async fn read2_to_string(directory: &str, file_name: &str) -> Result<String> {
+    pub async fn read2_to_string(
+        directory: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+    ) -> Result<String> {
         let mut file = Self::read2(directory, file_name)
             .acquire_file()
             .await
@@ -183,7 +182,7 @@ impl FileOptions {
         Ok(s)
     }
 
-    pub async fn write_str(file_path: &str, s: &str) -> Result<()> {
+    pub async fn write_str(file_path: impl AsRef<Path>, s: &str) -> Result<()> {
         let mut file = Self::write(file_path)
             .acquire_file()
             .await
@@ -193,7 +192,11 @@ impl FileOptions {
         Ok(())
     }
 
-    pub async fn write2_str(directory: &str, file_name: &str, s: &str) -> Result<()> {
+    pub async fn write2_str(
+        directory: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+        s: &str,
+    ) -> Result<()> {
         let mut file = Self::write2(directory, file_name)
             .acquire_file()
             .await
@@ -205,14 +208,19 @@ impl FileOptions {
 
     /// Copies bytes from the source to destination. Does not do any permissions
     /// copying unlike `tokio::fs::copy`
-    pub async fn copy(src_file_path: &str, dst_file_path: &str) -> Result<()> {
+    pub async fn copy(
+        src_file_path: impl AsRef<Path>,
+        dst_file_path: impl AsRef<Path>,
+    ) -> Result<()> {
+        let src_file_path = src_file_path.as_ref();
+        let dst_file_path = dst_file_path.as_ref();
         let src = Self::read(src_file_path)
             .acquire_file()
             .await
             .stack_err(|| {
                 format!(
-                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
-                     opening source"
+                    "copy(src_file_path: {src_file_path:?}, dst_file_path: {dst_file_path:?}) \
+                     when opening source"
                 )
             })?;
         let mut dst = Self::write(dst_file_path)
@@ -220,16 +228,16 @@ impl FileOptions {
             .await
             .stack_err(|| {
                 format!(
-                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
-                     opening destination"
+                    "copy(src_file_path: {src_file_path:?}, dst_file_path: {dst_file_path:?}) \
+                     when opening destination"
                 )
             })?;
         tokio::io::copy_buf(&mut BufReader::new(src), &mut dst)
             .await
             .stack_err(|| {
                 format!(
-                    "copy(src_file_path: {src_file_path}, dst_file_path: {dst_file_path}) when \
-                     copying"
+                    "copy(src_file_path: {src_file_path:?}, dst_file_path: {dst_file_path:?}) \
+                     when copying"
                 )
             })?;
         Ok(())

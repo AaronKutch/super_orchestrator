@@ -19,10 +19,15 @@ jobs:
           rustup default stable
       - name: Run test suite
         run: |
-          cargo r --example docker_entrypoint_pattern
-          cargo r --example clean
           cargo test --all-features
           cargo test --release --all-features
+          cargo r --example paths
+          cargo r --example basic_commands
+          cargo r --example commands
+          cargo r --example basic_containers
+          cargo r --example docker_entrypoint_pattern
+          cargo r --example postgres
+          cargo r --example clean
 
   rustfmt:
     name: Rustfmt

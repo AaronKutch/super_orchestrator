@@ -1,25 +1,31 @@
-//! Functions for managing Docker containers
+//! Docker container management
 //!
-//! See the `docker_entrypoint_pattern` example for how to use all of this
-//! together.
+//! See the `docker_entrypoint_pattern` and `postgres` crate examples
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
     time::Duration,
 };
 
 use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
 use uuid::Uuid;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
-    FileOptions,
+    acquire_dir_path, acquire_file_path, acquire_path, docker_helpers::wait_get_ip_addr, Command,
+    CommandResult, CommandRunner, FileOptions,
 };
 
+// No `OsString`s or `PathBufs` for these structs, it introduces too many issues
+// (e.g. the commands get sent to docker and I don't know exactly what
+// normalization it performs). Besides, this should be as cross platform as
+// possible.
+
 /// Ways of using a dockerfile for building a container
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Dockerfile {
     /// Builds using an image in the format "name:tag" such as "fedora:38"
     /// (running will call something such as `docker pull name:tag`)
@@ -33,31 +39,56 @@ pub enum Dockerfile {
     Contents(String),
 }
 
+impl Dockerfile {
+    /// Returns `Self::NameTag` with the argument
+    pub fn name_tag(name_and_tag: impl AsRef<str>) -> Self {
+        Self::NameTag(name_and_tag.as_ref().to_owned())
+    }
+
+    /// Returns `Self::Path` with the argument
+    pub fn path(path_to_dockerfile: impl AsRef<str>) -> Self {
+        Self::Path(path_to_dockerfile.as_ref().to_owned())
+    }
+
+    /// Returns `Self::Contents` with the argument
+    pub fn contents(contents_of_dockerfile: impl AsRef<str>) -> Self {
+        Self::Contents(contents_of_dockerfile.as_ref().to_owned())
+    }
+}
+
 /// Container running information, put this into a `ContainerNetwork`
-#[derive(Debug, Clone)]
+///
+/// # Note
+///
+/// Weird things happen if volumes to the same container overlap, e.g. if
+/// the directory used for logs is added as a volume, and a volume to another
+/// path contained within the directory is also added as a volume.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
     /// The name of the container, note the "name:tag" docker argument would go
     /// in [Dockerfile::NameTag]
     pub name: String,
-    /// Usually should be the same as the tag
+    /// Hostname of the URL that could access the container (the container can
+    /// alternatively be accessed by an ip address). Usually, this should be the
+    /// same as `name``.
     pub host_name: String,
     /// If true, `host_name` is used directly without appending a UUID
     pub no_uuid_for_host_name: bool,
-    /// The dockerfile arguments
+    /// The dockerfile
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
     pub build_args: Vec<String>,
-    /// Any flags and args passed to to `docker create`. Volumes by `volumes
-    /// have the advantage of being canonicalized and prechecked.
+    /// Any flags and args passed to to `docker create`
     pub create_args: Vec<String>,
-    /// note that the entrypoint binary is automatically included if
-    /// `extrypoint_path` is set
+    /// Passed as `--volume` to the create args, but these have the advantage of
+    /// being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
     /// Environment variable pairs passed to docker
     pub environment_vars: Vec<(String, String)>,
-    /// Path to the entrypoint binary locally
-    pub entrypoint_path: Option<String>,
-    /// passed in as ["arg1", "arg2", ...] with the bracket and quotations being
+    /// When set, this indicates that the container should run an entrypoint
+    /// using this path to a binary in the container
+    pub entrypoint_file: Option<String>,
+    /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
 }
@@ -65,12 +96,7 @@ pub struct Container {
 impl Container {
     /// Creates the information needed to describe a `Container`. `name` is used
     /// for both the `name` and `hostname`.
-    pub fn new(
-        name: &str,
-        dockerfile: Dockerfile,
-        entrypoint_path: Option<&str>,
-        entrypoint_args: &[&str],
-    ) -> Self {
+    pub fn new(name: &str, dockerfile: Dockerfile) -> Self {
         Self {
             name: name.to_owned(),
             host_name: name.to_owned(),
@@ -80,53 +106,132 @@ impl Container {
             create_args: vec![],
             volumes: vec![],
             environment_vars: vec![],
-            entrypoint_path: entrypoint_path.map(|s| s.to_owned()),
-            entrypoint_args: entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
-                acc.push(e.to_string());
-                acc
-            }),
+            entrypoint_file: None,
+            entrypoint_args: vec![],
         }
     }
 
-    pub fn volumes(mut self, volumes: &[(&str, &str)]) -> Self {
-        self.volumes = volumes.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push((e.0.to_string(), e.1.to_string()));
-            acc
-        });
+    /// This is used in the entrypoint pattern where an externally compiled
+    /// binary is used as the entrypoint for the container. This adds a volume
+    /// from `entrypoint_binary` to "/{binary_file_name}", sets
+    /// `entrypoint_file` to that, and also adds the
+    /// `entrypoint_args`. Returns an error if the binary file path cannot be
+    /// acquired.
+    pub async fn external_entrypoint<I, S>(
+        mut self,
+        entrypoint_binary: impl AsRef<str>,
+        entrypoint_args: I,
+    ) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let binary_path = acquire_file_path(entrypoint_binary.as_ref())
+            .await
+            .stack_err(|| "external_entrypoint could not acquire the external entrypoint binary")?;
+        let binary_file_name = binary_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let entrypoint_file = format!("/{binary_file_name}");
+        self.entrypoint_file = Some(entrypoint_file.clone());
+        self.volumes.push((
+            binary_path.as_os_str().to_str().unwrap().to_owned(),
+            entrypoint_file,
+        ));
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
+        Ok(self)
+    }
+
+    /// Sets `entrypoint_file` and adds to `entrypoint_args`
+    pub fn entrypoint<I, S>(mut self, entrypoint_file: impl AsRef<str>, entrypoint_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.entrypoint_file = Some(entrypoint_file.as_ref().to_owned());
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         self
     }
 
-    /// Sets the `build_args`
-    pub fn build_args(mut self, build_args: &[&str]) -> Self {
-        self.build_args = build_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Adds an entrypoint argument
+    pub fn entrypoint_arg(mut self, entrypoint_arg: impl AsRef<str>) -> Self {
+        self.entrypoint_args
+            .push(entrypoint_arg.as_ref().to_string());
         self
     }
 
-    /// Sets the `create_args`
-    pub fn create_args(mut self, create_args: &[&str]) -> Self {
-        self.create_args = create_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Adds a volume
+    pub fn volume(mut self, key: impl AsRef<str>, val: impl AsRef<str>) -> Self {
+        self.volumes
+            .push((key.as_ref().to_owned(), val.as_ref().to_owned()));
         self
     }
 
-    pub fn environment_vars(mut self, environment_vars: &[(&str, &str)]) -> Self {
-        self.environment_vars = environment_vars.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push((e.0.to_string(), e.1.to_string()));
-            acc
-        });
+    /// Adds multiple volumes
+    pub fn volumes<I, K, V>(mut self, volumes: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        self.volumes.extend(
+            volumes
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
+        );
         self
     }
 
-    pub fn entrypoint_args(mut self, entrypoint_args: &[&str]) -> Self {
-        self.entrypoint_args = entrypoint_args.iter().fold(Vec::new(), |mut acc, e| {
-            acc.push(e.to_string());
-            acc
-        });
+    /// Add arguments to be passed to `docker build`
+    pub fn build_args<I, S>(mut self, build_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.build_args
+            .extend(build_args.into_iter().map(|s| s.as_ref().to_owned()));
+        self
+    }
+
+    /// Add arguments to be passed to `docker create`
+    pub fn create_args<I, S>(mut self, create_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.create_args
+            .extend(create_args.into_iter().map(|s| s.as_ref().to_owned()));
+        self
+    }
+
+    /// Adds environment vars to be passed
+    pub fn environment_vars<I, K, V>(mut self, environment_vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        self.environment_vars.extend(
+            environment_vars
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
+        );
+        self
+    }
+
+    /// Add arguments to be passed to the entrypoint
+    pub fn entrypoint_args<I, S>(mut self, entrypoint_args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_owned()));
         self
     }
 
@@ -134,6 +239,28 @@ impl Container {
     pub fn no_uuid_for_host_name(mut self) -> Self {
         self.no_uuid_for_host_name = true;
         self
+    }
+
+    /// Runs this container by itself
+    pub async fn run(
+        self,
+        dockerfile_write_dir: Option<&str>,
+        timeout: Duration,
+        log_dir: &str,
+        debug: bool,
+    ) -> Result<CommandResult> {
+        let mut cn = ContainerNetwork::new(
+            "super_orchestrator",
+            vec![self],
+            dockerfile_write_dir,
+            true,
+            log_dir,
+        )
+        .stack()?;
+        cn.run_all(debug).await.stack()?;
+        cn.wait_with_timeout_all(true, timeout).await.stack()?;
+        cn.terminate_all().await;
+        Ok(cn.container_results.pop_first().unwrap().1.unwrap())
     }
 }
 
@@ -189,7 +316,7 @@ impl Drop for ContainerNetwork {
 impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
-    /// This function generates a `Uuid` used for enabling multiple
+    /// This function generates a UUID used for enabling multiple
     /// `ContainerNetwork`s with the same names and ids to run simultaneously.
     /// The uuid is appended to network names, container names, and hostnames.
     /// Arguments involving container names automatically append the uuid.
@@ -255,14 +382,17 @@ impl ContainerNetwork {
         })
     }
 
+    /// Returns the common UUID
     pub fn uuid(&self) -> Uuid {
         self.uuid
     }
 
+    /// Returns the common UUID as a string
     pub fn uuid_as_string(&self) -> String {
         self.uuid.to_string()
     }
 
+    /// Returns the full network name
     pub fn network_name_with_uuid(&self) -> String {
         format!("{}_{}", self.network_name, self.uuid)
     }
@@ -296,6 +426,7 @@ impl ContainerNetwork {
         }
     }
 
+    /// Adds the container to the inactive set
     pub fn add_container(&mut self, container: Container) -> Result<&mut Self> {
         if self.dockerfile_write_dir.is_none()
             && matches!(container.dockerfile, Dockerfile::Contents(_))
@@ -315,26 +446,37 @@ impl ContainerNetwork {
         Ok(self)
     }
 
-    /// Adds the volumes to every container
-    pub fn add_common_volumes(&mut self, volumes: &[(&str, &str)]) -> &mut Self {
+    /// Adds the volumes to every container currently in the network
+    pub fn add_common_volumes<I, K, V>(&mut self, volumes: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let volumes: Vec<(String, String)> = volumes
+            .into_iter()
+            .map(|x| (x.0.as_ref().to_string(), x.1.as_ref().to_string()))
+            .collect();
         for container in self.containers.values_mut() {
-            container
-                .volumes
-                .extend(volumes.iter().map(|x| (x.0.to_owned(), x.1.to_owned())))
+            container.volumes.extend(volumes.iter().cloned())
         }
         self
     }
 
     /// Adds the arguments to every container
-    pub fn add_common_entrypoint_args(&mut self, args: &[&str]) -> &mut Self {
+    pub fn add_common_entrypoint_args<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
         for container in self.containers.values_mut() {
-            container
-                .entrypoint_args
-                .extend(args.iter().map(|x| x.to_string()))
+            container.entrypoint_args.extend(args.iter().cloned())
         }
         self
     }
 
+    /// Get a map of active container names to ids
     pub fn get_active_container_ids(&self) -> &BTreeMap<String, String> {
         &self.active_container_ids
     }
@@ -363,7 +505,8 @@ impl ContainerNetwork {
                 // TODO we should parse errors to differentiate whether it is
                 // simply a race condition where the container finished before
                 // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f", &[&docker_id])
+                let _ = Command::new("docker rm -f")
+                    .arg(docker_id)
                     .run_to_completion()
                     .await;
                 if let Some(mut runner) = self.container_runners.remove(*name) {
@@ -382,7 +525,8 @@ impl ContainerNetwork {
                 // TODO we should parse errors to differentiate whether it is
                 // simply a race condition where the container finished before
                 // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f", &[&docker_id])
+                let _ = Command::new("docker rm -f")
+                    .arg(docker_id)
                     .run_to_completion()
                     .await;
                 if let Some(mut runner) = self.container_runners.remove(&name) {
@@ -398,7 +542,8 @@ impl ContainerNetwork {
     pub async fn terminate_all(&mut self) {
         self.terminate_containers().await;
         if self.network_active {
-            let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
+            let _ = Command::new("docker network rm")
+                .arg(self.network_name_with_uuid())
                 .run_to_completion()
                 .await;
             self.network_active = false;
@@ -406,10 +551,10 @@ impl ContainerNetwork {
     }
 
     /// Runs only the given `names`
-    pub async fn run(&mut self, names: &[&str], ci_mode: bool) -> Result<()> {
-        if ci_mode {
+    pub async fn run(&mut self, names: &[&str], debug: bool) -> Result<()> {
+        if debug {
             info!(
-                "`ContainerNetwork::run(ci_mode: true, ..)` with UUID {}",
+                "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
                 self.uuid_as_string()
             )
         }
@@ -434,7 +579,7 @@ impl ContainerNetwork {
 
         let debug_log = FileOptions::write2(
             &self.log_dir,
-            &format!("container_network_{}.log", self.network_name),
+            format!("container_network_{}.log", self.network_name),
         );
         // prechecking the log directory
         debug_log
@@ -445,16 +590,13 @@ impl ContainerNetwork {
         let mut get_dockerfile_write_dir = false;
         for name in names {
             let container = &self.containers[*name];
-            if let Some(ref path) = container.entrypoint_path {
-                acquire_file_path(path).await?;
-            }
             match container.dockerfile {
                 Dockerfile::NameTag(_) => {
                     // adds unnecessary time to common case, just catch it at
                     // build time or else we should add a flag to do this step
                     // (which does update the image if it has new commits)
                     /*let comres = Command::new("docker pull", &[&name_tag])
-                        .ci_mode(ci_mode)
+                        .debug(debug)
                         .stdout_log(&debug_log)
                         .stderr_log(&debug_log)
                         .run_to_completion()
@@ -486,9 +628,9 @@ impl ContainerNetwork {
         for name in names {
             // remove potentially previously existing container with same name
             let _ = Command::new("docker rm -f", &[name])
-                // never put in CI mode or put in debug file, error on nonexistent container is
-                // confusing, actual errors will be returned
-                .ci_mode(false)
+                // never put in debug_log mode or put in debug file, error on
+                // nonexistent container is confusing, actual errors will be returned
+                .debug(false)
                 .run_to_completion()
                 .await?;
         }
@@ -499,27 +641,23 @@ impl ContainerNetwork {
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
             /*let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
-            .ci_mode(false)
+            .debug(false)
             .stdout_log(&debug_log)
             .stderr_log(&debug_log)
             .run_to_completion()
             .await;*/
             let comres = if self.is_not_internal {
-                Command::new("docker network create", &[&self.network_name_with_uuid()])
-                    .ci_mode(false)
-                    .stdout_log(&debug_log)
-                    .stderr_log(&debug_log)
+                Command::new("docker network create")
+                    .arg(self.network_name_with_uuid())
+                    .log(Some(&debug_log))
                     .run_to_completion()
                     .await?
             } else {
-                Command::new("docker network create --internal", &[
-                    &self.network_name_with_uuid()
-                ])
-                .ci_mode(false)
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log)
-                .run_to_completion()
-                .await?
+                Command::new("docker network create --internal")
+                    .arg(self.network_name_with_uuid())
+                    .log(Some(&debug_log))
+                    .run_to_completion()
+                    .await?
             };
             // TODO we can get the network id
             comres.assert_success().stack()?;
@@ -529,14 +667,6 @@ impl ContainerNetwork {
         // run all the creation first so that everything is pulled and prepared
         for name in names {
             let container = &self.containers[*name];
-
-            let bin_path = if let Some(ref path) = container.entrypoint_path {
-                Some(acquire_file_path(path).await?)
-            } else {
-                None
-            };
-            let bin_s = bin_path.map(|p| p.file_name().unwrap().to_str().unwrap().to_owned());
-            let bin_s = bin_s.as_ref();
 
             // baseline args
             let network_name = self.network_name_with_uuid();
@@ -563,16 +693,8 @@ impl ContainerNetwork {
             }
 
             // volumes
-            let mut volumes = container.volumes.clone();
-            // include the needed binary
-            if let Some(bin_s) = bin_s {
-                volumes.push((
-                    container.entrypoint_path.as_ref().unwrap().to_owned(),
-                    format!("/usr/bin/{bin_s}"),
-                ));
-            }
             let mut combined_volumes = vec![];
-            for volume in &volumes {
+            for volume in &container.volumes {
                 let path = acquire_path(&volume.0)
                     .await
                     .stack_err(|| "could not locate local part of volume argument")?;
@@ -614,14 +736,14 @@ impl ContainerNetwork {
                         build_args.push(s);
                     }
                     build_args.push(&dockerfile_dir);
-                    Command::new("docker", &build_args)
-                        .ci_mode(ci_mode)
-                        .stdout_log(&debug_log)
-                        .stderr_log(&debug_log)
+                    Command::new("docker")
+                        .args(build_args)
+                        .debug(debug)
+                        .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
                         .assert_success()
-                        .stack_err(|| format!("Failed when using the dockerfile at {path}"))?;
+                        .stack_err(|| format!("Failed when using the dockerfile at {path:?}"))?;
                 }
                 Dockerfile::Contents(ref contents) => {
                     // tag
@@ -645,10 +767,10 @@ impl ContainerNetwork {
                         build_args.push(s);
                     }
                     build_args.push(dockerfile_write_dir.as_ref().unwrap());
-                    Command::new("docker", &build_args)
-                        .ci_mode(ci_mode)
-                        .stdout_log(&debug_log)
-                        .stderr_log(&debug_log)
+                    Command::new("docker")
+                        .args(build_args)
+                        .debug(debug)
+                        .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
                         .assert_success()
@@ -662,8 +784,8 @@ impl ContainerNetwork {
             }
 
             // the binary
-            if let Some(bin_s) = bin_s.as_ref() {
-                args.push(bin_s);
+            if let Some(s) = container.entrypoint_file.as_ref() {
+                args.push(s);
             }
             // entrypoint args
             let mut tmp = vec![];
@@ -673,11 +795,11 @@ impl ContainerNetwork {
             for s in &tmp {
                 args.push(s);
             }
-            let command = Command::new("docker", &args)
-                .ci_mode(ci_mode && matches!(container.dockerfile, Dockerfile::NameTag(_)))
-                .stdout_log(&debug_log)
-                .stderr_log(&debug_log);
-            if ci_mode {
+            let command = Command::new("docker")
+                .args(args)
+                .debug(debug && matches!(container.dockerfile, Dockerfile::NameTag(_)))
+                .log(Some(&debug_log));
+            if debug {
                 info!("`Container` creation command: {command:#?}");
             }
             match command.run_to_completion().await {
@@ -711,16 +833,17 @@ impl ContainerNetwork {
         // start containers
         for name in names {
             let docker_id = &self.active_container_ids[*name];
-            let command = Command::new("docker start --attach", &[docker_id])
-                .stdout_log(&FileOptions::write2(
+            let command = Command::new("docker start --attach")
+                .arg(docker_id)
+                .stdout_log(Some(&FileOptions::write2(
                     &self.log_dir,
                     &format!("container_{}_stdout.log", name),
-                ))
-                .stderr_log(&FileOptions::write2(
+                )))
+                .stderr_log(Some(&FileOptions::write2(
                     &self.log_dir,
                     &format!("container_{}_stderr.log", name),
-                ));
-            match command.ci_mode(ci_mode).run().await {
+                )));
+            match command.debug(debug).run().await {
                 Ok(runner) => {
                     self.container_runners.insert(name.to_string(), runner);
                 }
@@ -734,13 +857,13 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    pub async fn run_all(&mut self, ci_mode: bool) -> Result<()> {
+    pub async fn run_all(&mut self, debug: bool) -> Result<()> {
         let names = self.inactive_names();
         let mut v: Vec<&str> = vec![];
         for name in &names {
             v.push(name);
         }
-        self.run(&v, ci_mode).await.stack()
+        self.run(&v, debug).await.stack()
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:
@@ -832,7 +955,7 @@ impl ContainerNetwork {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return Err(Error::from(format!(
+                        return Err(Error::timeout().add_kind_locationless(format!(
                             "ContainerNetwork::wait_with_timeout() timeout waiting for container \
                              names {names:?} to complete"
                         )))
@@ -894,5 +1017,23 @@ impl ContainerNetwork {
         let mut names = self.active_names();
         self.wait_with_timeout(&mut names, terminate_on_failure, duration)
             .await
+    }
+
+    /// Gets the IP address of an active container. There is a delay between a
+    /// container starting and an IP address being assigned, which is why this
+    /// has a retry mechanism.
+    pub async fn wait_get_ip_addr(
+        &self,
+        num_retries: u64,
+        delay: Duration,
+        name: &str,
+    ) -> Result<IpAddr> {
+        let id = self.active_container_ids.get(name).stack_err(|| {
+            format!("get_ip_addr({name}) -> could not find active container with name")
+        })?;
+        let ip = wait_get_ip_addr(num_retries, delay, id)
+            .await
+            .stack_err(|| format!("get_ip_addr({name})"))?;
+        Ok(ip)
     }
 }
