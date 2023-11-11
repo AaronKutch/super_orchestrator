@@ -4,6 +4,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
     time::Duration,
 };
 
@@ -14,8 +15,8 @@ use tokio::time::{sleep, Instant};
 use uuid::Uuid;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, acquire_path, Command, CommandResult, CommandRunner,
-    FileOptions,
+    acquire_dir_path, acquire_file_path, acquire_path, docker_helpers::wait_get_ip_addr, Command,
+    CommandResult, CommandRunner, FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -1016,5 +1017,23 @@ impl ContainerNetwork {
         let mut names = self.active_names();
         self.wait_with_timeout(&mut names, terminate_on_failure, duration)
             .await
+    }
+
+    /// Gets the IP address of an active container. There is a delay between a
+    /// container starting and an IP address being assigned, which is why this
+    /// has a retry mechanism.
+    pub async fn wait_get_ip_addr(
+        &self,
+        num_retries: u64,
+        delay: Duration,
+        name: &str,
+    ) -> Result<IpAddr> {
+        let id = self.active_container_ids.get(name).stack_err(|| {
+            format!("get_ip_addr({name}) -> could not find active container with name")
+        })?;
+        let ip = wait_get_ip_addr(num_retries, delay, id)
+            .await
+            .stack_err(|| format!("get_ip_addr({name})"))?;
+        Ok(ip)
     }
 }

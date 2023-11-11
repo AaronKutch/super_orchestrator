@@ -449,7 +449,7 @@ impl Command {
     }
 
     /// Adds environment variables
-    pub fn envs<I, K, V>(&mut self, envs: I) -> &mut Command
+    pub fn envs<I, K, V>(mut self, envs: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<OsStr>,

@@ -11,21 +11,6 @@ use tokio::{
 
 use crate::{type_hash, wait_for_ok};
 
-// What we maybe need is a sequence of bijection statements macro which forms a
-// single document for barriers and syncronization between different programs,
-// maybe include ordinary code in it. It starts in the starting program, and at
-// a DSL keyword it succinctly logically moves a tuple of things to the next
-// program in parallel.
-
-/// This is mainly intended for sending serializeable structs within
-/// self-contained container networks
-#[derive(Debug)]
-pub struct NetMessenger {
-    stream: TcpStream,
-    // buffer whose capacity is kept around
-    buf: Vec<u8>,
-}
-
 /// Waits for looking up a host's `SocketAddr` to be successful.
 ///
 /// Note: it is possible for `lookup_host` to succeed, yet something like a
@@ -35,16 +20,10 @@ pub async fn wait_for_ok_lookup_host(
     num_retries: u64,
     delay: Duration,
     host: &str,
-) -> Result<SocketAddr> {
-    async fn f(host: &str) -> Result<SocketAddr> {
+) -> Result<Vec<SocketAddr>> {
+    async fn f(host: &str) -> Result<Vec<SocketAddr>> {
         match lookup_host(host).await {
-            Ok(mut addrs) => {
-                if let Some(addr) = addrs.next() {
-                    Ok(addr)
-                } else {
-                    Err(Error::from("empty addrs"))
-                }
-            }
+            Ok(addrs) => Ok(addrs.into_iter().collect()),
             Err(e) => Err(e).stack_err(|| format!("wait_for_ok_lookup_host(.., host: {host})")),
         }
     }
@@ -66,6 +45,21 @@ pub async fn wait_for_ok_tcp_stream_connect(
         }
     }
     wait_for_ok(num_retries, delay, || f(socket_addr)).await
+}
+
+// What we maybe need is a sequence of bijection statements macro which forms a
+// single document for barriers and syncronization between different programs,
+// maybe include ordinary code in it. It starts in the starting program, and at
+// a DSL keyword it succinctly logically moves a tuple of things to the next
+// program in parallel.
+
+/// This is mainly intended for sending serializeable structs within
+/// self-contained container networks
+#[derive(Debug)]
+pub struct NetMessenger {
+    stream: TcpStream,
+    // buffer whose capacity is kept around
+    buf: Vec<u8>,
 }
 
 impl NetMessenger {
@@ -93,9 +87,12 @@ impl NetMessenger {
     /// Connects to another `NetMessenger` that is being started with
     /// `listen`.
     pub async fn connect(num_retries: u64, delay: Duration, host: &str) -> Result<Self> {
-        let socket_addr = wait_for_ok_lookup_host(num_retries, delay, host)
+        let socket_addrs = wait_for_ok_lookup_host(num_retries, delay, host)
             .await
             .stack()?;
+        let socket_addr = *socket_addrs
+            .first()
+            .stack_err(|| "wait_for_ok_lookup_host was ok but returned no socket addresses")?;
         let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
             .await
             .stack()?;

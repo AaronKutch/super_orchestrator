@@ -53,12 +53,13 @@ async fn main() -> Result<()> {
 
     // debug mode forwards the standard streams of the command to the current
     // process
-    let comres = Command::new("ls")
+    Command::new("ls")
         .debug(true)
         .run_to_completion()
         .await
+        .stack()?
+        .assert_success()
         .stack()?;
-    comres.assert_success().stack()?;
 
     // shorthand for the above
     sh(["ls"]).await.stack()?;
@@ -134,8 +135,11 @@ async fn main() -> Result<()> {
         }
     }
     // use this once after a termination function is successful
-    let comres = ls_runner.get_command_result().unwrap();
-    comres.assert_success().stack()?;
+    ls_runner
+        .get_command_result()
+        .unwrap()
+        .assert_success()
+        .stack()?;
 
     // also note that for very long running commands, you may want to set
     // `record_limit` and `log_limit`, or disable recording and logging altogether
@@ -143,13 +147,14 @@ async fn main() -> Result<()> {
     println!("\n\nexample 3\n");
 
     // changing the current working directory of the command
-    let comres = Command::new("ls")
+    Command::new("ls")
         .debug(true)
         .cwd("./examples")
         .run_to_completion()
         .await
+        .stack()?
+        .assert_success()
         .stack()?;
-    comres.assert_success().stack()?;
 
     // Sending output to a file, debugging, and using the records simultaneously.
     // This is the main utility of the `super_orchestrator` `Command` struct v.s.
@@ -172,8 +177,12 @@ async fn main() -> Result<()> {
     let len = record.len();
     // drop mutex guards immediately after using them
     drop(record);
-    let comres = ls_runner.wait_with_output().await.stack()?;
-    comres.assert_success().stack()?;
+    ls_runner
+        .wait_with_output()
+        .await
+        .stack()?
+        .assert_success()
+        .stack()?;
     ensure_eq!(
         FileOptions::read_to_string("./logs/basic_commands_stdout_ex.log")
             .await

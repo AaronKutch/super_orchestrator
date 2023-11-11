@@ -96,6 +96,7 @@ macro_rules! stacked_get {
     ($value:ident [$inx0:expr] $([$inx1:expr])*) => {{
         // this is unrolled once to avoid a let binding
         // and allow multiple kinds of borrowing
+        #[allow(unused)]
         let mut tmp = $crate::stacked_errors::StackableErr::stack_err(
             $value.get($inx0),
             || format!(
@@ -177,6 +178,7 @@ macro_rules! stacked_get {
 #[macro_export]
 macro_rules! stacked_get_mut {
     ($value:ident [$inx0:expr] $([$inx1:expr])*) => {{
+        #[allow(unused)]
         let mut tmp = $crate::stacked_errors::StackableErr::stack_err(
             $value.get_mut($inx0),
             || format!(

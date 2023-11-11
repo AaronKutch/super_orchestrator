@@ -171,14 +171,15 @@ async fn test_runner(args: &Args) -> Result<()> {
     let uuid = &args.uuid.as_deref().stack()?;
 
     async fn postgres_health(uuid: &str) -> Result<()> {
-        let comres = Command::new(format!(
+        Command::new(format!(
             "psql --host=postgres_{uuid} -U postgres --command=\\l"
         ))
         .env("PGPASSWORD", "root")
         .run_to_completion()
         .await
+        .stack()?
+        .assert_success()
         .stack()?;
-        comres.assert_success().stack()?;
         Ok(())
     }
     wait_for_ok(10, Duration::from_secs(1), || postgres_health(uuid))
@@ -186,13 +187,14 @@ async fn test_runner(args: &Args) -> Result<()> {
         .stack()?;
 
     // check that no uuid host works
-    let comres = Command::new("psql --host=postgres -U postgres --command=\\l")
+    Command::new("psql --host=postgres -U postgres --command=\\l")
         .env("PGPASSWORD", "root")
         .debug(true)
         .run_to_completion()
         .await
+        .stack()?
+        .assert_success()
         .stack()?;
-    comres.assert_success().stack()?;
 
     info!("postgres is ready");
 
