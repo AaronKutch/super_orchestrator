@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0] - TODO
+## [0.9.0] - 2023-11-11
 ### Fixes
 - Fixed that `Command`s and all downstream constructs would add an extra newline byte at the end of
   standard stream copying even if there wasn't one in actuality
