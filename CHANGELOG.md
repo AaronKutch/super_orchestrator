@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.10.0] - 2024-1-20
+### Fixes
+- Fixed compilation on Windows
+- Fixed an issue with an example
+
+### Changes
+- Updated `env_logger` to 0.11
+- Removed the "ctrlc_support" and "env_logger_support" features, their functionality is always
+  enabled now
+- Made "nix_support" not default, which improves usage on non-Unix targets
+
 ## [0.9.0] - 2023-11-11
 ### Fixes
 - Fixed that `Command`s and all downstream constructs would add an extra newline byte at the end of

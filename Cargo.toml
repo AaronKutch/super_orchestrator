@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -12,11 +12,11 @@ description = "programmable container orchestration tools"
 
 [dependencies]
 clap = "4"
-ctrlc = { version = "3", optional = true, default-features = false }
-env_logger = { version = "0.10", optional = true, default-features = false }
+ctrlc = { version = "3", default-features = false }
+env_logger = { version = "0.11", default-features = false }
 log = "0.4"
 nix = { version = "0.27", optional = true, default-features = false, features = ["signal"] }
-owo-colors = { version = "3.5", default-features = false }
+owo-colors = { version = "4.0", default-features = false }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
@@ -31,8 +31,6 @@ uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive", "env"] }
 
 [features]
-default = ["ctrlc_support", "env_logger_support", "nix_support"]
-ctrlc_support = ["ctrlc"]
-env_logger_support = ["env_logger"]
+default = []
 # needed for Unix signals on `Command`s
 nix_support = ["nix"]
