@@ -5,8 +5,7 @@ mod parsing;
 mod paths;
 pub use command::*;
 pub mod docker;
-/// Miscellanious docker helpers enabled by "ctrlc_support"
-#[cfg(feature = "ctrlc_support")]
+/// Miscellanious docker helpers
 pub mod docker_helpers;
 /// Communication with `NetMessenger`
 pub mod net_message;

@@ -19,11 +19,10 @@ use tokio::{
 
 use crate::{acquire_dir_path, Command};
 
-/// use the "ctrlc_support" feature to see functions that use this
+/// Used by [crate::ctrlc_init] and [crate::ctrlc_issued_reset]
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
 
 /// Sets up the ctrl-c handler
-#[cfg(feature = "ctrlc_support")]
 pub fn ctrlc_init() -> Result<()> {
     ctrlc::set_handler(move || {
         CTRLC_ISSUED.store(true, Ordering::SeqCst);
@@ -33,7 +32,6 @@ pub fn ctrlc_init() -> Result<()> {
 }
 
 /// Sets up `env_logger` with `LevelFilter::Info`
-#[cfg(feature = "env_logger_support")]
 pub fn std_init() -> Result<()> {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Info)

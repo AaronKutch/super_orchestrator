@@ -712,6 +712,8 @@ impl Command {
     }
 }
 
+/// Note: there are `send_unix_signal` and `send_unix_sigterm` function that can
+/// be enabled by the "nix_support" feature
 impl CommandRunner {
     /// Attempts to force the command to exit, but does not wait for the request
     /// to take effect. This does not set `self.result`.
