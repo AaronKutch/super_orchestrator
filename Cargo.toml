@@ -13,6 +13,7 @@ description = "programmable container orchestration tools"
 [dependencies]
 clap = "4"
 ctrlc = { version = "3", default-features = false }
+dunce = "1.0"
 env_logger = { version = "0.11", default-features = false }
 log = "0.4"
 nix = { version = "0.28", optional = true, default-features = false, features = ["signal"] }

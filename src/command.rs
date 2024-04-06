@@ -406,7 +406,7 @@ impl Command {
         let mut args: Vec<OsString> = vec![];
         for (i, part) in program_with_args.as_ref().split_whitespace().enumerate() {
             if i == 0 {
-                program = part.to_owned();
+                part.clone_into(&mut program)
             } else {
                 args.push(part.into());
             }
