@@ -1,22 +1,23 @@
 //! Note: change working directory to this crate's root in two separate
 //! terminals. In one terminal, run
-//! `cargo r --example auto_exec_i -- --container-name container0`
-//! and in the other `cargo r --example docker_entrypoint_pattern`. The first
-//! terminal should catch a running container, and you can run commands on it or
-//! ctrl-c to end the container early. The second will finish after building and
-//! 20 seconds.
+//! `cargo r --example auto_exec -- --container-name container0`
+//! and in the other `cargo r --example docker_entrypoint_pattern`. Note that on
+//! windows you will need to use WSL 2 or else the cross compilation will fail
+//! at linking stage. The first terminal should catch a running container, and
+//! you can run commands on it or ctrl-c to end the container early. The second
+//! will finish after building and 20 seconds.
 
 use std::time::Duration;
 
 use clap::Parser;
-use log::info;
 use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
-    sh, std_init, FileOptions,
+    sh, FileOptions,
 };
 use tokio::time::sleep;
+use tracing::info;
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 const STD_TRIES: u64 = 300;
@@ -45,7 +46,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     let args = Args::parse();
 
     if let Some(ref s) = args.entry_name {

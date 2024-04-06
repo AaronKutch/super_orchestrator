@@ -1,6 +1,18 @@
 # Changelog
 
-## [0.10.0] - 2024-1-20
+## [0.11.0] - 2025-04-06
+### Fixes
+- Fixed path canonicalization on Windows to use `dunce::simplify` to avoid UNC paths
+
+### Changes
+- Replaced `auto_exec_i` with `auto_exec` which allows customizing arguments
+- Removed the `log` dependency in favor of `tracing`
+- Removed `std_init`
+
+### Additions
+- Added a `workdir` option to `Container`
+
+## [0.10.0] - 2024-01-20
 ### Fixes
 - Fixed compilation on Windows
 - Fixed an issue with an example

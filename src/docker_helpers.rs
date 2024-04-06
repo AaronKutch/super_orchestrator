@@ -1,8 +1,8 @@
 use std::{net::IpAddr, process::Stdio, time::Duration};
 
-use log::{info, warn};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::sleep;
+use tracing::{info, warn};
 
 use crate::{ctrlc_issued_reset, sh, stacked_get, wait_for_ok, Command};
 
@@ -46,16 +46,36 @@ pub async fn wait_get_ip_addr(
 }
 
 /// Intended to be called from the main() of a standalone binary, or run from
-/// this repo `cargo r --example auto_exec_i -- --container-name main`
+/// this repo `cargo r --example auto_exec -- --container-name main`
 ///
 /// This actively looks for a running container with the given
 /// `container_name` prefix, and when such a container starts it gets the
-/// container id and runs `docker exec -i [id] bash`, forwarding stdin and
-/// stdout to whatever program is calling this. Using Ctrl-C causes this to
-/// force terminate the container and resume looping. Ctrl-C again terminates
-/// the whole program.
-pub async fn auto_exec_i(container_name: &str) -> Result<()> {
-    info!("running auto_exec_i({container_name})");
+/// container id and runs `docker exec [exec_args..] [id] [container_args..`,
+/// forwarding stdin and stdout to whatever program is calling this. Using
+/// Ctrl-C causes this to force terminate the container and resume looping.
+/// Ctrl-C again terminates the whole program. See the crate examples for more.
+pub async fn auto_exec<I0, I1, S0, S1, S2>(
+    exec_args: I0,
+    container_name: S2,
+    container_args: I1,
+) -> Result<()>
+where
+    I0: IntoIterator<Item = S0>,
+    S0: AsRef<str>,
+    I1: IntoIterator<Item = S1>,
+    S1: AsRef<str>,
+    S2: AsRef<str>,
+{
+    let container_name = container_name.as_ref().to_string();
+    let exec_args: Vec<String> = exec_args
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .collect();
+    let container_args: Vec<String> = container_args
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .collect();
+    info!("running auto_exec({exec_args:?} {container_name} {container_args:?})");
     loop {
         if ctrlc_issued_reset() {
             break
@@ -68,7 +88,7 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
         let mut name_id = None;
         for line in comres.stdout_as_utf8().stack()?.lines().skip(1) {
             let line = line.trim();
-            if let Some(inx) = line.rfind(container_name) {
+            if let Some(inx) = line.rfind(&container_name) {
                 let name = &line[inx..];
                 // make sure we are just getting the last field with the name
                 if name.split_whitespace().nth(1).is_none() {
@@ -88,7 +108,10 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
                 "Found container {name} with id {id}, forwarding stdin, stdout, stderr.\nIP is: \
                  {ip:?}"
             );
-            docker_exec_i(&id).await.stack()?;
+            let mut total_args = exec_args.clone();
+            total_args.push(id.to_string());
+            total_args.extend(container_args.clone());
+            docker_exec(total_args).await.stack()?;
             let _ = sh(["docker rm -f", &id]).await;
             info!("\nTerminated container {id}\n");
         }
@@ -97,9 +120,13 @@ pub async fn auto_exec_i(container_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn docker_exec_i(container_id: &str) -> Result<()> {
-    let mut runner = Command::new("docker exec -i")
-        .args([container_id, "bash"])
+pub async fn docker_exec<I, S>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut runner = Command::new("docker exec")
+        .args(args.into_iter().map(|s| s.as_ref().to_string()))
         .debug(true)
         .run_with_stdin(Stdio::inherit())
         .await

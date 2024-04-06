@@ -31,14 +31,6 @@ pub fn ctrlc_init() -> Result<()> {
     Ok(())
 }
 
-/// Sets up `env_logger` with `LevelFilter::Info`
-pub fn std_init() -> Result<()> {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .init();
-    Ok(())
-}
-
 /// Returns if `CTRLC_ISSUED` has been set, and resets it to `false`
 pub fn ctrlc_issued_reset() -> bool {
     CTRLC_ISSUED.swap(false, Ordering::SeqCst)

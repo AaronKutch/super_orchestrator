@@ -4,14 +4,14 @@ use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::wait_for_ok_lookup_host,
-    std_init, FileOptions,
+    FileOptions,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     let logs_dir = "./logs";
 
     println!("\n\nexample 0\n");

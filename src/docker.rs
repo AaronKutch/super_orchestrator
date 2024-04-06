@@ -8,10 +8,10 @@ use std::{
     time::Duration,
 };
 
-use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -83,6 +83,8 @@ pub struct Container {
     /// Passed as `--volume` to the create args, but these have the advantage of
     /// being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
+    /// Working directory inside the container
+    pub workdir: Option<String>,
     /// Environment variable pairs passed to docker
     pub environment_vars: Vec<(String, String)>,
     /// When set, this indicates that the container should run an entrypoint
@@ -105,6 +107,7 @@ impl Container {
             build_args: vec![],
             create_args: vec![],
             volumes: vec![],
+            workdir: None,
             environment_vars: vec![],
             entrypoint_file: None,
             entrypoint_args: vec![],
@@ -221,6 +224,12 @@ impl Container {
                 .into_iter()
                 .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
         );
+        self
+    }
+
+    /// Sets the working directory inside the container
+    pub fn workdir<S: AsRef<str>>(mut self, workdir: S) -> Self {
+        self.workdir = Some(workdir.as_ref().to_string());
         self
     }
 
@@ -682,6 +691,11 @@ impl ContainerNetwork {
                 "--name",
                 &full_name,
             ];
+
+            if let Some(workdir) = container.workdir.as_ref() {
+                args.push("-w");
+                args.push(workdir)
+            }
 
             let mut tmp = vec![];
             for var in &container.environment_vars {

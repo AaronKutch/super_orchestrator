@@ -2,9 +2,7 @@ use std::iter;
 
 use clap::Parser;
 use stacked_errors::{ensure, ensure_eq, StackableErr};
-use super_orchestrator::{
-    remove_files_in_dir, stacked_errors::Result, std_init, Command, FileOptions,
-};
+use super_orchestrator::{remove_files_in_dir, stacked_errors::Result, Command, FileOptions};
 
 // this program calls itself to get stdout and stderr examples
 #[derive(Parser, Debug)]
@@ -20,7 +18,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     let args = Args::parse();
 
     if args.print {

@@ -1,13 +1,12 @@
 use stacked_errors::{ensure, StackableErr};
 use super_orchestrator::{
-    acquire_dir_path, acquire_file_path, remove_files_in_dir, stacked_errors::Result, std_init,
-    FileOptions,
+    acquire_dir_path, acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
 };
 use tokio::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
 
     // note: in regular use you would use `.await.stack()?` on the ends
     // to tell what lines are failing
