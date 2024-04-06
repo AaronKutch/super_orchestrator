@@ -1,8 +1,8 @@
 use std::{net::IpAddr, process::Stdio, time::Duration};
 
-use log::{info, warn};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::sleep;
+use tracing::{info, warn};
 
 use crate::{ctrlc_issued_reset, sh, stacked_get, wait_for_ok, Command};
 

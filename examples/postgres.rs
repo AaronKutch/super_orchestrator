@@ -7,15 +7,15 @@
 use std::time::Duration;
 
 use clap::Parser;
-use log::info;
 use super_orchestrator::{
     acquire_dir_path,
     docker::{Container, ContainerNetwork, Dockerfile},
     sh,
     stacked_errors::{Error, Result, StackableErr},
-    std_init, wait_for_ok, Command,
+    wait_for_ok, Command,
 };
 use tokio::{fs, time::sleep};
+use tracing::info;
 
 // time until the program ends after everything is deployed
 const END_TIMEOUT: Duration = Duration::from_secs(1_000_000_000);
@@ -52,7 +52,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     let args = Args::parse();
 
     if let Some(ref s) = args.entry_name {

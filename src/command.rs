@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 
-use log::warn;
 use owo_colors::AnsiColors;
 use serde::{Deserialize, Serialize};
 use stacked_errors::{DisplayStr, Error, Result, StackableErr};
@@ -23,6 +22,7 @@ use tokio::{
     task::{self, JoinHandle},
     time::{sleep, timeout},
 };
+use tracing::warn;
 
 use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
@@ -131,7 +131,7 @@ impl Debug for Command {
 /// to make a quick copy or other operation, because the task to record program
 /// outputs needs the lock to progress.
 ///
-/// If the `log` crate is used and an implementor is active, warnings from
+/// If the `tracing` crate is used and a subscriber is active, warnings from
 /// bad `Drop`s can be issued
 ///
 /// The `Default` impl is for if an empty runner not attached to anything is

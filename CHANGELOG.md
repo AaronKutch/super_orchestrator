@@ -6,6 +6,8 @@
 
 ### Changes
 - Replaced `auto_exec_i` with `auto_exec` which allows customizing arguments
+- Removed the `log` dependency in favor of `tracing`
+- Removed `std_init`
 
 ### Additions
 - Added a `workdir` option to `Container`

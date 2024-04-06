@@ -1,6 +1,6 @@
 use clap::Parser;
 use stacked_errors::Result;
-use super_orchestrator::{ctrlc_init, docker_helpers::auto_exec, std_init};
+use super_orchestrator::{ctrlc_init, docker_helpers::auto_exec};
 
 /// Runs `super_orchestrator::docker_helpers::auto_exec`
 #[derive(Parser, Debug)]
@@ -17,7 +17,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     ctrlc_init()?;
     let args = Args::parse();
     auto_exec(if args.tty { ["-it"] } else { ["-i"] }, &args.prefix, [

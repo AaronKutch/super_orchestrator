@@ -10,14 +10,14 @@
 use std::time::Duration;
 
 use clap::Parser;
-use log::info;
 use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
-    sh, std_init, FileOptions,
+    sh, FileOptions,
 };
 use tokio::time::sleep;
+use tracing::info;
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 const STD_TRIES: u64 = 300;
@@ -46,7 +46,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std_init()?;
+    tracing_subscriber::fmt().init();
     let args = Args::parse();
 
     if let Some(ref s) = args.entry_name {

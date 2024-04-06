@@ -8,10 +8,10 @@ use std::{
     time::Duration,
 };
 
-use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{

@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use stacked_errors::{ensure, ensure_eq, StackableErr};
 use super_orchestrator::{
-    sh, stacked_errors::Result, std_init, Command, CommandResult, CommandResultNoDebug, FileOptions,
+    sh, stacked_errors::Result, Command, CommandResult, CommandResultNoDebug, FileOptions,
 };
 use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // logging to detect bad drops
-    std_init()?;
+    // tracing to detect bad drops
+    tracing_subscriber::fmt().init();
 
     println!("example 0\n");
 
