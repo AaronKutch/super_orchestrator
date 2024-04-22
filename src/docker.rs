@@ -5,6 +5,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
+    sync::atomic::Ordering,
     time::Duration,
 };
 
@@ -16,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     acquire_dir_path, acquire_file_path, acquire_path, docker_helpers::wait_get_ip_addr, Command,
-    CommandResult, CommandRunner, FileOptions,
+    CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -278,10 +279,16 @@ impl Container {
 ///
 /// # Note
 ///
-/// When running multiple containers with networking, there is an issue on some
-/// platforms <https://github.com/moby/libnetwork/issues/2647> that means you
-/// may have to set `is_not_internal` to `true` even if networking is only done
-/// between containers within the network.
+/// If a CTRL-C/sigterm signal is sent while containers are running, and
+/// [ctrlc_init](crate::ctrlc_init) or some other handler has not been set up,
+/// the containers may continue to run in the background and will have to be
+/// manually stopped. If the handlers are set, then one of the runners will
+/// trigger an error or a check for `CTRLC_ISSUED` will terminate all.
+///
+/// When running multiple containers with networking, there is an
+/// [issue](<https://github.com/moby/libnetwork/issues/2647>)
+/// on some platforms that means you may have to set `is_not_internal` to `true`
+/// even if networking is only done between containers within the network.
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
@@ -932,12 +939,18 @@ impl ContainerNetwork {
         Err(res)
     }
 
-    /// If `terminate_on_failure`, then if any container runner has an error or
-    /// completes with unsuccessful return status, the whole network will be
+    /// If `terminate_on_failure`, then if there is a timeout or any
+    /// container from `names` has an error, then the whole network will be
     /// terminated.
     ///
-    /// If called with `Duration::ZERO`, this will complete successfully if all
-    /// containers were terminated before this call.
+    /// Note that if a CTRL-C/sigterm signal is sent and
+    /// [ctrlc_init](crate::ctrlc_init) has been run, then either terminating
+    /// runners or an internal [CTRLC_ISSUED] check will trigger
+    /// [terminate_all](ContainerNetwork::terminate_all). Otherwise,
+    /// containers may continue to run in the background.
+    ///
+    /// If called with `Duration::ZERO`, this will always complete successfully
+    /// if all containers were terminated before this call.
     pub async fn wait_with_timeout(
         &mut self,
         names: &mut Vec<String>,
@@ -950,6 +963,14 @@ impl ContainerNetwork {
         // terminate all
         let mut i = 0;
         loop {
+            if CTRLC_ISSUED.load(Ordering::SeqCst) {
+                // most of the time, a terminating runner will cause a stop before this, but
+                // still check
+                self.terminate_all().await;
+                return Err(Error::from(
+                    "ContainerNetwork::wait_with_timeout terminating because of `CTRLC_ISSUED`",
+                ))
+            }
             if names.is_empty() {
                 break
             }
@@ -970,7 +991,7 @@ impl ContainerNetwork {
                             self.terminate_all().await;
                         }
                         return Err(Error::timeout().add_kind_locationless(format!(
-                            "ContainerNetwork::wait_with_timeout() timeout waiting for container \
+                            "ContainerNetwork::wait_with_timeout timeout waiting for container \
                              names {names:?} to complete"
                         )))
                     }
@@ -985,7 +1006,6 @@ impl ContainerNetwork {
             })?;
             match runner.wait_with_timeout(Duration::ZERO).await {
                 Ok(()) => {
-                    self.active_container_ids.remove(name).unwrap();
                     let runner = self.container_runners.remove(name).unwrap();
                     let first = runner.get_command_result().unwrap();
                     let err = !first.successful();
@@ -994,9 +1014,13 @@ impl ContainerNetwork {
                         sleep(Duration::from_millis(300)).await;
                         self.terminate_all().await;
                         return self.error_compilation().stack_err(|| {
-                            "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):\n"
+                            "ContainerNetwork::wait_with_timeout error compilation (check logs for \
+                             more):\n"
                         })
+                    } else {
+                        // this must not happen before the `terminate_all` call or else
+                        // ctrl-c conditions or others can lead the container to not be removed
+                        self.active_container_ids.remove(name).unwrap();
                     }
                     names.remove(i);
                 }
@@ -1011,8 +1035,8 @@ impl ContainerNetwork {
                             self.terminate_all().await;
                         }
                         return self.error_compilation().stack_err(|| {
-                            "ContainerNetwork::wait_with_timeout(terminate_on_failure: true) error \
-                             compilation (check logs for more):\n"
+                            "ContainerNetwork::wait_with_timeout error compilation (check logs for \
+                             more):\n"
                         })
                     }
                     i += 1;

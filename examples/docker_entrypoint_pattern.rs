@@ -12,6 +12,7 @@ use std::time::Duration;
 use clap::Parser;
 use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
+    ctrlc_init,
     docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
     sh, FileOptions,
@@ -152,6 +153,17 @@ async fn container_runner(args: &Args) -> Result<()> {
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
     cn.add_common_entrypoint_args(["--uuid", &uuid]);
+
+    // Whenever using the docker entrypoint pattern or similar setup where there is
+    // a dedicated container runner function that is just calling
+    // `wait_with_timeout` before `terminate_all` and exiting, `ctrlc_init`
+    // should be used just before the `run_all`. This will then allow
+    // `wait_with_timeout` the time to stop all containers before returning an
+    // error, if a Ctrl+C or sigterm signal is issued. This may take a few moments.
+    // Ctrl-C will work like intended in other cases and times.
+
+    ctrlc_init().unwrap();
+
     cn.run_all(true).await.stack()?;
 
     // container2 ends early

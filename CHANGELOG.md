@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.0] - 2025-04-22
+### Fixes
+- Partially fixed a long standing issue with containers not being stopped from CTRL-C/sigterm. The
+  ctrl-c handler needs to be set in the right place for this to work (see the
+  docker_entrypoint_pattern example).
+
 ## [0.11.0] - 2025-04-06
 ### Fixes
 - Fixed path canonicalization on Windows to use `dunce::simplify` to avoid UNC paths

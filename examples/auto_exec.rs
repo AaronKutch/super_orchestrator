@@ -18,7 +18,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
-    ctrlc_init()?;
+    ctrlc_init().unwrap();
     let args = Args::parse();
     auto_exec(if args.tty { ["-it"] } else { ["-i"] }, &args.prefix, [
         "sh",
