@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
+    cell::OnceCell,
     collections::VecDeque,
     ffi::{OsStr, OsString},
     fmt::{Debug, Display},
@@ -255,11 +256,21 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     terminal_color: AnsiColors,
     std_err: bool,
 ) {
+    const FORWARDING_FAILED: &str =
+        "`super_orchestrator::Command` stdout or stderr recording failed on write";
     let program_name = program_name.to_string_lossy();
     // for tracking how much has been written to the file
     let mut log_len = 0u64;
+    // if the previous read had a newline on the end (for forwarding to stdout)
     let mut previous_newline = false;
-    let mut nonempty = false;
+    // if no bytes have been written (for forwarding to stdout)
+    let mut empty = true;
+    // for computing the terminal prefix only once
+    let stdout_terminal_prefix = OnceCell::<String>::new();
+    let stderr_terminal_prefix = OnceCell::<String>::new();
+    let mut line_buf = Vec::new();
+    // when a utf8 codepoint is cut up across reads, we need to store it here
+    let mut cut_up: Option<Vec<u8>> = None;
     // 8 KB, like BufReader
     let mut buf = [0u8; 8 * 1024];
     loop {
@@ -268,25 +279,32 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 if bytes_read == 0 {
                     // if there has been nonempty output with no ending newline insert one upon
                     // completion
-                    if nonempty && (!previous_newline) {
-                        if let Some(ref mut stdout_forward) = std_forward {
-                            let _ = stdout_forward
-                                .write(b"\n")
-                                .await
-                                .expect("command recorder forwarding failed");
-                            stdout_forward.flush().await.unwrap();
+                    if (!empty) && (!previous_newline) {
+                        if let Some(ref mut std_forward) = std_forward {
+                            if cut_up.is_some() {
+                                // the outside precondition is always met in case of an incomplete
+                                std_forward
+                                    .write_all("\u{fffd}\n".as_bytes())
+                                    .await
+                                    .expect(FORWARDING_FAILED);
+                            } else {
+                                std_forward.write_all(b"\n").await.expect(FORWARDING_FAILED);
+                            }
+                            std_forward.flush().await.unwrap();
                         }
                     }
                     break
                 }
-                let bytes = &buf[..bytes_read];
+                let mut bytes = &buf[..bytes_read];
                 // copying to record
                 if let Some(ref mut arc) = std_record {
                     let mut deque = arc.lock().await;
                     if let Some(limit) = record_limit {
                         let limit = usize::try_from(limit).unwrap();
                         if deque.len().saturating_add(bytes.len()) > limit {
+                            // we would overflow the limit if all the `bytes` were inserted
                             if bytes.len() >= limit {
+                                // the deque needs to be entirely replaced with the end of `bytes`
                                 deque.clear();
                                 deque.extend(bytes[bytes.len().wrapping_sub(limit)..].iter());
                             } else {
@@ -320,59 +338,137 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             std_log
                                 .write_all(&bytes[usize::try_from(start).unwrap()..])
                                 .await
-                                .expect("command recorder to file failed");
+                                .expect(FORWARDING_FAILED);
                             log_len = len.wrapping_sub(start);
                         }
                     }
                     if !reset {
-                        std_log
-                            .write_all(bytes)
-                            .await
-                            .expect("command recorder to file failed");
+                        std_log.write_all(bytes).await.expect(FORWARDING_FAILED);
                     }
                 }
                 // copying to std stream
                 if let Some(ref mut std_forward) = std_forward {
-                    // TODO handle cases where a utf8 codepoint is cut up, use from_utf8 and call
-                    // valid_up_to on the Utf8Error. This is not critical, the records and logs need
-                    // to be exact for arbitrary cases, the forwarding debug is for debug only.
-                    let string = String::from_utf8_lossy(bytes).into_owned();
-                    let mut first_iter = true;
-                    for line in string.split_inclusive('\n') {
-                        if (!first_iter) || previous_newline || (!nonempty) {
-                            // need to format together otherwise stdout running into stderr is too
-                            // common
-                            let s = if std_err {
-                                format!("{} {} E|", program_name, child_id)
+                    let mut tmp = Vec::new();
+                    if let Some(cut_up) = cut_up.take() {
+                        // prepend the possibly cut up bytes, this should be very rare
+                        tmp.extend_from_slice(&cut_up);
+                        tmp.extend_from_slice(bytes);
+                        // use this instead of the original backing to `bytes`
+                        bytes = &tmp;
+                    }
+                    // `utf8_chunks` is incredibly useful, since the `incomplete` function will only
+                    // check on the last chunk
+                    for utf8_chunk in bstr::ByteSlice::utf8_chunks(bytes) {
+                        // `utf8_chunk` can have a valid part followed by an invalid part
+                        let valid = utf8_chunk.valid();
+                        if !valid.is_empty() {
+                            // `lines_with_terminator` avoids the issue with `lines` where a string
+                            // with the final sequence being a newline has no difference without it
+                            for line in bstr::ByteSlice::lines_with_terminator(valid.as_bytes()) {
+                                // Need to write the terminal prefix together with the line,
+                                // otherwise stdout running into stderr
+                                // is too common. `write_vectored` is useless for this.
+
+                                // if there has been no writing yet, or the last writing had a
+                                // newline, then insert the terminal prefix
+                                if empty || previous_newline {
+                                    if std_err {
+                                        line_buf.extend_from_slice(
+                                            stderr_terminal_prefix
+                                                .get_or_init(|| {
+                                                    owo_colors::OwoColorize::color(
+                                                        &format!("{program_name} {child_id} E| "),
+                                                        terminal_color,
+                                                    )
+                                                    .to_string()
+                                                })
+                                                .as_bytes(),
+                                        );
+                                    } else {
+                                        line_buf.extend_from_slice(
+                                            stdout_terminal_prefix
+                                                .get_or_init(|| {
+                                                    owo_colors::OwoColorize::color(
+                                                        &format!("{program_name} {child_id}  | "),
+                                                        terminal_color,
+                                                    )
+                                                    .to_string()
+                                                })
+                                                .as_bytes(),
+                                        );
+                                    };
+                                }
+                                previous_newline = line.last() == Some(&b'\n');
+                                line_buf.extend_from_slice(line);
+                                std_forward
+                                    .write_all(&line_buf)
+                                    .await
+                                    .expect(FORWARDING_FAILED);
+                                line_buf.clear();
+                                empty = false;
+                            }
+                        }
+                        let invalid = utf8_chunk.invalid();
+                        if !invalid.is_empty() {
+                            // need to have this again
+                            if empty || previous_newline {
+                                if std_err {
+                                    line_buf.extend_from_slice(
+                                        stderr_terminal_prefix
+                                            .get_or_init(|| {
+                                                owo_colors::OwoColorize::color(
+                                                    &format!("{program_name} {child_id} E| "),
+                                                    terminal_color,
+                                                )
+                                                .to_string()
+                                            })
+                                            .as_bytes(),
+                                    );
+                                } else {
+                                    line_buf.extend_from_slice(
+                                        stdout_terminal_prefix
+                                            .get_or_init(|| {
+                                                owo_colors::OwoColorize::color(
+                                                    &format!("{program_name} {child_id}  | "),
+                                                    terminal_color,
+                                                )
+                                                .to_string()
+                                            })
+                                            .as_bytes(),
+                                    );
+                                };
+                            }
+                            if utf8_chunk.incomplete() {
+                                // the next read pass or ending will pick this up
+                                cut_up = Some(invalid.to_vec());
                             } else {
-                                format!("{} {}  |", program_name, child_id)
-                            };
-                            let _ = std_forward
-                                .write(
-                                    format!(
-                                        "{} {}",
-                                        owo_colors::OwoColorize::color(&s, terminal_color),
-                                        line
-                                    )
-                                    .as_bytes(),
-                                )
-                                .await
-                                .expect("command recorder forwarding failed");
-                            first_iter = false;
-                        } else {
-                            let _ = std_forward
-                                .write(line.as_bytes())
-                                .await
-                                .expect("command recorder forwarding failed");
+                                // insert replacement character, this will happen according to the
+                                // "substitution of maximal subparts" strategy described in `bstr`
+                                line_buf.extend_from_slice("\u{fffd}".as_bytes());
+                            }
+                            if !line_buf.is_empty() {
+                                std_forward
+                                    .write_all(&line_buf)
+                                    .await
+                                    .expect(FORWARDING_FAILED);
+                                line_buf.clear();
+                            }
+                            previous_newline = false;
+                            empty = false;
                         }
                     }
+                    // if set excessively large by some single line, shrink
+                    if line_buf.capacity() > (8 * 1024) {
+                        line_buf.shrink_to_fit();
+                    }
                     std_forward.flush().await.unwrap();
-                    previous_newline = string.bytes().last() == Some(b'\n');
-                    nonempty = true;
                 }
             }
             Ok(Err(e)) => {
-                panic!("command recorder buffer read failed with {}", e)
+                panic!(
+                    "`super_orchestrator::Command` stdout or stderr recording failed on read: {}",
+                    e
+                )
             }
             // timeout
             Err(_) => (),

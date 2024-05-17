@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.1] - TODO
+### Fixes
+- Fixed several minor issues with the `Command` recorder forwarding to stdout
+- Fixed a mistake where a string intended as a format string was not actually in a `format!`
+
 ## [0.12.0] - 2025-04-22
 ### Fixes
 - Partially fixed a long standing issue with containers not being stopped from CTRL-C/sigterm. The

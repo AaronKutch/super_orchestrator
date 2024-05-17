@@ -18,9 +18,9 @@ async fn main() -> Result<()> {
     let comres: CommandResult = Command::new("ls").run_to_completion().await.stack()?;
     // The result from the `run_to_completion` command only returns if OS calls or
     // other infrastructure failed. The status of the `CommandResult` needs to be
-    // checked to see if the return status of the command was actually ok or not.
-    // `assert_success` just checks the `status` and returns a nicely formatted
-    // error if the status is not a success status.
+    // checked to see if the return status of the command itself was actually ok or
+    // not. `assert_success` just checks the `status` and returns a nicely
+    // formatted error if the status is not a success status.
     comres.assert_success().stack()?;
 
     // access all the public fields
@@ -64,8 +64,12 @@ async fn main() -> Result<()> {
     // shorthand for the above
     sh(["ls"]).await.stack()?;
 
-    // add an argument to the command this is the same as `ls ./example` on a
-    // command line
+    // also outputs utf-8 stdout
+    let stdout = sh(["ls"]).await.stack()?;
+    dbg!(stdout);
+
+    // add an argument to the command, this is the same as running `ls ./example` on
+    // a command line
     sh(["ls", "./examples"]).await.stack()?;
 
     // `super_orchestrator::Command::new` and the first iterator element of
@@ -75,7 +79,7 @@ async fn main() -> Result<()> {
     sh(["ls ./examples"]).await.stack()?;
 
     // Note: when trying to access the file "filename with spaces.txt", you would
-    // type on a command line `ls "filename with spaces"`. However, it would not
+    // type on a shell `ls "filename with spaces"`. However, it would not
     // mean the same thing to use
 
     //sh(["ls \"filename with spaces\""])
@@ -84,7 +88,7 @@ async fn main() -> Result<()> {
     // or
     //sh["ls", "\"filename with spaces\""])
 
-    // because the quotation marks are for the commandline, a signal, to pass
+    // because the shell uses the string within the quotation marks
     // "filename with spaces" as a single OS argument without the literal quotation
     // marks. The correct way is:
 
@@ -98,7 +102,7 @@ async fn main() -> Result<()> {
         .stack()?;
 
     // This triggers the command to have an unsuccessful exit status.
-    // Debug stderr lines have an 'E' in them to distinguish from stdout lines,
+    // Debug stderr lines have an 'E' in them to distinguish from stdout lines.
     ensure!(sh(["ls ./nonexistent"]).await.is_err());
 
     // there is not an error at the command running stage
@@ -175,7 +179,8 @@ async fn main() -> Result<()> {
     sleep(Duration::from_millis(10)).await;
     let record = ls_runner.stdout_record.lock().await;
     let len = record.len();
-    // drop mutex guards immediately after using them
+    // drop mutex guards immediately after using them, or else the recorder will
+    // freeze
     drop(record);
     ls_runner
         .wait_with_output()
@@ -198,7 +203,7 @@ async fn main() -> Result<()> {
         return Ok(())
     }
 
-    // Now suppose we want to pipe input to the "echo" command. The `echo
+    // Now suppose we want to pipe input to the "grep" command. The `echo
     // "hello\nworld" | grep h` line that would be typed into a commandline also has
     // special interpreting that is equivalent to:
 
