@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.12.0"
+version = "0.12.1"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -11,6 +11,7 @@ keywords = ["container", "docker"]
 description = "programmable container orchestration tools"
 
 [dependencies]
+bstr = "1"
 ctrlc = { version = "3", default-features = false }
 dunce = "1.0"
 nix = { version = "0.28", optional = true, default-features = false, features = ["signal"] }

@@ -1002,7 +1002,10 @@ impl ContainerNetwork {
 
             let name = &names[i];
             let runner = self.container_runners.get_mut(name).stack_err(|| {
-                "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the network"
+                format!(
+                    "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the \
+                     network"
+                )
             })?;
             match runner.wait_with_timeout(Duration::ZERO).await {
                 Ok(()) => {

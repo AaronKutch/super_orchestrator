@@ -1,8 +1,9 @@
-use std::iter;
+use std::{io::Write, iter, time::Duration};
 
 use clap::Parser;
 use stacked_errors::{ensure, ensure_eq, StackableErr};
 use super_orchestrator::{remove_files_in_dir, stacked_errors::Result, Command, FileOptions};
+use tokio::time::sleep;
 
 // this program calls itself to get stdout and stderr examples
 #[derive(Parser, Debug)]
@@ -14,12 +15,47 @@ struct Args {
     to_stdout: String,
     #[arg(long, default_value_t = String::new())]
     to_stderr: String,
+    #[arg(long)]
+    nonutf8: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
     let args = Args::parse();
+
+    if args.nonutf8 {
+        let mut bytes = vec![];
+        bytes.extend("\u{1f60a}".as_bytes());
+        for i in 0..=u8::MAX {
+            bytes.push(i);
+            if i % 20 == 0 {
+                bytes.push(b'\n');
+            }
+        }
+        for i in 0..10 {
+            bytes.extend("\u{1f60a}".as_bytes());
+            if i % 3 == 0 {
+                bytes.push(b'\n');
+            }
+        }
+        bytes.push(b'\n');
+        // check that starting with a cutoff multibyte char is continued
+        let mut i = 5;
+        for chunk in bytes.chunk_by(|_, _| {
+            i += 1;
+            i % 7 == 0
+        }) {
+            sleep(Duration::from_millis(10)).await;
+            std::io::stdout().write_all(chunk).stack().unwrap();
+            std::io::stdout().flush().unwrap();
+        }
+        for chunk in bytes.chunks(7) {
+            std::io::stderr().write_all(chunk).stack().unwrap();
+        }
+
+        return Ok(())
+    }
 
     if args.print {
         print!("{}", args.to_stdout);
@@ -96,6 +132,19 @@ async fn main() -> Result<()> {
     comres.assert_success().stack()?;
     ensure!(comres.stdout.is_empty());
     ensure!(comres.stderr.is_empty());
+
+    // check special handling for non-utf8 in stdout forwarding
+    let comres = Command::new("cargo r --example commands --quiet -- --nonutf8")
+        .debug(true)
+        .stdout_log(Some(FileOptions::write("./logs/stdout.log")))
+        .stderr_log(Some(FileOptions::write("./logs/stderr.log")))
+        .run_to_completion()
+        .await
+        .stack()?;
+    ensure!(comres.stdout_as_utf8().is_err());
+    ensure!(comres.stderr_as_utf8().is_err());
+    dbg!(comres.stdout_as_utf8_lossy());
+    dbg!(comres.stderr_as_utf8_lossy());
 
     Ok(())
 }
