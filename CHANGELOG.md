@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.0] - TODO
+### Changes
+- Removed `FileOptions::create` and `FileOptions::append`
+- Added `FileOptions::new` and functions for `ReadOrWrite`
+- Used `*_locationless` in many more places
+
 ## [0.12.1] - 2024-05-20
 ### Fixes
 - Fixed several minor issues with the `Command` recorder forwarding to stdout

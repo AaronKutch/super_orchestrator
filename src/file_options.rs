@@ -23,6 +23,19 @@ pub enum ReadOrWrite {
     Write(WriteOptions),
 }
 
+impl ReadOrWrite {
+    /// Read mode
+    pub fn read() -> Self {
+        Self::Read
+    }
+
+    /// Write mode, with options to `create` if the file should be created if it
+    /// does not exist, and `append` to append to the file instead of overwrite.
+    pub fn write(create: bool, append: bool) -> Self {
+        Self::Write(WriteOptions { create, append })
+    }
+}
+
 /// A wrapper combining capabilities from `tokio::fs::{OpenOptions, File}` with
 /// a lot of opinionated defaults and `close_file`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +47,14 @@ pub struct FileOptions {
 }
 
 impl FileOptions {
+    pub fn new(path: impl AsRef<Path>, options: ReadOrWrite) -> Self {
+        Self {
+            path: path.as_ref().to_owned(),
+            options,
+        }
+    }
+
+    /// `FileOptions` for reading from `file_path`
     pub fn read(file_path: impl AsRef<Path>) -> Self {
         Self {
             path: file_path.as_ref().to_owned(),
@@ -74,28 +95,6 @@ impl FileOptions {
                 create: true,
                 append: false,
             }),
-        }
-    }
-
-    pub fn create(mut self, create: bool) -> Result<Self> {
-        if let ReadOrWrite::Write(ref mut options) = self.options {
-            options.create = create;
-            Ok(self)
-        } else {
-            Err(Error::from(format!(
-                "{self:?}.create() -> options are readonly"
-            )))
-        }
-    }
-
-    pub fn append(mut self, append: bool) -> Result<Self> {
-        if let ReadOrWrite::Write(ref mut options) = self.options {
-            options.append = append;
-            Ok(self)
-        } else {
-            Err(Error::from(format!(
-                "{self:?}.append() -> options are readonly"
-            )))
         }
     }
 

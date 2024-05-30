@@ -1,8 +1,7 @@
-use stacked_errors::{ensure, StackableErr};
+use stacked_errors::ensure;
 use super_orchestrator::{
-    acquire_dir_path, acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
+    acquire_file_path, remove_files_in_dir, stacked_errors::Result, FileOptions,
 };
-use tokio::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -72,9 +71,9 @@ async fn main() -> Result<()> {
     ensure!(acquire_file_path("./logs/tar.gz").await.is_err());
 
     // may need to sudo remove because of docker
-    if let Ok(pg_data_dir) = acquire_dir_path("./logs/pg_data").await {
+    /*if let Ok(pg_data_dir) = acquire_dir_path("./logs/pg_data").await {
         fs::remove_dir_all(pg_data_dir).await.stack()?;
-    }
+    }*/
 
     Ok(())
 }
