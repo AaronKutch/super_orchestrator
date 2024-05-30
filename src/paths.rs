@@ -19,7 +19,7 @@ pub async fn acquire_path(path: impl AsRef<Path>) -> Result<PathBuf> {
 
     let mut path = fs::canonicalize(path)
         .await
-        .stack_err(|| format!("acquire_path(path: {:?})", path))?;
+        .stack_err_locationless(|| format!("acquire_path(path: {:?})", path))?;
     if cfg!(windows) {
         path = dunce::simplified(&path).to_owned();
     }
@@ -34,14 +34,14 @@ pub async fn acquire_file_path(file_path: impl AsRef<Path>) -> Result<PathBuf> {
     let file_path = file_path.as_ref();
     let mut path = fs::canonicalize(file_path)
         .await
-        .stack_err(|| format!("acquire_file_path(file_path: {:?})", file_path))?;
+        .stack_err_locationless(|| format!("acquire_file_path(file_path: {:?})", file_path))?;
     if cfg!(windows) {
         path = dunce::simplified(&path).to_owned();
     }
     if path.is_file() {
         Ok(path)
     } else {
-        Err(Error::from(format!(
+        Err(Error::from_kind_locationless(format!(
             "acquire_file_path(file_path: {:?}) -> is not a file",
             file_path
         )))
@@ -56,14 +56,14 @@ pub async fn acquire_dir_path(dir_path: impl AsRef<Path>) -> Result<PathBuf> {
     let dir_path = dir_path.as_ref();
     let mut path = fs::canonicalize(dir_path)
         .await
-        .stack_err(|| format!("acquire_dir_path(dir_path: {:?})", dir_path))?;
+        .stack_err_locationless(|| format!("acquire_dir_path(dir_path: {:?})", dir_path))?;
     if cfg!(windows) {
         path = dunce::simplified(&path).to_owned();
     }
     if path.is_dir() {
         Ok(path)
     } else {
-        Err(Error::from(format!(
+        Err(Error::from_kind_locationless(format!(
             "acquire_dir_path(dir_path: {:?}) -> is not a directory",
             dir_path
         )))

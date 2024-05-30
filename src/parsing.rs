@@ -40,7 +40,7 @@ pub fn get_separated_val(
             }
         }
     }
-    value.stack_err(|| format!("get_separated_val() -> key \"{key}\" not found"))
+    value.stack_err_locationless(|| format!("get_separated_val() -> key \"{key}\" not found"))
 }
 
 /// Applies `get` and `stack_err(...)?` in a chain
