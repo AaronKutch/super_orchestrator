@@ -3,8 +3,12 @@
 ## [0.13.0] - TODO
 ### Changes
 - Removed `FileOptions::create` and `FileOptions::append`
-- Added several `FileOptions` functions and functions for `ReadOrWrite`
 - Used `*_locationless` in many more places
+- Improved some debug and display outputs
+
+### Additions
+- Added several `FileOptions` functions and functions for `ReadOrWrite`
+- Added some helper functions to `Command`
 
 ## [0.12.1] - 2024-05-20
 ### Fixes

@@ -108,23 +108,47 @@ impl Default for Command {
 impl Debug for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
-            "Command {{\nprogram: {:?}\n, env_clear: {}, envs: {:?}, cwd: {:?}, recording: ({}, \
-             {}), log: ({:?}, {:?}), debug: ({}, {}), record_limit: {:?}, log_limit: {:?}, \
-             forget_on_drop: {}}}",
+            "Command {{\nprogram: {:?}\n,",
             DisplayStr(&self.get_unified_command()),
-            self.env_clear,
-            self.envs,
-            self.cwd,
-            self.stdout_recording,
-            self.stderr_recording,
-            self.stdout_log.as_ref().map(|x| &x.path),
-            self.stderr_log.as_ref().map(|x| &x.path),
-            self.stdout_debug,
-            self.stderr_debug,
-            self.record_limit,
-            self.log_limit,
-            self.forget_on_drop
-        ))
+        ))?;
+        if self.env_clear {
+            f.write_fmt(format_args!(" env_clear: true,",))?;
+        }
+        if !self.envs.is_empty() {
+            f.write_fmt(format_args!(" envs: {:?},", self.envs))?;
+        }
+        if let Some(cwd) = &self.cwd {
+            f.write_fmt(format_args!(" cwd: {cwd:?},"))?;
+        }
+        // potential accident cases
+        if !(self.stdout_recording && self.stderr_recording) {
+            f.write_fmt(format_args!(
+                " recording: ({}, {}),",
+                self.stdout_recording, self.stderr_recording
+            ))?;
+        }
+        if let Some(log) = self.stdout_log.as_ref().map(|x| &x.path) {
+            f.write_fmt(format_args!(" stdout_log: {log:?},"))?;
+        }
+        if let Some(log) = self.stderr_log.as_ref().map(|x| &x.path) {
+            f.write_fmt(format_args!(" stderr_log: {log:?},"))?;
+        }
+        if self.stdout_debug || self.stderr_debug {
+            f.write_fmt(format_args!(
+                " debug: ({}, {}),",
+                self.stdout_debug, self.stderr_debug
+            ))?;
+        }
+        if let Some(limit) = self.record_limit {
+            f.write_fmt(format_args!(" record_limit: {limit},"))?;
+        }
+        if let Some(limit) = self.log_limit {
+            f.write_fmt(format_args!(" log_limit: {limit},"))?;
+        }
+        if self.forget_on_drop {
+            f.write_fmt(format_args!(" forget_on_drop: true,"))?;
+        }
+        f.write_fmt(format_args!("}}",))
     }
 }
 
@@ -204,27 +228,20 @@ pub struct CommandResult {
 
 impl Debug for CommandResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let stdout = self.stdout_as_utf8_lossy();
-        let stderr = self.stderr_as_utf8_lossy();
+        f.write_fmt(format_args!(
+            "CommandResult {{\ncommand: {:?},\nstatus: {:?},\n",
+            self.command, self.status
+        ))?;
         // move the commas out of the way of the stdout and stderr
-        match (stdout.is_empty(), stderr.is_empty()) {
-            (true, true) => f.write_fmt(format_args!(
-                "CommandResult {{\ncommand: {:?},\nstatus: {:?},\n}}",
-                self.command, self.status
-            )),
-            (true, false) => f.write_fmt(format_args!(
-                "CommandResult {{\ncommand: {:?},\nstatus: {:?},\nstderr: {}\n,}}",
-                self.command, self.status, stderr
-            )),
-            (false, true) => f.write_fmt(format_args!(
-                "CommandResult {{\ncommand: {:?},\nstatus: {:?},\nstdout: {}\n,}}",
-                self.command, self.status, stdout
-            )),
-            (false, false) => f.write_fmt(format_args!(
-                "CommandResult {{\ncommand: {:?},\nstatus: {:?},\nstdout: {}\n, stderr: {}\n,}}",
-                self.command, self.status, stdout, stderr
-            )),
+        let stdout = self.stdout_as_utf8_lossy();
+        if !stdout.is_empty() {
+            f.write_fmt(format_args!("stdout: {}\n,", stdout))?;
         }
+        let stderr = self.stderr_as_utf8_lossy();
+        if !stderr.is_empty() {
+            f.write_fmt(format_args!("stderr: {}\n,", stderr))?;
+        }
+        f.write_fmt(format_args!("}}"))
     }
 }
 
@@ -556,6 +573,12 @@ impl Command {
         self
     }
 
+    /// Set if environment variables should be cleared
+    pub fn env_clear(mut self, env_clear: bool) -> Self {
+        self.env_clear = env_clear;
+        self
+    }
+
     /// Adds an environment variable
     pub fn env(mut self, env_key: impl AsRef<OsStr>, env_val: impl AsRef<OsStr>) -> Self {
         self.envs
@@ -663,6 +686,12 @@ impl Command {
     /// Sets `read_loop_timeout`
     pub fn read_loop_timeout(mut self, read_loop_timeout: Duration) -> Self {
         self.read_loop_timeout = read_loop_timeout;
+        self
+    }
+
+    /// Sets `forget_on_drop`
+    pub fn forget_on_drop(mut self, forget_on_drop: bool) -> Self {
+        self.forget_on_drop = forget_on_drop;
         self
     }
 
