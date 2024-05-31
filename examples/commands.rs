@@ -25,6 +25,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     if args.nonutf8 {
+        // testing that the recorder handles non-UTF8 correctly
         let mut bytes = vec![];
         bytes.extend("\u{1f60a}".as_bytes());
         for i in 0..=u8::MAX {

@@ -109,7 +109,7 @@ async fn container_runner(args: &Args) -> Result<()> {
             .stack()?
             // if exposing a port beyond the machine, use something like this on the
             // container
-            .create_args(["-p", "8000:8000"]),
+            .create_args(["-p", "127.0.0.1:8000:8000"]),
     ];
 
     let mut cn =

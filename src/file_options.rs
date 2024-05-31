@@ -47,11 +47,24 @@ pub struct FileOptions {
 }
 
 impl FileOptions {
+    /// New `FileOptions` with file path `path` and `ReadOrWrite` `options`
     pub fn new(path: impl AsRef<Path>, options: ReadOrWrite) -> Self {
         Self {
             path: path.as_ref().to_owned(),
             options,
         }
+    }
+
+    /// New `FileOptions` with `directory`, `file_name`, and `ReadOrWrite`
+    /// `options`
+    pub fn new2(
+        directory: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+        options: ReadOrWrite,
+    ) -> Self {
+        let mut path = directory.as_ref().to_owned();
+        path.push(file_name.as_ref());
+        Self { path, options }
     }
 
     /// `FileOptions` for reading from `file_path`
@@ -231,6 +244,75 @@ impl FileOptions {
             .stack_err_locationless(|| "FileOptions::write2_str")?;
         close_file(file).await.stack_err_locationless(|| {
             "FileOptions::write2_str -> unexpected error when closing file"
+        })?;
+        Ok(())
+    }
+
+    /// Reads a file at `file_path` to a `Vec<u8>`, returning an error if
+    /// acquiring the file fails
+    pub async fn read_to_vec(file_path: impl AsRef<Path>) -> Result<Vec<u8>> {
+        let mut file = Self::read(file_path)
+            .acquire_file()
+            .await
+            .stack_err_locationless(|| "FileOptions::read_to_vec")?;
+        let mut v = vec![];
+        file.read_to_end(&mut v)
+            .await
+            .stack_err_locationless(|| "FileOptions::read_to_vec")?;
+        Ok(v)
+    }
+
+    /// Reads a file at `file_name` in `directory` to a `Vec<u8>`, returning an
+    /// error if acquiring the file fails
+    pub async fn read2_to_vec(
+        directory: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+    ) -> Result<Vec<u8>> {
+        let mut file = Self::read2(directory, file_name)
+            .acquire_file()
+            .await
+            .stack_err_locationless(|| "FileOptions::read2_to_vec")?;
+        let mut v = vec![];
+        file.read_to_end(&mut v)
+            .await
+            .stack_err_locationless(|| "FileOptions::read2_to_vec")?;
+        Ok(v)
+    }
+
+    /// Writes `v` to a file at `file_path`, returning an error if acquiring the
+    /// file fails or if there is some filesystem error. Uses the
+    /// [FileOptions::write] defaults.
+    pub async fn write_bytes(file_path: impl AsRef<Path>, v: impl AsRef<[u8]>) -> Result<()> {
+        let mut file = Self::write(file_path)
+            .acquire_file()
+            .await
+            .stack_err_locationless(|| "FileOptions::write_bytes")?;
+        file.write_all(v.as_ref())
+            .await
+            .stack_err_locationless(|| "FileOptions::write_bytes")?;
+        close_file(file).await.stack_err_locationless(|| {
+            "FileOptions::write_bytes -> unexpected error when closing file"
+        })?;
+        Ok(())
+    }
+
+    /// Writes `v` to `file_name` in `directory`, returning an error if
+    /// acquiring the file fails or if there is some filesystem error. Uses the
+    /// [FileOptions::write2] defaults.
+    pub async fn write2_bytes(
+        directory: impl AsRef<Path>,
+        file_name: impl AsRef<Path>,
+        v: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let mut file = Self::write2(directory, file_name)
+            .acquire_file()
+            .await
+            .stack_err_locationless(|| "FileOptions::write2_bytes")?;
+        file.write_all(v.as_ref())
+            .await
+            .stack_err_locationless(|| "FileOptions::write2_bytes")?;
+        close_file(file).await.stack_err_locationless(|| {
+            "FileOptions::write2_bytes -> unexpected error when closing file"
         })?;
         Ok(())
     }
