@@ -31,6 +31,11 @@ use crate::{acquire_dir_path, next_terminal_color, FileOptions};
 
 const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 
+// TODO IIRC starting lines could be cutoff, this may be because both recorders
+// both truncate the file, stepping on each other's first output. Perhaps have
+// an `Arc<AtomicBool>` or something to communicate, and change one of the
+// `FileOptions` to not truncate?.
+
 /// An OS Command, this is `tokio::process::Command` wrapped in a bunch of
 /// helping functionality.
 #[derive(Clone, Serialize, Deserialize)]

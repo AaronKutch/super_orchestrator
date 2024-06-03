@@ -16,8 +16,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, acquire_path, docker_helpers::wait_get_ip_addr, Command,
-    CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
+    acquire_dir_path, acquire_file_path, acquire_path, docker_helpers::wait_get_ip_addr,
+    next_terminal_color, Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -81,12 +81,12 @@ pub struct Container {
     pub build_args: Vec<String>,
     /// Any flags and args passed to to `docker create`
     pub create_args: Vec<String>,
-    /// Passed as `--volume` to the create args, but these have the advantage of
-    /// being canonicalized and prechecked
+    /// Passed as `--volume string0:string1` to the create args, but these have
+    /// the advantage of being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
     /// Working directory inside the container
     pub workdir: Option<String>,
-    /// Environment variable pairs passed to docker
+    /// Environment variable mappings passed to docker
     pub environment_vars: Vec<(String, String)>,
     /// When set, this indicates that the container should run an entrypoint
     /// using this path to a binary in the container
@@ -94,6 +94,12 @@ pub struct Container {
     /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
+    /// Set by default, this tells the `ContainerNetwork` to forward
+    /// stdout/stderr from `docker start`
+    pub debug: bool,
+    /// Set by default, this tells the `ContainerNetwork` to copy stdout/stderr
+    /// to log files in the log directory
+    pub log: bool,
 }
 
 impl Container {
@@ -112,6 +118,8 @@ impl Container {
             environment_vars: vec![],
             entrypoint_file: None,
             entrypoint_args: vec![],
+            debug: true,
+            log: true,
         }
     }
 
@@ -250,6 +258,18 @@ impl Container {
     /// Turns of the default behavior of attaching the UUID to the hostname
     pub fn no_uuid_for_host_name(mut self) -> Self {
         self.no_uuid_for_host_name = true;
+        self
+    }
+
+    /// Sets whether container stdout/stderr should be forwarded
+    pub fn debug(mut self, debug: bool) -> Self {
+        self.debug = debug;
+        self
+    }
+
+    /// Sets whether container stdout/stderr should be written to log files
+    pub fn log(mut self, log: bool) -> Self {
+        self.log = log;
         self
     }
 
@@ -778,7 +798,6 @@ impl ContainerNetwork {
                     build_args.push(&dockerfile_dir);
                     Command::new("docker")
                         .args(build_args)
-                        .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
@@ -811,7 +830,6 @@ impl ContainerNetwork {
                     build_args.push(dockerfile_write_dir.as_ref().unwrap());
                     Command::new("docker")
                         .args(build_args)
-                        .debug(debug)
                         .log(Some(&debug_log))
                         .run_to_completion()
                         .await?
@@ -837,10 +855,7 @@ impl ContainerNetwork {
             for s in &tmp {
                 args.push(s);
             }
-            let command = Command::new("docker")
-                .args(args)
-                .debug(debug && matches!(container.dockerfile, Dockerfile::NameTag(_)))
-                .log(Some(&debug_log));
+            let command = Command::new("docker").args(args).log(Some(&debug_log));
             if debug {
                 info!("`Container` creation command: {command:#?}");
             }
@@ -874,18 +889,38 @@ impl ContainerNetwork {
 
         // start containers
         for name in names {
+            let terminal_color = if true {
+                next_terminal_color()
+            } else {
+                owo_colors::AnsiColors::Default
+            };
             let docker_id = &self.active_container_ids[*name];
-            let command = Command::new("docker start --attach")
-                .arg(docker_id)
-                .stdout_log(Some(&FileOptions::write2(
-                    &self.log_dir,
-                    &format!("container_{}_stdout.log", name),
-                )))
-                .stderr_log(Some(&FileOptions::write2(
-                    &self.log_dir,
-                    &format!("container_{}_stderr.log", name),
-                )));
-            match command.debug(debug).run().await {
+            let container = &self.containers[*name];
+            let mut command = Command::new("docker start --attach").arg(docker_id);
+            if container.debug {
+                command = command
+                    .debug(true)
+                    .stdout_debug_line_prefix(Some(
+                        owo_colors::OwoColorize::color(&format!("{name}  | "), terminal_color)
+                            .to_string(),
+                    ))
+                    .stderr_debug_line_prefix(Some(
+                        owo_colors::OwoColorize::color(&format!("{name} E| "), terminal_color)
+                            .to_string(),
+                    ));
+            }
+            if container.log {
+                command = command
+                    .stdout_log(Some(&FileOptions::write2(
+                        &self.log_dir,
+                        &format!("container_{}_stdout.log", name),
+                    )))
+                    .stderr_log(Some(&FileOptions::write2(
+                        &self.log_dir,
+                        &format!("container_{}_stderr.log", name),
+                    )));
+            }
+            match command.run().await {
                 Ok(runner) => {
                     self.container_runners.insert(name.to_string(), runner);
                 }

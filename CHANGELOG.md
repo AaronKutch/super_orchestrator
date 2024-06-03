@@ -6,6 +6,9 @@
 - Used `*_locationless` in many more places
 - Improved some debug and display outputs
 - `CommandRunner::child_process` now holds the `ChildStdout` and `ChildStderr` if the streams have no recording
+- Running containers forward with their corresponding name as the line prefix instead
+- Container building and creation messages are no longer `debug`
+- Container debug settings are per-container now
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`
