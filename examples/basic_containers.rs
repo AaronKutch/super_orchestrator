@@ -74,15 +74,10 @@ async fn main() -> Result<()> {
     println!("\n\nexample 4\n");
 
     // for more complicated things we need `ContainerNetwork`s
-    let mut cn = ContainerNetwork::new(
-        "test",
-        vec![
-            Container::new("container0", Dockerfile::name_tag("fedora:38"))
-                .entrypoint("/usr/bin/sleep", ["3"]),
-        ],
-        None,
-        true,
-        logs_dir,
+    let mut cn = ContainerNetwork::new("test", None, logs_dir);
+    cn.add_container(
+        Container::new("container0", Dockerfile::name_tag("fedora:38"))
+            .entrypoint("/usr/bin/sleep", ["3"]),
     )
     .stack()?;
     // run all containers

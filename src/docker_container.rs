@@ -51,15 +51,15 @@ impl Dockerfile {
 /// path contained within the directory is also added as a volume.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
-    /// The name of the container, note the "name:tag" docker argument would go
-    /// in [Dockerfile::NameTag]
+    /// The name of the container as referenced by
     pub name: String,
+    /// The name that the container is tagged with, note that the "name:tag"
+    /// dockerhub image argument would go in [Dockerfile::NameTag]
+    pub tag_name: String,
     /// Hostname of the URL that could access the container (the container can
     /// alternatively be accessed by an ip address). Usually, this should be the
-    /// same as `name``.
+    /// same as `name`.
     pub host_name: String,
-    /// If true, `host_name` is used directly without appending a UUID
-    pub no_uuid_for_host_name: bool,
     /// The dockerfile
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
@@ -89,12 +89,12 @@ pub struct Container {
 
 impl Container {
     /// Creates the information needed to describe a `Container`. `name` is used
-    /// for both the `name` and `hostname`.
+    /// for the `name`, `tag_name`, and `hostname`.
     pub fn new(name: &str, dockerfile: Dockerfile) -> Self {
         Self {
             name: name.to_owned(),
+            tag_name: name.to_owned(),
             host_name: name.to_owned(),
-            no_uuid_for_host_name: false,
             dockerfile,
             build_args: vec![],
             create_args: vec![],
@@ -240,12 +240,6 @@ impl Container {
         self
     }
 
-    /// Turns of the default behavior of attaching the UUID to the hostname
-    pub fn no_uuid_for_host_name(mut self) -> Self {
-        self.no_uuid_for_host_name = true;
-        self
-    }
-
     /// Sets whether container stdout/stderr should be forwarded
     pub fn debug(mut self, debug: bool) -> Self {
         self.debug = debug;
@@ -268,14 +262,10 @@ impl Container {
         log_dir: &str,
         debug: bool,
     ) -> Result<CommandResult> {
-        let mut cn = ContainerNetwork::new(
-            "super_orchestrator",
-            vec![self],
-            dockerfile_write_dir,
-            true,
-            log_dir,
-        )
-        .stack_err_locationless(|| "Container::run when trying to create a `ContainerNetwork`")?;
+        let mut cn = ContainerNetwork::new("super_orchestrator", dockerfile_write_dir, log_dir);
+        cn.add_container(self).stack_err_locationless(|| {
+            "Container::run when trying to create a `ContainerNetwork`"
+        })?;
         cn.run_all(debug)
             .await
             .stack_err_locationless(|| "Container::run when trying to run a `ContainerNetwork`")?;

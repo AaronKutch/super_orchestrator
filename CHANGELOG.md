@@ -9,6 +9,7 @@
 - Running containers forward with their corresponding name as the line prefix instead
 - Container building and creation messages are no longer `debug`
 - Container debug settings are per-container now
+- Refactor several things about `ContainerNetwork`
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`

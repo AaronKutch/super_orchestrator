@@ -27,20 +27,14 @@ use crate::{
 /// the containers may continue to run in the background and will have to be
 /// manually stopped. If the handlers are set, then one of the runners will
 /// trigger an error or a check for `CTRLC_ISSUED` will terminate all.
-///
-/// When running multiple containers with networking, there is an
-/// [issue](<https://github.com/moby/libnetwork/issues/2647>)
-/// on some platforms that means you may have to set `is_not_internal` to `true`
-/// even if networking is only done between containers within the network.
 #[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
     uuid: Uuid,
     network_name: String,
+    pub network_args: Vec<String>,
     containers: BTreeMap<String, Container>,
     dockerfile_write_dir: Option<String>,
-    /// is `--internal` by default
-    is_not_internal: bool,
     log_dir: String,
     active_container_ids: BTreeMap<String, String>,
     container_runners: BTreeMap<String, CommandRunner>,
@@ -57,7 +51,7 @@ impl Drop for ContainerNetwork {
                 warn!(
                     "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
                      running (a termination function needs to be called",
-                    self.network_name_with_uuid()
+                    self.network_name()
                 )
             }
         } else if self.network_active && (!std::thread::panicking()) {
@@ -66,7 +60,7 @@ impl Drop for ContainerNetwork {
             warn!(
                 "`ContainerNetwork` \"{}\" was dropped with the network still active \
                  (`ContainerNetwork::terminate_all` needs to be called)",
-                self.network_name_with_uuid()
+                self.network_name()
             )
         }
     }
@@ -101,44 +95,31 @@ impl ContainerNetwork {
     /// Can return an error if there are containers with duplicate names, or a
     /// container is built with `Dockerfile::Content` but no
     /// `dockerfile_write_dir` is specified.
-    pub fn new(
-        network_name: &str,
-        containers: Vec<Container>,
-        dockerfile_write_dir: Option<&str>,
-        is_not_internal: bool,
-        log_dir: &str,
-    ) -> Result<Self> {
-        let mut map = BTreeMap::new();
-        for container in containers {
-            if dockerfile_write_dir.is_none()
-                && matches!(container.dockerfile, Dockerfile::Contents(_))
-            {
-                return Err(Error::from_kind_locationless(
-                    "ContainerNetwork::new() a container is built with `Dockerfile::Contents`, \
-                     but `dockerfile_write_dir` is unset",
-                ))
-            }
-            if map.contains_key(&container.name) {
-                return Err(Error::from_kind_locationless(format!(
-                    "ContainerNetwork::new() two containers were supplied with the same name \
-                     \"{}\"",
-                    container.name
-                )))
-            }
-            map.insert(container.name.clone(), container);
-        }
-        Ok(Self {
+    pub fn new(network_name: &str, dockerfile_write_dir: Option<&str>, log_dir: &str) -> Self {
+        Self {
             uuid: Uuid::new_v4(),
             network_name: network_name.to_owned(),
-            containers: map,
+            network_args: vec![],
+            containers: BTreeMap::new(),
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
-            is_not_internal,
             log_dir: log_dir.to_owned(),
             active_container_ids: BTreeMap::new(),
             container_runners: BTreeMap::new(),
             container_results: BTreeMap::new(),
             network_active: false,
-        })
+        }
+    }
+
+    /// Adds arguments to be passed to `docker network create` (which will be
+    /// run once any container is started)
+    pub fn add_network_args<I, S>(&mut self, network_args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.network_args
+            .extend(network_args.into_iter().map(|s| s.as_ref().to_owned()));
+        self
     }
 
     /// Returns the common UUID
@@ -152,37 +133,8 @@ impl ContainerNetwork {
     }
 
     /// Returns the full network name
-    pub fn network_name_with_uuid(&self) -> String {
-        format!("{}_{}", self.network_name, self.uuid)
-    }
-
-    /// Returns an error if the container with the name could not be found
-    pub fn container_name_with_uuid(&self, container_name: &str) -> Result<String> {
-        if let Some(container) = self.containers.get(container_name) {
-            Ok(format!("{}_{}", container.name, self.uuid))
-        } else {
-            Err(Error::from_kind_locationless(format!(
-                "container_name_with_uuid({container_name}): could not find container with given \
-                 name"
-            )))
-        }
-    }
-
-    /// If `no_uuid_for_host_name` is true for the container, this just returns
-    /// the `host_name` Returns an error if the container with the name
-    /// could not be found
-    pub fn hostname_with_uuid(&self, container_name: &str) -> Result<String> {
-        if let Some(container) = self.containers.get(container_name) {
-            if container.no_uuid_for_host_name {
-                Ok(container.host_name.clone())
-            } else {
-                Ok(format!("{}_{}", container.host_name, self.uuid))
-            }
-        } else {
-            Err(Error::from_kind_locationless(format!(
-                "hostname_with_uuid({container_name}): could not find container with given name"
-            )))
-        }
+    pub fn network_name(&self) -> &str {
+        &self.network_name
     }
 
     /// Adds the container to the inactive set
@@ -222,7 +174,7 @@ impl ContainerNetwork {
         self
     }
 
-    /// Adds the arguments to every container
+    /// Adds the arguments to every container currently in the network
     pub fn add_common_entrypoint_args<I, S>(&mut self, args: I) -> &mut Self
     where
         I: IntoIterator<Item = S>,
@@ -302,7 +254,7 @@ impl ContainerNetwork {
         self.terminate_containers().await;
         if self.network_active {
             let _ = Command::new("docker network rm")
-                .arg(self.network_name_with_uuid())
+                .arg(self.network_name())
                 .run_to_completion()
                 .await;
             self.network_active = false;
@@ -409,19 +361,12 @@ impl ContainerNetwork {
             .stderr_log(&debug_log)
             .run_to_completion()
             .await;*/
-            let comres = if self.is_not_internal {
-                Command::new("docker network create")
-                    .arg(self.network_name_with_uuid())
-                    .log(Some(&debug_log))
-                    .run_to_completion()
-                    .await?
-            } else {
-                Command::new("docker network create --internal")
-                    .arg(self.network_name_with_uuid())
-                    .log(Some(&debug_log))
-                    .run_to_completion()
-                    .await?
-            };
+            let comres = Command::new("docker network create --internal")
+                .args(self.network_args.iter())
+                .arg(self.network_name())
+                .log(Some(&debug_log))
+                .run_to_completion()
+                .await?;
             // TODO we can get the network id
             comres
                 .assert_success()
@@ -434,9 +379,9 @@ impl ContainerNetwork {
             let container = &self.containers[*name];
 
             // baseline args
-            let network_name = self.network_name_with_uuid();
-            let hostname = self.hostname_with_uuid(name).unwrap();
-            let full_name = self.container_name_with_uuid(name).unwrap();
+            let network_name = self.network_name();
+            let tag_name = &container.tag_name;
+            let hostname = &container.host_name;
             let mut args = vec![
                 "create",
                 "--rm",
@@ -445,7 +390,7 @@ impl ContainerNetwork {
                 "--hostname",
                 &hostname,
                 "--name",
-                &full_name,
+                &tag_name,
             ];
 
             if let Some(workdir) = container.workdir.as_ref() {
@@ -494,13 +439,12 @@ impl ContainerNetwork {
                 Dockerfile::Path(ref path) => {
                     // tag
                     args.push("-t");
-                    args.push(&full_name);
+                    args.push(tag_name);
 
                     let mut dockerfile = acquire_file_path(path).await?;
                     // yes we do need to do this because of the weird way docker build works
                     let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
-                    let mut build_args =
-                        vec!["build", "-t", &full_name, "--file", &dockerfile_full];
+                    let mut build_args = vec!["build", "-t", &tag_name, "--file", &dockerfile_full];
                     dockerfile.pop();
                     let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
                     let mut tmp = vec![];
@@ -524,14 +468,14 @@ impl ContainerNetwork {
                 Dockerfile::Contents(ref contents) => {
                     // tag
                     args.push("-t");
-                    args.push(&full_name);
+                    args.push(tag_name);
 
                     FileOptions::write_str(dockerfile_write_file.as_ref().unwrap(), contents)
                         .await?;
                     let mut build_args = vec![
                         "build",
                         "-t",
-                        &full_name,
+                        &tag_name,
                         "--file",
                         dockerfile_write_file.as_ref().unwrap(),
                     ];

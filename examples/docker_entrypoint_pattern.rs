@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use stacked_errors::{ensure_eq, Error, Result, StackableErr};
 use super_orchestrator::{
     ctrlc_init,
@@ -25,7 +26,7 @@ const STD_TRIES: u64 = 300;
 const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Runs `docker_entrypoint_pattern`
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 #[command(about)]
 struct Args {
     /// If left `None`, the container runner program runs, otherwise this
@@ -43,17 +44,32 @@ struct Args {
     /// needs the "env" Clap feature to compile
     #[arg(long, env)]
     arg_from_env: Option<String>,
+    /// This prelude is used for booleans that should be false by default
+    #[clap(
+        long,
+        default_missing_value("true"),
+        default_value("false"),
+        num_args(0..=1),
+        action = clap::ArgAction::Set,
+    )]
+    pub boolean: bool,
+    /// Parsed as `Args` and replaces everything if set
+    #[arg(long)]
+    pub json_args: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
-    let args = Args::parse();
+    let mut args = Args::parse();
+    if let Some(s) = &args.json_args {
+        args = serde_json::from_str(s).stack()?;
+    }
 
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
             "container0" => container0_runner(&args).await.stack(),
-            "container1" => container1_runner().await.stack(),
+            "container1" => container1_runner(&args).await.stack(),
             "container2" => container2_runner(&args).await.stack(),
             _ => Err(Error::from(format!("entrypoint \"{s}\" is not recognized"))),
         }
@@ -62,7 +78,7 @@ async fn main() -> Result<()> {
     }
 }
 
-// example inline dockerfile, but could be dynamically generated
+// an example inline dockerfile, but this could be dynamically generated
 const CONTAINER2_DOCKERFILE: &str = r#"
 FROM fedora:38
 
@@ -104,49 +120,52 @@ async fn container_runner(args: &Args) -> Result<()> {
     .stack()?;
     let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
 
-    // Container entrypoint binaries have no arguments passed to them by default. We
-    // pass "--entry-name ..." to each of them to tell them what to specialize into,
-    // so that the whole top level system can be described by one file and one
-    // compilation (this can of course be customized an infinite number of ways, I
-    // have found this entrypoint pattern to be the most useful).
-    let mut container2_args = vec!["--entry-name", "container2"];
-    // if we pass "--pass-along-example" when calling the container runner (e.x.
-    // `cargo r --example docker_entrypoint_pattern -- --pass-along-example ...`),
-    // it won't make it to any of the container entypoint instances unless we copy
-    // it
-    if let Some(ref arg) = args.pass_along_example {
-        container2_args.extend(&["--pass-along-example", arg]);
-    }
+    // Container entrypoint binaries have no arguments passed to them by default. To
+    // propogate all of the same arguments automatically, we clone the `Args` make
+    // any changes we need, and serialize it to be sent through the `--json-args`
+    // option. If we pass "--pass-along-example" when calling the container runner
+    // subprocess, it will get propogated to all the containers as well.
+    let mut container2_args = args.clone();
+    // pass a different `entry_name` to each of them to tell them what to specialize
+    // into, so that the whole system can be described by one file and one
+    // cross compilation (this can of course be customized an infinite number of
+    // ways, I have found this entrypoint pattern to be the most useful).
+    container2_args.entry_name = Some("container2".to_owned());
+    let container2_args = vec![
+        "--json-args".to_owned(),
+        serde_json::to_string(&container2_args).unwrap(),
+    ];
 
-    let mut cn = ContainerNetwork::new(
-        "test",
-        vec![
-            // a container with a plain fedora:38 image
-            Container::new("container0", Dockerfile::name_tag("fedora:38"))
-                .external_entrypoint(entrypoint, ["--entry-name", "container0"])
-                .await
-                .stack()?,
-            // uses the example dockerfile
-            Container::new(
-                "container1",
-                Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
-            )
-            .external_entrypoint(entrypoint, ["--entry-name", "container1"])
+    let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
+    // a container with a plain fedora:38 image
+    cn.add_container(
+        Container::new("container0", Dockerfile::name_tag("fedora:38"))
+            .external_entrypoint(entrypoint, ["--entry-name", "container0"])
             .await
             .stack()?,
-            // uses the literal string, allowing for self-contained complicated systems in a single
-            // file
-            Container::new("container2", Dockerfile::contents(CONTAINER2_DOCKERFILE))
-                .external_entrypoint(entrypoint, container2_args)
-                .await
-                .stack()?,
-        ],
-        Some(dockerfiles_dir),
-        // TODO see issue on `ContainerNetwork` struct documentation
-        true,
-        logs_dir,
     )
     .stack()?;
+    // uses the example dockerfile
+    cn.add_container(
+        Container::new(
+            "container1",
+            Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
+        )
+        .external_entrypoint(entrypoint, ["--entry-name", "container1"])
+        .await
+        .stack()?,
+    )
+    .stack()?;
+    // uses the literal string, allowing for self-contained complicated systems in a
+    // single file
+    cn.add_container(
+        Container::new("container2", Dockerfile::contents(CONTAINER2_DOCKERFILE))
+            .external_entrypoint(entrypoint, container2_args)
+            .await
+            .stack()?,
+    )
+    .stack()?;
+
     // check the local "./logs" directory, this gets mapped to "/logs" inside the
     // containers
     cn.add_common_volumes([(logs_dir, "/logs")]);
@@ -183,11 +202,10 @@ async fn container_runner(args: &Args) -> Result<()> {
     Ok(())
 }
 
-async fn container0_runner(args: &Args) -> Result<()> {
+async fn container0_runner(_args: &Args) -> Result<()> {
     // it might seem annoying to use `stack` at every fallible point, but this is
     // more than worth it when trying to decipher where an error is coming from
-    let uuid = args.uuid.clone().stack()?;
-    let container1_host = &format!("container1_{}:26000", uuid);
+    let container1_host = &format!("container1:26000");
     let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, container1_host)
         .await
         .stack()?;
@@ -208,7 +226,7 @@ async fn container0_runner(args: &Args) -> Result<()> {
     Ok(())
 }
 
-async fn container1_runner() -> Result<()> {
+async fn container1_runner(_args: &Args) -> Result<()> {
     let host = "0.0.0.0:26000";
     let mut nm = NetMessenger::listen(host, TIMEOUT).await.stack()?;
 
@@ -229,6 +247,7 @@ async fn container2_runner(args: &Args) -> Result<()> {
     );
 
     info!("the environment var is {:?}", args.arg_from_env);
+    info!("the boolean is {:?}", args.boolean);
 
     // check that the file is in this container's filesystem
     ensure_eq!(
