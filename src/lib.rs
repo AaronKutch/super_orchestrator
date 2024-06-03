@@ -1,9 +1,11 @@
 mod command;
+mod command_runner;
 mod file_options;
 mod misc;
 mod parsing;
 mod paths;
 pub use command::*;
+pub use command_runner::*;
 pub mod docker;
 /// Miscellanious docker helpers
 pub mod docker_helpers;
