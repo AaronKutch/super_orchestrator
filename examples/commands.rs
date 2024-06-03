@@ -165,10 +165,24 @@ async fn main() -> Result<()> {
         .cwd("./")
         .recording(false)
         .stderr_debug(true)
+        .stderr_log(Some(FileOptions::write("./hello.txt")))
         .record_limit(Some(9))
         .log_limit(Some(8))
         .forget_on_drop(true);
     dbg!(command);
+
+    // check custom prefixes
+    let command = Command::new("cargo r --example commands -- --print --to-stdout hello")
+        .debug(true)
+        .stdout_debug_line_prefix(Some("stdout |".to_owned()))
+        .stderr_debug_line_prefix(Some("stderr |".to_owned()));
+    dbg!(&command);
+    command
+        .run_to_completion()
+        .await
+        .stack()?
+        .assert_success()
+        .stack()?;
 
     Ok(())
 }

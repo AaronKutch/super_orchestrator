@@ -9,6 +9,7 @@
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`
 - Added some helper functions to `Command`
+- Added the ability to customize the `Command` debug line prefix
 
 ## [0.12.1] - 2024-05-20
 ### Fixes

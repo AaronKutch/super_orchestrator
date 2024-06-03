@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
-    cell::OnceCell,
     collections::VecDeque,
     ffi::{OsStr, OsString},
     fmt::{Debug, Display},
@@ -12,7 +11,6 @@ use std::{
     time::Duration,
 };
 
-use owo_colors::AnsiColors;
 use serde::{Deserialize, Serialize};
 use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
@@ -62,6 +60,10 @@ pub struct Command {
     pub stdout_debug: bool,
     /// Forward stderr to the current process stderr
     pub stderr_debug: bool,
+    /// If the default stdout debug line prefix should be overridden
+    pub stdout_debug_line_prefix: Option<String>,
+    /// If the default stderr debug line prefix should be overridden
+    pub stderr_debug_line_prefix: Option<String>,
     /// Sets a limit on the number of bytes recorded by the stdout and stderr
     /// records separately, after which the records become circular buffers.
     /// This limits the potential memory used by a long running command. `None`
@@ -97,6 +99,8 @@ impl Default for Command {
             stderr_log: Default::default(),
             stdout_debug: Default::default(),
             stderr_debug: Default::default(),
+            stdout_debug_line_prefix: None,
+            stderr_debug_line_prefix: None,
             record_limit: Default::default(),
             log_limit: Default::default(),
             read_loop_timeout: DEFAULT_READ_LOOP_TIMEOUT,
@@ -286,24 +290,17 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     record_limit: Option<u64>,
     mut std_log: Option<File>,
     log_limit: Option<u64>,
-    mut std_forward: Option<W>,
-    program_name: OsString,
-    child_id: u32,
-    terminal_color: AnsiColors,
-    std_err: bool,
+    // write point and prefix
+    mut std_forward: Option<(W, String)>,
 ) {
     const FORWARDING_FAILED: &str =
         "`super_orchestrator::Command` stdout or stderr recording failed on write";
-    let program_name = program_name.to_string_lossy();
     // for tracking how much has been written to the file
     let mut log_len = 0u64;
     // if the previous read had a newline on the end (for forwarding to stdout)
     let mut previous_newline = false;
     // if no bytes have been written (for forwarding to stdout)
     let mut empty = true;
-    // for computing the terminal prefix only once
-    let stdout_terminal_prefix = OnceCell::<String>::new();
-    let stderr_terminal_prefix = OnceCell::<String>::new();
     let mut line_buf = Vec::new();
     // when a utf8 codepoint is cut up across reads, we need to store it here
     let mut cut_up: Option<Vec<u8>> = None;
@@ -316,7 +313,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     // if there has been nonempty output with no ending newline insert one upon
                     // completion
                     if (!empty) && (!previous_newline) {
-                        if let Some(ref mut std_forward) = std_forward {
+                        if let Some((ref mut std_forward, _)) = std_forward {
                             if cut_up.is_some() {
                                 // the outside precondition is always met in case of an incomplete
                                 std_forward
@@ -383,7 +380,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     }
                 }
                 // copying to std stream
-                if let Some(ref mut std_forward) = std_forward {
+                if let Some((ref mut std_forward, ref prefix)) = std_forward {
                     let mut tmp = Vec::new();
                     if let Some(cut_up) = cut_up.take() {
                         // prepend the possibly cut up bytes, this should be very rare
@@ -408,31 +405,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                                 // if there has been no writing yet, or the last writing had a
                                 // newline, then insert the terminal prefix
                                 if empty || previous_newline {
-                                    if std_err {
-                                        line_buf.extend_from_slice(
-                                            stderr_terminal_prefix
-                                                .get_or_init(|| {
-                                                    owo_colors::OwoColorize::color(
-                                                        &format!("{program_name} {child_id} E| "),
-                                                        terminal_color,
-                                                    )
-                                                    .to_string()
-                                                })
-                                                .as_bytes(),
-                                        );
-                                    } else {
-                                        line_buf.extend_from_slice(
-                                            stdout_terminal_prefix
-                                                .get_or_init(|| {
-                                                    owo_colors::OwoColorize::color(
-                                                        &format!("{program_name} {child_id}  | "),
-                                                        terminal_color,
-                                                    )
-                                                    .to_string()
-                                                })
-                                                .as_bytes(),
-                                        );
-                                    };
+                                    line_buf.extend_from_slice(prefix.as_bytes());
                                 }
                                 previous_newline = line.last() == Some(&b'\n');
                                 line_buf.extend_from_slice(line);
@@ -448,31 +421,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                         if !invalid.is_empty() {
                             // need to have this again
                             if empty || previous_newline {
-                                if std_err {
-                                    line_buf.extend_from_slice(
-                                        stderr_terminal_prefix
-                                            .get_or_init(|| {
-                                                owo_colors::OwoColorize::color(
-                                                    &format!("{program_name} {child_id} E| "),
-                                                    terminal_color,
-                                                )
-                                                .to_string()
-                                            })
-                                            .as_bytes(),
-                                    );
-                                } else {
-                                    line_buf.extend_from_slice(
-                                        stdout_terminal_prefix
-                                            .get_or_init(|| {
-                                                owo_colors::OwoColorize::color(
-                                                    &format!("{program_name} {child_id}  | "),
-                                                    terminal_color,
-                                                )
-                                                .to_string()
-                                            })
-                                            .as_bytes(),
-                                    );
-                                };
+                                line_buf.extend_from_slice(prefix.as_bytes());
                             }
                             if utf8_chunk.incomplete() {
                                 // the next read pass or ending will pick this up
@@ -695,6 +644,20 @@ impl Command {
         self
     }
 
+    /// Changes the debug line prefix for stdout lines. If `None`, then the
+    /// default of the command name and process ID is used.
+    pub fn stdout_debug_line_prefix(mut self, line_prefix: Option<String>) -> Self {
+        self.stdout_debug_line_prefix = line_prefix;
+        self
+    }
+
+    /// Changes the debug line prefix for stderr lines. If `None`, then the
+    /// default of the command name and process ID is used.
+    pub fn stderr_debug_line_prefix(mut self, line_prefix: Option<String>) -> Self {
+        self.stderr_debug_line_prefix = line_prefix;
+        self
+    }
+
     /// Gets the program and args interspersed with spaces
     pub(crate) fn get_unified_command(&self) -> String {
         let mut command = self.program.to_string_lossy().into_owned();
@@ -748,24 +711,9 @@ impl Command {
         } else {
             None
         };
-        let stdout_forward_stdout = if self.stdout_debug {
-            Some(tokio::io::stdout())
-        } else {
-            None
-        };
-        let stderr_forward_stderr = if self.stderr_debug {
-            Some(tokio::io::stderr())
-        } else {
-            None
-        };
-        let terminal_color = if stdout_forward_stdout.is_some() || stderr_forward_stderr.is_some() {
-            next_terminal_color()
-        } else {
-            owo_colors::AnsiColors::Default
-        };
         let record_limit = self.record_limit;
         let log_limit = self.log_limit;
-        let program_name = self.program.clone();
+        let program_name = self.program.to_string_lossy();
         let read_loop_timeout = self.read_loop_timeout;
         let mut handles: Vec<JoinHandle<()>> = vec![];
         cmd.args(&self.args)
@@ -785,6 +733,42 @@ impl Command {
         let stdout_read = BufReader::new(child.stdout.take().unwrap());
         let stderr_read = BufReader::new(child.stderr.take().unwrap());
         let child_id = child.id().unwrap();
+        let terminal_color = if self.stdout_debug || self.stderr_debug {
+            next_terminal_color()
+        } else {
+            owo_colors::AnsiColors::Default
+        };
+        let stdout_forward = if self.stdout_debug {
+            let stdout = tokio::io::stdout();
+            // TODO tokio does not support `IsTerminal` yet
+            let prefix = if let Some(prefix) = &self.stdout_debug_line_prefix {
+                prefix.clone()
+            } else {
+                owo_colors::OwoColorize::color(
+                    &format!("{program_name} {child_id}  | "),
+                    terminal_color,
+                )
+                .to_string()
+            };
+            Some((stdout, prefix))
+        } else {
+            None
+        };
+        let stderr_forward = if self.stderr_debug {
+            let stderr = tokio::io::stderr();
+            let prefix = if let Some(prefix) = &self.stderr_debug_line_prefix {
+                prefix.clone()
+            } else {
+                owo_colors::OwoColorize::color(
+                    &format!("{program_name} {child_id} E| "),
+                    terminal_color,
+                )
+                .to_string()
+            };
+            Some((stderr, prefix))
+        } else {
+            None
+        };
         handles.push(task::spawn(recorder(
             read_loop_timeout,
             stdout_read,
@@ -792,13 +776,8 @@ impl Command {
             record_limit,
             stdout_log,
             log_limit,
-            stdout_forward_stdout,
-            program_name,
-            child_id,
-            terminal_color,
-            false,
+            stdout_forward,
         )));
-        let program_name = self.program.clone();
         handles.push(task::spawn(recorder(
             read_loop_timeout,
             stderr_read,
@@ -806,11 +785,7 @@ impl Command {
             record_limit,
             stderr_log,
             log_limit,
-            stderr_forward_stderr,
-            program_name,
-            child_id,
-            terminal_color,
-            true,
+            stderr_forward,
         )));
         Ok(CommandRunner {
             command: Some(self),
