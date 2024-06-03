@@ -16,7 +16,7 @@ use stacked_errors::{DisplayStr, Error, Result, StackableErr};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufReader},
-    process::{self, Child, ChildStdin},
+    process::{self, Child},
     sync::Mutex,
     task::{self, JoinHandle},
     time::{sleep, timeout},
@@ -37,12 +37,15 @@ const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 pub struct Command {
     /// The program to run.
     pub program: OsString,
+    /// All the arguments that will be passed to the program
     pub args: Vec<OsString>,
-    /// Clears the environment variable map before applying `envs`
+    /// If set, the environment variable map is cleared (before the `envs` are
+    /// applied)
     pub env_clear: bool,
     /// Environment variable mappings
     pub envs: Vec<(OsString, OsString)>,
-    /// Working directory for process
+    /// Working directory for process. `acquire_dir_path` is used on this in the
+    /// functions that run the `Commanmd`.
     pub cwd: Option<PathBuf>,
     /// Set to true by default, this enables recording of the `stdout` which can
     /// be accessed from `stdout_record` in the runner or `stdout` in the
@@ -52,9 +55,9 @@ pub struct Command {
     /// be accessed from `stderr_record` in the runner or `stderr` in the
     /// command result later
     pub stderr_recording: bool,
-    /// If set, the command will copy the `stdout` to a file
+    /// If set, the command will copy the `stdout` to the file
     pub stdout_log: Option<FileOptions>,
-    /// If set, the command will copy the `stderr` to a file
+    /// If set, the command will copy the `stderr` to the file
     pub stderr_log: Option<FileOptions>,
     /// Forward stdout to the current process stdout
     pub stdout_debug: bool,
@@ -161,7 +164,7 @@ impl Debug for Command {
 /// # Note
 ///
 /// Locks on `stdout_record` and `stderr_record` should only be held long enough
-/// to make a quick copy or other operation, because the task to record program
+/// to make the needed `VecDeque` operations, because the task to record program
 /// outputs needs the lock to progress.
 ///
 /// If the `tracing` crate is used and a subscriber is active, warnings from
@@ -175,14 +178,26 @@ pub struct CommandRunner {
     // this information is kept around for failures
     /// The command this runner was started with
     command: Option<Command>,
-    // do not make public, some functions assume this is available
-    child_process: Option<Child>,
+    /// The handle to the `Child` process. The `ChildStdout` was taken if there
+    /// was any kind of recording. `stdout_recording`, `stdout_debug`, and
+    /// `stdout_log.is_some()` should all be false in the `Command` if you
+    /// want direct access to the `ChildStdout`. Likewise, `stderr_recording`,
+    /// `stderr_debug`, and `stderr_log.is_some()` should be all false if
+    /// you want `ChildStderr`.
+    pub child_process: Option<Child>,
     handles: Vec<tokio::task::JoinHandle<()>>,
-    stdin: Option<ChildStdin>,
-    // If we take out the `ChildStderr` from the process, the results will have nothing in them. If
-    // we are actively copying stdout/stderr to a file and/or forwarding stdout, we need to also be
-    // copying it to here in order to not lose the data.
+
+    // TODO I'm not sure if this can/should be a `std::sync::mutex` considering the parallel async
+    // tasks, clippy sends warnings in basic_commands.rs (not sure if they are spurious).
+    /// The stdout of the command is actively pushed to the `VecDeque`. The
+    /// remaining contents of this are used in `stdout` in the `CommandResult`.
+    /// Note: the lock should only be held long enough to make needed
+    /// `VecDeque` operations.
     pub stdout_record: Arc<Mutex<VecDeque<u8>>>,
+    /// The stderr of the command is actively pushed to the `VecDeque`. The
+    /// remaining contents of this are used in `stderr` in the `CommandResult`.
+    /// Note: the lock should only be held long enough to make needed
+    /// `VecDeque` operations.
     pub stderr_record: Arc<Mutex<VecDeque<u8>>>,
     result: Option<CommandResult>,
 }
@@ -727,11 +742,6 @@ impl Command {
             .stack_err_locationless(|| {
                 format!("{self:?}.run() -> failed to spawn child process")
             })?;
-        let stdin = child.stdin.take();
-        // TODO: If all recording is disabled do we drop the ChildStdout or do we need
-        // to drop the output in a loop like we currently do?
-        let stdout_read = BufReader::new(child.stdout.take().unwrap());
-        let stderr_read = BufReader::new(child.stderr.take().unwrap());
         let child_id = child.id().unwrap();
         let terminal_color = if self.stdout_debug || self.stderr_debug {
             next_terminal_color()
@@ -769,29 +779,38 @@ impl Command {
         } else {
             None
         };
-        handles.push(task::spawn(recorder(
-            read_loop_timeout,
-            stdout_read,
-            stdout_record_clone,
-            record_limit,
-            stdout_log,
-            log_limit,
-            stdout_forward,
-        )));
-        handles.push(task::spawn(recorder(
-            read_loop_timeout,
-            stderr_read,
-            stderr_record_clone,
-            record_limit,
-            stderr_log,
-            log_limit,
-            stderr_forward,
-        )));
+        // dropping the stdout and stderr handles actually results in an error, we keep
+        // all the stuff anyway in `child_process` if there is not any kind of recording
+        if self.stdout_recording || self.stdout_debug || self.stdout_log.is_some() {
+            let stdout = child.stdout.take().unwrap();
+            let stdout_read = BufReader::new(stdout);
+            handles.push(task::spawn(recorder(
+                read_loop_timeout,
+                stdout_read,
+                stdout_record_clone,
+                record_limit,
+                stdout_log,
+                log_limit,
+                stdout_forward,
+            )));
+        }
+        if self.stderr_recording || self.stderr_debug || self.stderr_log.is_some() {
+            let stderr = child.stderr.take().unwrap();
+            let stderr_read = BufReader::new(stderr);
+            handles.push(task::spawn(recorder(
+                read_loop_timeout,
+                stderr_read,
+                stderr_record_clone,
+                record_limit,
+                stderr_log,
+                log_limit,
+                stderr_forward,
+            )));
+        }
         Ok(CommandRunner {
             command: Some(self),
             child_process: Some(child),
             handles,
-            stdin,
             stdout_record,
             stderr_record,
             result: None,
@@ -814,16 +833,13 @@ impl Command {
     }
 
     /// Same as [Command::run_to_completion] except it pipes `input` to the
-    /// process stdin.
+    /// process stdin
     pub async fn run_with_input_to_completion(self, input: &[u8]) -> Result<CommandResult> {
         let mut runner = self
             .run_with_stdin(Stdio::piped())
             .await
             .stack_err_locationless(|| "Command::run_with_input_to_completion")?;
-        let mut stdin = runner.stdin.take().stack_err(|| {
-            "Command::run_with_input_to_completion -> using Stdio::piped() did not result in a \
-             stdin handle"
-        })?;
+        let mut stdin = runner.child_process.as_mut().unwrap().stdin.take().unwrap();
         stdin.write_all(input).await.stack_err_locationless(|| {
             "Command::run_with_input_to_completion -> failed to write_all to process stdin"
         })?;
@@ -948,7 +964,7 @@ impl CommandRunner {
     /// use `wait_with_timeout` for a timeout). Note: If this function
     /// succeeds, it only means that the OS calls and parsing all succeeded,
     /// it does not mean that the command itself had a successful return
-    /// status, use `assert_status` or check the `status` on
+    /// status, use `assert_success` or check the `status` on
     /// the `CommandResult`.
     pub async fn wait_with_output(mut self) -> Result<CommandResult> {
         self.wait_with_output_internal().await?;
@@ -1123,5 +1139,25 @@ impl CommandResultNoDebug {
                 "{self:#?}.assert_success() -> termination was called before completion"
             )))
         }
+    }
+
+    /// Returns `str::from_utf8(&self.stdout)`
+    pub fn stdout_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stdout)
+    }
+
+    /// Returns `str::from_utf8(&self.stderr)`
+    pub fn stderr_as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.stderr)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stdout)`
+    pub fn stdout_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stdout)
+    }
+
+    /// Returns `String::from_utf8_lossy(&self.stderr)`
+    pub fn stderr_as_utf8_lossy(&self) -> Cow<str> {
+        String::from_utf8_lossy(&self.stderr)
     }
 }

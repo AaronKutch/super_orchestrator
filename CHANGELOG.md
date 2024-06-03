@@ -5,11 +5,13 @@
 - Removed `FileOptions::create` and `FileOptions::append`
 - Used `*_locationless` in many more places
 - Improved some debug and display outputs
+- `CommandRunner::child_process` now holds the `ChildStdout` and `ChildStderr` if the streams have no recording
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`
 - Added some helper functions to `Command`
 - Added the ability to customize the `Command` debug line prefix
+- Added missing functions to `CommandResultNoDebug`
 
 ## [0.12.1] - 2024-05-20
 ### Fixes
