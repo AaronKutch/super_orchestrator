@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
@@ -287,7 +287,7 @@ impl Container {
             .await
             .stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
         cn.terminate_all().await;
-        cn.remove_name(name)
+        cn.remove_container(name)
             .await
             .unwrap()
             .stack_err_locationless(|| {
@@ -303,7 +303,7 @@ impl Container {
     pub async fn create(
         &self,
         network_name: &str,
-        dockerfile_write_file: &Option<String>,
+        dockerfile_write_file: &Option<PathBuf>,
         debug: bool,
         log_file: Option<&FileOptions>,
     ) -> Result<String> {
@@ -430,8 +430,13 @@ impl Container {
                 args.push(tag_name);
 
                 FileOptions::write_str(&dockerfile_write_file, contents).await?;
-                let mut build_args: Vec<&str> =
-                    vec!["build", "-t", &tag_name, "--file", &dockerfile_write_file];
+                let mut build_args: Vec<&str> = vec![
+                    "build",
+                    "-t",
+                    &tag_name,
+                    "--file",
+                    &dockerfile_write_file.to_str().stack()?,
+                ];
                 let mut tmp: Vec<&str> = vec![];
                 for arg in &self.build_args {
                     tmp.push(arg);
@@ -439,7 +444,9 @@ impl Container {
                 for s in &tmp {
                     build_args.push(s);
                 }
-                build_args.push(dockerfile_write_file);
+                let mut dockerfile_write_dir = dockerfile_write_file.to_owned();
+                dockerfile_write_dir.pop();
+                build_args.push(dockerfile_write_dir.to_str().stack()?);
                 Command::new("docker")
                     .args(build_args)
                     .log(log_file)
@@ -449,7 +456,7 @@ impl Container {
                     .stack_err_locationless(|| {
                         format!(
                             "Container::create -> when using the `Dockerfile::Contents` written \
-                             to \"{dockerfile_write_file}\":\n{contents}\n"
+                             to \"{dockerfile_write_file:?}\":\n{contents}\n"
                         )
                     })?;
             }

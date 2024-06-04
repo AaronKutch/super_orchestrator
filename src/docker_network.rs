@@ -81,7 +81,9 @@ impl ContainerState {
                         RunState::PostActive(Ok(runner.take_command_result().unwrap()));
                 }
             }
-            RunState::PostActive(_) => (),
+            RunState::PostActive(x) => {
+                self.run_state = RunState::PostActive(x);
+            }
         }
     }
 
@@ -119,7 +121,6 @@ impl ContainerState {
 pub struct ContainerNetwork {
     uuid: Uuid,
     network_name: String,
-    /// FIXME in init args
     pub network_args: Vec<String>,
     set: BTreeMap<String, ContainerState>,
     dockerfile_write_dir: Option<String>,
@@ -129,6 +130,13 @@ pub struct ContainerNetwork {
 
 impl Drop for ContainerNetwork {
     fn drop(&mut self) {
+        if self.network_active {
+            let _ = std::process::Command::new("docker")
+                .arg("network")
+                .arg("rm")
+                .arg(self.network_name())
+                .output();
+        }
         // here we are only concerned with logically active containers in a non
         // panicking situation, the `Drop` impl on each `ContainerState` handles the
         // rest if necessary
@@ -139,7 +147,8 @@ impl Drop for ContainerNetwork {
                 warn!(
                     "A `ContainerNetwork` was dropped without all active containers being \
                      properly terminated"
-                )
+                );
+                break
             }
         }
     }
@@ -249,7 +258,7 @@ impl ContainerNetwork {
     /// if it is currently active. Returns `Ok(None)` if the container was never
     /// activated. Should return a `CommandResult` if the container was normally
     /// terminated. Returns an error if `name` could not be found.
-    pub async fn remove_name<S>(&mut self, name: S) -> Result<Option<CommandResult>>
+    pub async fn remove_container<S>(&mut self, name: S) -> Result<Option<CommandResult>>
     where
         S: AsRef<str>,
     {
@@ -359,12 +368,10 @@ impl ContainerNetwork {
         }
     }
 
-    /// Force removes all active containers and removes the network. The
-    /// `ContainerNetwork` can always be safely dropped if this is the last
-    /// function called on it. The network is recreated if any containers are
-    /// run again.
-    pub async fn terminate_all(&mut self) {
-        self.terminate_containers().await;
+    // don't make public because we would have to make decisions around containers
+    // that still exist
+    /// Removes the docker network
+    async fn terminate_network(&mut self) {
         if self.network_active {
             let _ = Command::new("docker network rm")
                 .arg(self.network_name())
@@ -372,6 +379,15 @@ impl ContainerNetwork {
                 .await;
             self.network_active = false;
         }
+    }
+
+    /// Force removes all active containers and removes the network. The
+    /// `ContainerNetwork` can always be safely dropped if this is the last
+    /// function called on it. The network is recreated if any containers are
+    /// run again.
+    pub async fn terminate_all(&mut self) {
+        self.terminate_containers().await;
+        self.terminate_network().await;
     }
 
     /// Runs only the given `names`. This prechecks as much as it can before
@@ -448,7 +464,7 @@ impl ContainerNetwork {
             let path = file_options.preacquire().await.stack_err_locationless(|| {
                 "ContainerNetwork::run -> could not acquire the `dockerfile_write_dir`"
             })?;
-            dockerfile_write_file = Some(path.to_str().unwrap().to_owned());
+            dockerfile_write_file = Some(path);
         }
 
         let log_file = FileOptions::write2(
