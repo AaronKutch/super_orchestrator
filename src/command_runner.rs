@@ -446,7 +446,7 @@ impl CommandRunner {
             Ok(())
         } else {
             Err(Error::from_kind_locationless(
-                "`CommandRunner` has already had some termination method called",
+                "CommandRunner::terminate -> a termination method has already been called",
             ))
         }
     }

@@ -24,7 +24,7 @@ enum RunState {
     #[default]
     PreActive,
     Active(CommandRunner),
-    PostActive(CommandResult),
+    PostActive(Result<CommandResult>),
 }
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ struct ContainerState {
     // variable and assume that panicking is happening or the state is cleaned up before giving
     // back to a user.
     active_container_id: Option<String>,
-    // this variable should be per-ContainerState and not on a higher or lower level
+    // this variable should be per-`ContainerState`` and not on a higher or lower level
     already_tried_drop: bool,
 }
 
@@ -71,9 +71,14 @@ impl ContainerState {
         match state {
             RunState::PreActive => (),
             RunState::Active(mut runner) => {
-                let _ = runner.terminate().await;
-                if let Some(result) = runner.take_command_result() {
-                    self.run_state = RunState::PostActive(result);
+                if let Err(e) = runner.terminate().await {
+                    self.run_state = RunState::PostActive(Err(e.add_kind_locationless(
+                        "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
+                         container, encountered an unexpected error",
+                    )));
+                } else {
+                    self.run_state =
+                        RunState::PostActive(Ok(runner.take_command_result().unwrap()));
                 }
             }
             RunState::PostActive(_) => (),
@@ -106,10 +111,10 @@ impl ContainerState {
 /// # Note
 ///
 /// If a CTRL-C/sigterm signal is sent while containers are running, and
-/// [ctrlc_init](crate::ctrlc_init) or some other handler has not been set up,
-/// the containers may continue to run in the background and will have to be
-/// manually stopped. If the handlers are set, then one of the runners will
-/// trigger an error or a check for `CTRLC_ISSUED` will terminate all.
+/// [ctrlc_init](crate::ctrlc_init) has not been set up, the containers may
+/// continue to run in the background and will have to be manually stopped. If
+/// the handlers are set, then one of the runners will trigger an error or a
+/// check for `CTRLC_ISSUED` will terminate all.
 #[derive(Debug)]
 pub struct ContainerNetwork {
     uuid: Uuid,
@@ -140,6 +145,9 @@ impl Drop for ContainerNetwork {
     }
 }
 
+// TODO parallelize, order `Dockerfile`s for startup and all parallel for
+// bringing down
+
 impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
@@ -169,14 +177,18 @@ impl ContainerNetwork {
     /// Can return an error if there are containers with duplicate names, or a
     /// container is built with `Dockerfile::Content` but no
     /// `dockerfile_write_dir` is specified.
-    pub fn new(network_name: &str, dockerfile_write_dir: Option<&str>, log_dir: &str) -> Self {
+    pub fn new<S0, S1>(network_name: S0, dockerfile_write_dir: Option<&str>, log_dir: S1) -> Self
+    where
+        S0: AsRef<str>,
+        S1: AsRef<str>,
+    {
         Self {
             uuid: Uuid::new_v4(),
-            network_name: network_name.to_owned(),
+            network_name: network_name.as_ref().to_owned(),
             network_args: vec![],
             set: BTreeMap::new(),
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
-            log_dir: log_dir.to_owned(),
+            log_dir: log_dir.as_ref().to_owned(),
             network_active: false,
         }
     }
@@ -214,8 +226,8 @@ impl ContainerNetwork {
             && matches!(container.dockerfile, Dockerfile::Contents(_))
         {
             return Err(Error::from_kind_locationless(
-                "ContainerNetwork::new() a container is built with `Dockerfile::Contents`, but \
-                 `dockerfile_write_dir` is unset",
+                "ContainerNetwork::add_container -> a container is built with \
+                 `Dockerfile::Contents`, but `dockerfile_write_dir` is unset",
             ))
         }
         match self.set.entry(container.name.clone()) {
@@ -224,13 +236,35 @@ impl ContainerNetwork {
             }
             Entry::Occupied(_) => {
                 return Err(Error::from_kind_locationless(format!(
-                    "ContainerNetwork::new() two containers were supplied with the same name \
-                     \"{}\"",
+                    "ContainerNetwork::add_container -> two containers were supplied with the \
+                     same name \"{}\"",
                     container.name
                 )))
             }
         }
         Ok(self)
+    }
+
+    /// Removes the container with `name` from the network, force terminating it
+    /// if it is currently active. Returns `Ok(None)` if the container was never
+    /// activated. Should return a `CommandResult` if the container was normally
+    /// terminated. Returns an error if `name` could not be found.
+    pub async fn remove_name<S>(&mut self, name: S) -> Result<Option<CommandResult>>
+    where
+        S: AsRef<str>,
+    {
+        let name = name.as_ref();
+        self.terminate([name]).await;
+        if let Some(mut state) = self.set.remove(name) {
+            match mem::take(&mut state.run_state) {
+                RunState::PostActive(Ok(comres)) => Ok(Some(comres)),
+                _ => Ok(None),
+            }
+        } else {
+            Err(Error::from(format!(
+                "ContainerNetwork::remove_name -> could not find name \"{name}\" in the network"
+            )))
+        }
     }
 
     /// Adds the volumes to every container currently in the network
@@ -325,7 +359,10 @@ impl ContainerNetwork {
         }
     }
 
-    /// Force removes all active containers and removes the network
+    /// Force removes all active containers and removes the network. The
+    /// `ContainerNetwork` can always be safely dropped if this is the last
+    /// function called on it. The network is recreated if any containers are
+    /// run again.
     pub async fn terminate_all(&mut self) {
         self.terminate_containers().await;
         if self.network_active {
@@ -531,34 +568,44 @@ impl ContainerNetwork {
             // TODO not sure if we should have a generation counter to track different sets
             // of `wait_*` failures, for now we will just always use all unsuccessful
             // `PostActive` containers
-            if let RunState::PostActive(ref comres) = state.run_state {
-                if !comres.successful() {
-                    let mut encountered = false;
-                    let stdout = comres.stdout_as_utf8_lossy();
-                    if let Some(start) = stdout.rfind(error_stack) {
-                        if !stdout.contains(not_root_cause) {
-                            encountered = true;
-                            res = res.add_kind_locationless(format!(
-                                "Error stack from container \"{name}\":\n{}\n",
-                                &stdout[start..]
-                            ));
+            if let RunState::PostActive(ref result) = state.run_state {
+                match result {
+                    Ok(comres) => {
+                        if !comres.successful() {
+                            let mut encountered = false;
+                            let stdout = comres.stdout_as_utf8_lossy();
+                            if let Some(start) = stdout.rfind(error_stack) {
+                                if !stdout.contains(not_root_cause) {
+                                    encountered = true;
+                                    res = res.add_kind_locationless(format!(
+                                        "Error stack from container \"{name}\":\n{}\n",
+                                        &stdout[start..]
+                                    ));
+                                }
+                            }
+
+                            if let Some(i) = stdout.rfind(panicked_at) {
+                                if let Some(i) = stdout[0..i].rfind("thread") {
+                                    encountered = true;
+                                    res = res.add_kind_locationless(format!(
+                                        "Panic message from container \"{name}\":\n{}\n",
+                                        &stdout[i..]
+                                    ));
+                                }
+                            }
+
+                            if (!encountered) && (!comres.successful_or_terminated()) {
+                                res = res.add_kind_locationless(format!(
+                                    "Error: Container \"{name}\" was unsuccessful but does not \
+                                     seem to have an error stack or panic message\n"
+                                ));
+                            }
                         }
                     }
-
-                    if let Some(i) = stdout.rfind(panicked_at) {
-                        if let Some(i) = stdout[0..i].rfind("thread") {
-                            encountered = true;
-                            res = res.add_kind_locationless(format!(
-                                "Panic message from container \"{name}\":\n{}\n",
-                                &stdout[i..]
-                            ));
-                        }
-                    }
-
-                    if (!encountered) && (!comres.successful_or_terminated()) {
+                    Err(e) => {
                         res = res.add_kind_locationless(format!(
-                            "Error: Container \"{name}\" was unsuccessful but does not seem to \
-                             have an error stack or panic message\n"
+                            "Error: The internal handling of Container \"{name}\" produced this \
+                             error:\n {e:?}"
                         ));
                     }
                 }
@@ -660,7 +707,7 @@ impl ContainerNetwork {
                                  for more):\n"
                             })
                         }
-                        state.run_state = RunState::PostActive(comres);
+                        state.run_state = RunState::PostActive(Ok(comres));
                         names.remove(i);
                     }
                     Err(e) => {

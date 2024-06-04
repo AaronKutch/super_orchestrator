@@ -265,8 +265,8 @@ impl Container {
     }
 
     /// Runs this container by itself in a default `ContainerNetwork` with
-    /// "super_orchestrator" as the network name, waiting for completion with a
-    /// timeout.
+    /// "super_orchestrator_{uuid}" as the network name, waiting for completion
+    /// with a timeout.
     pub async fn run(
         self,
         dockerfile_write_dir: Option<&str>,
@@ -274,7 +274,9 @@ impl Container {
         log_dir: &str,
         debug: bool,
     ) -> Result<CommandResult> {
+        // TODO UUID for this for instance
         let mut cn = ContainerNetwork::new("super_orchestrator", dockerfile_write_dir, log_dir);
+        let name = self.name.clone();
         cn.add_container(self).stack_err_locationless(|| {
             "Container::run when trying to create a `ContainerNetwork`"
         })?;
@@ -285,8 +287,12 @@ impl Container {
             .await
             .stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
         cn.terminate_all().await;
-        todo!()
-        //Ok(cn.container_results.pop_first().unwrap().1.unwrap())
+        cn.remove_name(name)
+            .await
+            .unwrap()
+            .stack_err_locationless(|| {
+                "Container::run could not get `CommandResult` because of some internal bug or error"
+            })
     }
 
     /// This function is intended to be indirectly used by most users through
@@ -366,7 +372,8 @@ impl Container {
             })?;
             combined_volumes.push(format!(
                 "{}:{}",
-                path.to_str().stack_err(|| "path was not UTF-8")?,
+                path.to_str()
+                    .stack_err_locationless(|| "Container::create -> path was not UTF-8")?,
                 volume.1
             ));
         }
@@ -412,7 +419,7 @@ impl Container {
                     .await?
                     .assert_success()
                     .stack_err_locationless(|| {
-                        format!("Failed when using the dockerfile at {path:?}")
+                        format!("Container::create -> when using the dockerfile at {path:?}")
                     })?;
             }
             Dockerfile::Contents(ref contents) => {
@@ -441,8 +448,8 @@ impl Container {
                     .assert_success()
                     .stack_err_locationless(|| {
                         format!(
-                            "The Dockerfile::Contents written to \
-                             \"{dockerfile_write_file}\":\n{contents}\n"
+                            "Container::create -> when using the `Dockerfile::Contents` written \
+                             to \"{dockerfile_write_file}\":\n{contents}\n"
                         )
                     })?;
             }
@@ -480,7 +487,9 @@ impl Container {
                     Err(e) => Err(e),
                 }
             }
-            Err(e) => Err(e).stack_err_locationless(|| "{self:?}.run()"),
+            Err(e) => {
+                Err(e).stack_err_locationless(|| "Container::create -> when creating the container")
+            }
         }
     }
 
@@ -514,7 +523,10 @@ impl Container {
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
         }
-        let runner = command.run().await.stack_err(|| "Container::start")?;
+        let runner = command
+            .run()
+            .await
+            .stack_err_locationless(|| "Container::start")?;
         Ok(runner)
     }
 }
