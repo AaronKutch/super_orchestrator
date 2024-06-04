@@ -425,8 +425,8 @@ impl CommandRunner {
 
     /// Forces the command to exit. Drops the internal handle. Returns an error
     /// if some termination method has already been called (this will not
-    /// error if the process exited itself, only if a termination function that
-    /// removes the handle has been called).
+    /// error if the process exited by itself, only if a termination function
+    /// that removes the handle has been called).
     ///
     /// `self.result` is set, and `self.result.status` is set to `None`.
     pub async fn terminate(&mut self) -> Result<()> {
@@ -575,9 +575,15 @@ impl CommandRunner {
         Ok(())
     }
 
-    /// Assuming that `self` is finished after
-    /// [CommandRunner::wait_with_timeout], this can be called
-    pub fn get_command_result(mut self) -> Option<CommandResult> {
+    /// After [CommandRunner::wait_with_timeout] is successful, this will return
+    /// a reference to the `CommandResult`
+    pub fn get_command_result(&mut self) -> Option<&CommandResult> {
+        self.result.as_ref()
+    }
+
+    /// After [CommandRunner::wait_with_timeout] is successful, this will take
+    /// the `CommandResult` from `self`, replacing it with `None`.
+    pub fn take_command_result(&mut self) -> Option<CommandResult> {
         self.result.take()
     }
 }

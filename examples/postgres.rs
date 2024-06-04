@@ -142,7 +142,8 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.run_all(true).await.stack()?;
 
-    // only wait on the "test_runner" because the postgres container will run by itself forever
+    // only wait on the "test_runner" because the postgres container will run by
+    // itself forever
     cn.wait_with_timeout(&mut vec!["test_runner".to_owned()], true, TIMEOUT)
         .await
         .stack()?;

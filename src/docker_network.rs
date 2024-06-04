@@ -1,5 +1,6 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    mem,
     net::IpAddr,
     sync::atomic::Ordering,
     time::Duration,
@@ -11,14 +12,96 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    acquire_dir_path, acquire_file_path, acquire_path,
+    acquire_file_path,
     docker::{Container, Dockerfile},
     docker_helpers::wait_get_ip_addr,
-    next_terminal_color, Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
+    Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 
-/// A complete network of one or more containers, a more programmable
-/// alternative to `docker-compose`
+#[derive(Debug, Default)]
+#[allow(clippy::large_enum_variant)]
+enum RunState {
+    #[default]
+    PreActive,
+    Active(CommandRunner),
+    PostActive(CommandResult),
+}
+
+#[derive(Debug)]
+struct ContainerState {
+    container: Container,
+    run_state: RunState,
+    // NOTE: logically, only the `Active` state should have actual containers that should be
+    // removed before program exit, but in the run function there is a loop that first creates all
+    // containers before starting them. If an error occurs in between, the created containers with
+    // associated IDs need to be removed. The drop and terminate functions only deals with this
+    // variable and assume that panicking is happening or the state is cleaned up before giving
+    // back to a user.
+    active_container_id: Option<String>,
+    // this variable should be per-ContainerState and not on a higher or lower level
+    already_tried_drop: bool,
+}
+
+impl Drop for ContainerState {
+    fn drop(&mut self) {
+        if self.already_tried_drop {
+            // avoid recursive panics if something goes wrong in the `Command`
+            return
+        }
+        self.already_tried_drop = true;
+        if let Some(id) = self.active_container_id.take() {
+            let _ = std::process::Command::new("docker")
+                .arg("rm")
+                .arg("-f")
+                .arg(id)
+                .output();
+        }
+    }
+}
+
+impl ContainerState {
+    pub async fn terminate(&mut self) {
+        if let Some(id) = self.active_container_id.take() {
+            let _ = Command::new("docker rm -f")
+                .arg(id)
+                .run_to_completion()
+                .await;
+        }
+        let state = mem::take(&mut self.run_state);
+        match state {
+            RunState::PreActive => (),
+            RunState::Active(mut runner) => {
+                let _ = runner.terminate().await;
+                if let Some(result) = runner.take_command_result() {
+                    self.run_state = RunState::PostActive(result);
+                }
+            }
+            RunState::PostActive(_) => (),
+        }
+    }
+
+    pub fn new(container: Container) -> Self {
+        Self {
+            container,
+            run_state: RunState::PreActive,
+            active_container_id: None,
+            already_tried_drop: false,
+        }
+    }
+
+    pub fn container(&self) -> &Container {
+        &self.container
+    }
+
+    pub fn container_mut(&mut self) -> &mut Container {
+        &mut self.container
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self.run_state, RunState::Active(_))
+    }
+}
+
 ///
 /// # Note
 ///
@@ -27,41 +110,32 @@ use crate::{
 /// the containers may continue to run in the background and will have to be
 /// manually stopped. If the handlers are set, then one of the runners will
 /// trigger an error or a check for `CTRLC_ISSUED` will terminate all.
-#[must_use]
 #[derive(Debug)]
 pub struct ContainerNetwork {
     uuid: Uuid,
     network_name: String,
+    /// FIXME in init args
     pub network_args: Vec<String>,
-    containers: BTreeMap<String, Container>,
+    set: BTreeMap<String, ContainerState>,
     dockerfile_write_dir: Option<String>,
     log_dir: String,
-    active_container_ids: BTreeMap<String, String>,
-    container_runners: BTreeMap<String, CommandRunner>,
-    pub container_results: BTreeMap<String, Result<CommandResult>>,
     network_active: bool,
 }
 
 impl Drop for ContainerNetwork {
     fn drop(&mut self) {
-        // we purposely order in this way to avoid calling `panicking` in the
-        // normal case
-        if !self.container_runners.is_empty() {
-            if !std::thread::panicking() {
+        // here we are only concerned with logically active containers in a non
+        // panicking situation, the `Drop` impl on each `ContainerState` handles the
+        // rest if necessary
+        for state in self.set.values() {
+            // we purposely order in this way to avoid calling `panicking` in the
+            // normal case
+            if state.is_active() && (!std::thread::panicking()) {
                 warn!(
-                    "`ContainerNetwork` \"{}\" was dropped with internal container runners still \
-                     running (a termination function needs to be called",
-                    self.network_name()
+                    "A `ContainerNetwork` was dropped without all active containers being \
+                     properly terminated"
                 )
             }
-        } else if self.network_active && (!std::thread::panicking()) {
-            // we can't call async/await in a `drop` function, and it would be suspicious
-            // anyway
-            warn!(
-                "`ContainerNetwork` \"{}\" was dropped with the network still active \
-                 (`ContainerNetwork::terminate_all` needs to be called)",
-                self.network_name()
-            )
         }
     }
 }
@@ -100,12 +174,9 @@ impl ContainerNetwork {
             uuid: Uuid::new_v4(),
             network_name: network_name.to_owned(),
             network_args: vec![],
-            containers: BTreeMap::new(),
+            set: BTreeMap::new(),
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
             log_dir: log_dir.to_owned(),
-            active_container_ids: BTreeMap::new(),
-            container_runners: BTreeMap::new(),
-            container_results: BTreeMap::new(),
             network_active: false,
         }
     }
@@ -147,13 +218,18 @@ impl ContainerNetwork {
                  `dockerfile_write_dir` is unset",
             ))
         }
-        if self.containers.contains_key(&container.name) {
-            return Err(Error::from_kind_locationless(format!(
-                "ContainerNetwork::new() two containers were supplied with the same name \"{}\"",
-                container.name
-            )))
+        match self.set.entry(container.name.clone()) {
+            Entry::Vacant(v) => {
+                v.insert(ContainerState::new(container));
+            }
+            Entry::Occupied(_) => {
+                return Err(Error::from_kind_locationless(format!(
+                    "ContainerNetwork::new() two containers were supplied with the same name \
+                     \"{}\"",
+                    container.name
+                )))
+            }
         }
-        self.containers.insert(container.name.clone(), container);
         Ok(self)
     }
 
@@ -168,8 +244,11 @@ impl ContainerNetwork {
             .into_iter()
             .map(|x| (x.0.as_ref().to_string(), x.1.as_ref().to_string()))
             .collect();
-        for container in self.containers.values_mut() {
-            container.volumes.extend(volumes.iter().cloned())
+        for state in self.set.values_mut() {
+            state
+                .container_mut()
+                .volumes
+                .extend(volumes.iter().cloned());
         }
         self
     }
@@ -181,71 +260,68 @@ impl ContainerNetwork {
         S: AsRef<str>,
     {
         let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
-        for container in self.containers.values_mut() {
-            container.entrypoint_args.extend(args.iter().cloned())
+        for state in self.set.values_mut() {
+            state
+                .container_mut()
+                .entrypoint_args
+                .extend(args.iter().cloned())
         }
         self
     }
 
     /// Get a map of active container names to ids
-    pub fn get_active_container_ids(&self) -> &BTreeMap<String, String> {
-        &self.active_container_ids
-    }
-
-    /// Get the names of all active containers
-    pub fn active_names(&self) -> Vec<String> {
-        self.active_container_ids.keys().cloned().collect()
-    }
-
-    /// Get the names of all inactive containers
-    pub fn inactive_names(&self) -> Vec<String> {
-        let mut v = vec![];
-        for name in self.containers.keys() {
-            if !self.active_container_ids.contains_key(name) {
-                v.push(name.clone());
+    pub fn get_active_container_ids(&self) -> BTreeMap<String, String> {
+        let mut v = BTreeMap::new();
+        for (name, state) in &self.set {
+            if state.is_active() {
+                v.insert(name.to_string(), state.active_container_id.clone().unwrap());
             }
         }
         v
     }
 
-    /// Force removes containers with the given names. No errors are returned in
-    /// case of duplicate names or names that are not in the active set.
-    pub async fn terminate(&mut self, names: &[&str]) {
+    /// Get the names of all active containers
+    pub fn active_names(&self) -> Vec<String> {
+        let mut v = vec![];
+        for (name, state) in &self.set {
+            if state.is_active() {
+                v.push(name.to_string());
+            }
+        }
+        v
+    }
+
+    /// Get the names of all inactive containers (both containers that have not
+    /// been run before, and containers that were terminated)
+    pub fn inactive_names(&self) -> Vec<String> {
+        let mut v = vec![];
+        for (name, state) in &self.set {
+            if !state.is_active() {
+                v.push(name.to_string());
+            }
+        }
+        v
+    }
+
+    /// Force removes any active containers found with the given names
+    pub async fn terminate<I, S>(&mut self, names: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         for name in names {
-            if let Some(docker_id) = self.active_container_ids.remove(*name) {
-                // TODO we should parse errors to differentiate whether it is
-                // simply a race condition where the container finished before
-                // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f")
-                    .arg(docker_id)
-                    .run_to_completion()
-                    .await;
-                if let Some(mut runner) = self.container_runners.remove(*name) {
-                    let _ = runner.terminate().await;
-                    self.container_results
-                        .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
-                }
+            let name = name.as_ref();
+            if let Some(state) = self.set.get_mut(name) {
+                state.terminate().await;
             }
         }
     }
 
-    /// Force removes all active containers.
+    /// Force removes all active containers, but does not remove the docker
+    /// network
     pub async fn terminate_containers(&mut self) {
-        for name in self.active_names() {
-            if let Some(docker_id) = self.active_container_ids.remove(&name) {
-                // TODO we should parse errors to differentiate whether it is
-                // simply a race condition where the container finished before
-                // this time, or is a proper command runner error.
-                let _ = Command::new("docker rm -f")
-                    .arg(docker_id)
-                    .run_to_completion()
-                    .await;
-                if let Some(mut runner) = self.container_runners.remove(&name) {
-                    let _ = runner.terminate().await;
-                    self.container_results
-                        .insert(name.to_string(), Ok(runner.get_command_result().unwrap()));
-                }
-            }
+        for state in self.set.values_mut() {
+            state.terminate().await;
         }
     }
 
@@ -261,8 +337,27 @@ impl ContainerNetwork {
         }
     }
 
-    /// Runs only the given `names`
-    pub async fn run(&mut self, names: &[&str], debug: bool) -> Result<()> {
+    /// Runs only the given `names`. This prechecks as much as it can before
+    /// creating any containers. If an error happens in the middle of creating
+    /// and starting the containers, any of the `names` that had been created
+    /// are terminated before the function returns.
+    pub async fn run<I, S>(&mut self, names: I, debug: bool) -> Result<()>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        // avoid polymorphizing such a large function
+        self.run_internal(
+            &names
+                .into_iter()
+                .map(|s| s.as_ref().to_owned())
+                .collect::<Vec<String>>(),
+            debug,
+        )
+        .await
+    }
+
+    async fn run_internal(&mut self, names: &[String], debug: bool) -> Result<()> {
         if debug {
             info!(
                 "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
@@ -275,46 +370,29 @@ impl ContainerNetwork {
         for name in names {
             if set.contains(name) {
                 return Err(Error::from_kind_locationless(format!(
-                    "ContainerNetwork::run() two containers were supplied with the same name \
+                    "ContainerNetwork::run -> two containers were supplied with the same name \
                      \"{name}\""
                 )))
             }
-            if !self.containers.contains_key(*name) {
+            if let Some(state) = self.set.get(name) {
+                if state.is_active() {
+                    return Err(Error::from_kind_locationless(format!(
+                        "ContainerNetwork::run -> name \"{name}\" is already an active container"
+                    )))
+                }
+            } else {
                 return Err(Error::from_kind_locationless(format!(
-                    "ContainerNetwork::run() argument name \"{name}\" is not contained in the \
+                    "ContainerNetwork::run -> argument name \"{name}\" is not contained in the \
                      network"
                 )))
             }
-            set.insert(*name);
+            set.insert(name.to_string());
         }
-
-        let debug_log = FileOptions::write2(
-            &self.log_dir,
-            format!("container_network_{}.log", self.network_name),
-        );
-        // prechecking the log directory
-        debug_log.preacquire().await.stack_err_locationless(|| {
-            "ContainerNetwork::run() -> could not acquire logs directory"
-        })?;
 
         let mut get_dockerfile_write_dir = false;
         for name in names {
-            let container = &self.containers[*name];
-            match container.dockerfile {
-                Dockerfile::NameTag(_) => {
-                    // adds unnecessary time to common case, just catch it at
-                    // build time or else we should add a flag to do this step
-                    // (which does update the image if it has new commits)
-                    /*let comres = Command::new("docker pull", &[&name_tag])
-                        .debug(debug)
-                        .stdout_log(&debug_log)
-                        .stderr_log(&debug_log)
-                        .run_to_completion()
-                        .await?;
-                    comres.assert_success().stack_err(|| {
-                        format!("could not pull image for `Dockerfile::Image({name_tag})`")
-                    })?;*/
-                }
+            match self.set[name].container().dockerfile {
+                Dockerfile::NameTag(_) => {}
                 Dockerfile::Path(ref path) => {
                     acquire_file_path(path).await.stack_err_locationless(|| {
                         "ContainerNetwork::run -> could not acquire the path in a \
@@ -324,32 +402,25 @@ impl ContainerNetwork {
                 Dockerfile::Contents(_) => get_dockerfile_write_dir = true,
             }
         }
-        let mut dockerfile_write_dir = None;
         let mut dockerfile_write_file = None;
         if get_dockerfile_write_dir {
-            let mut path = acquire_dir_path(self.dockerfile_write_dir.as_ref().unwrap())
-                .await
-                .stack_err_locationless(|| {
-                    "ContainerNetwork::run -> could not acquire the `dockerfile_write_dir` \
-                     directory"
-                })?;
-            dockerfile_write_dir =
-                Some(path.to_str().stack_err(|| "path was not UTF-8")?.to_owned());
-            path.push("__tmp.dockerfile");
+            let file_options = FileOptions::write2(
+                self.dockerfile_write_dir.as_ref().unwrap(),
+                "__tmp.dockerfile",
+            );
+            let path = file_options.preacquire().await.stack_err_locationless(|| {
+                "ContainerNetwork::run -> could not acquire the `dockerfile_write_dir`"
+            })?;
             dockerfile_write_file = Some(path.to_str().unwrap().to_owned());
         }
 
-        /*
-        for name in names {
-            // remove potentially previously existing container with same name
-            let _ = Command::new("docker rm -f", &[name])
-                // never put in debug_log mode or put in debug file, error on
-                // nonexistent container is confusing, actual errors will be returned
-                .debug(false)
-                .run_to_completion()
-                .await?;
-        }
-        */
+        let log_file = FileOptions::write2(
+            &self.log_dir,
+            format!("container_network_{}.log", self.network_name()),
+        );
+        log_file.preacquire().await.stack_err_locationless(|| {
+            "ContainerNetwork::run -> could not acquire logs directory"
+        })?;
 
         if !self.network_active {
             // remove old network if it exists (there is no option to ignore nonexistent
@@ -364,9 +435,12 @@ impl ContainerNetwork {
             let comres = Command::new("docker network create --internal")
                 .args(self.network_args.iter())
                 .arg(self.network_name())
-                .log(Some(&debug_log))
+                .log(Some(&log_file))
                 .run_to_completion()
-                .await?;
+                .await
+                .stack_err_locationless(|| {
+                    "ContainerNetwork::run -> when running network creation command"
+                })?;
             // TODO we can get the network id
             comres
                 .assert_success()
@@ -375,216 +449,57 @@ impl ContainerNetwork {
         }
 
         // run all the creation first so that everything is pulled and prepared
-        for name in names {
-            let container = &self.containers[*name];
+        let network_name = &self.network_name;
+        for (i, name) in names.iter().enumerate() {
+            let state = self.set.get_mut(name).unwrap();
 
-            // baseline args
-            let network_name = self.network_name();
-            let tag_name = &container.tag_name;
-            let hostname = &container.host_name;
-            let mut args = vec![
-                "create",
-                "--rm",
-                "--network",
-                &network_name,
-                "--hostname",
-                &hostname,
-                "--name",
-                &tag_name,
-            ];
-
-            if let Some(workdir) = container.workdir.as_ref() {
-                args.push("-w");
-                args.push(workdir)
-            }
-
-            let mut tmp = vec![];
-            for var in &container.environment_vars {
-                tmp.push(format!("{}={}", var.0, var.1));
-            }
-            for tmp in &tmp {
-                args.push("-e");
-                args.push(tmp);
-            }
-
-            // volumes
-            let mut combined_volumes = vec![];
-            for volume in &container.volumes {
-                let path = acquire_path(&volume.0).await.stack_err_locationless(|| {
-                    "ContainerNetwork::run() -> could not acquire_path to local part of volume \
-                     argument"
-                })?;
-                combined_volumes.push(format!(
-                    "{}:{}",
-                    path.to_str().stack_err(|| "path was not UTF-8")?,
-                    volume.1
-                ));
-            }
-            for volume in &combined_volumes {
-                args.push("--volume");
-                args.push(volume);
-            }
-
-            // other creation args
-            for create_arg in &container.create_args {
-                args.push(create_arg);
-            }
-
-            match container.dockerfile {
-                Dockerfile::NameTag(ref name_tag) => {
-                    // tag using `name_tag`
-                    args.push("-t");
-                    args.push(name_tag);
-                }
-                Dockerfile::Path(ref path) => {
-                    // tag
-                    args.push("-t");
-                    args.push(tag_name);
-
-                    let mut dockerfile = acquire_file_path(path).await?;
-                    // yes we do need to do this because of the weird way docker build works
-                    let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
-                    let mut build_args = vec!["build", "-t", &tag_name, "--file", &dockerfile_full];
-                    dockerfile.pop();
-                    let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
-                    let mut tmp = vec![];
-                    for arg in &container.build_args {
-                        tmp.push(arg);
-                    }
-                    for s in &tmp {
-                        build_args.push(s);
-                    }
-                    build_args.push(&dockerfile_dir);
-                    Command::new("docker")
-                        .args(build_args)
-                        .log(Some(&debug_log))
-                        .run_to_completion()
-                        .await?
-                        .assert_success()
-                        .stack_err_locationless(|| {
-                            format!("Failed when using the dockerfile at {path:?}")
-                        })?;
-                }
-                Dockerfile::Contents(ref contents) => {
-                    // tag
-                    args.push("-t");
-                    args.push(tag_name);
-
-                    FileOptions::write_str(dockerfile_write_file.as_ref().unwrap(), contents)
-                        .await?;
-                    let mut build_args = vec![
-                        "build",
-                        "-t",
-                        &tag_name,
-                        "--file",
-                        dockerfile_write_file.as_ref().unwrap(),
-                    ];
-                    let mut tmp = vec![];
-                    for arg in &container.build_args {
-                        tmp.push(arg);
-                    }
-                    for s in &tmp {
-                        build_args.push(s);
-                    }
-                    build_args.push(dockerfile_write_dir.as_ref().unwrap());
-                    Command::new("docker")
-                        .args(build_args)
-                        .log(Some(&debug_log))
-                        .run_to_completion()
-                        .await?
-                        .assert_success()
-                        .stack_err_locationless(|| {
-                            format!(
-                                "The Dockerfile::Contents written to \
-                                 \"__tmp.dockerfile\":\n{contents}\n"
-                            )
-                        })?;
-                }
-            }
-
-            // the binary
-            if let Some(s) = container.entrypoint_file.as_ref() {
-                args.push(s);
-            }
-            // entrypoint args
-            let mut tmp = vec![];
-            for arg in &container.entrypoint_args {
-                tmp.push(arg.to_owned());
-            }
-            for s in &tmp {
-                args.push(s);
-            }
-            let command = Command::new("docker").args(args).log(Some(&debug_log));
-            if debug {
-                info!("`Container` creation command: {command:#?}");
-            }
-            match command.run_to_completion().await {
-                Ok(output) => {
-                    match output.assert_success() {
-                        Ok(_) => {
-                            let mut docker_id = output.stdout;
-                            // remove trailing '\n'
-                            docker_id.pop();
-                            match String::from_utf8(docker_id) {
-                                Ok(docker_id) => {
-                                    self.active_container_ids
-                                        .insert(name.to_string(), docker_id);
-                                }
-                                Err(e) => return Err(Error::from_kind_locationless(e)),
-                            }
-                        }
-                        Err(e) => {
-                            self.terminate_all().await;
-                            return Err(e)
-                        }
-                    }
+            match state
+                .container()
+                .create(network_name, &dockerfile_write_file, debug, Some(&log_file))
+                .await
+                .stack_err_locationless(|| {
+                    format!("ContainerNetwork::run when creating the container for name \"{name}\"")
+                }) {
+                Ok(docker_id) => {
+                    state.active_container_id = Some(docker_id);
                 }
                 Err(e) => {
-                    self.terminate_all().await;
-                    return e.stack_err_locationless(|| "{self:?}.run()")
+                    // need to fix all the containers in the intermediate state
+                    for name in &names[..i] {
+                        self.set.get_mut(name).unwrap().terminate().await;
+                    }
+                    return Err(e)
                 }
             }
         }
 
         // start containers
         for name in names {
-            let terminal_color = if true {
-                next_terminal_color()
-            } else {
-                owo_colors::AnsiColors::Default
-            };
-            let docker_id = &self.active_container_ids[*name];
-            let container = &self.containers[*name];
-            let mut command = Command::new("docker start --attach").arg(docker_id);
-            if container.debug {
-                command = command
-                    .debug(true)
-                    .stdout_debug_line_prefix(Some(
-                        owo_colors::OwoColorize::color(&format!("{name}  | "), terminal_color)
-                            .to_string(),
-                    ))
-                    .stderr_debug_line_prefix(Some(
-                        owo_colors::OwoColorize::color(&format!("{name} E| "), terminal_color)
-                            .to_string(),
-                    ));
-            }
-            if container.log {
-                command = command
-                    .stdout_log(Some(&FileOptions::write2(
-                        &self.log_dir,
-                        &format!("container_{}_stdout.log", name),
-                    )))
-                    .stderr_log(Some(&FileOptions::write2(
-                        &self.log_dir,
-                        &format!("container_{}_stderr.log", name),
-                    )));
-            }
-            match command.run().await {
+            let state = self.set.get_mut(name).unwrap();
+            let stdout_log = state.container.stdout_log.clone().unwrap_or_else(|| {
+                FileOptions::write2(&self.log_dir, format!("container_{}_stdout.log", name))
+            });
+            let stderr_log = state.container.stderr_log.clone().unwrap_or_else(|| {
+                FileOptions::write2(&self.log_dir, format!("container_{}_stderr.log", name))
+            });
+            match state
+                .container()
+                .start(
+                    state.active_container_id.as_ref().unwrap(),
+                    Some(&stdout_log),
+                    Some(&stderr_log),
+                )
+                .await
+                .stack_err_locationless(|| {
+                    format!("ContainerNetwork::run when starting the container for name \"{name}\"")
+                }) {
                 Ok(runner) => {
-                    self.container_runners.insert(name.to_string(), runner);
+                    state.run_state = RunState::Active(runner);
                 }
                 Err(e) => {
-                    self.terminate_all().await;
+                    for name in names.iter() {
+                        self.set.get_mut(name).unwrap().terminate().await;
+                    }
                     return Err(e)
                 }
             }
@@ -612,44 +527,40 @@ impl ContainerNetwork {
         let error_stack = "Error { stack: [";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
-        for (name, result) in &self.container_results {
-            match result {
-                Ok(comres) => {
-                    if !comres.successful() {
-                        let mut encountered = false;
-                        let stdout = comres.stdout_as_utf8_lossy();
-                        if let Some(start) = stdout.rfind(error_stack) {
-                            if !stdout.contains(not_root_cause) {
-                                encountered = true;
-                                res = res.add_kind_locationless(format!(
-                                    "Error stack from container \"{name}\":\n{}\n",
-                                    &stdout[start..]
-                                ));
-                            }
-                        }
-
-                        if let Some(i) = stdout.rfind(panicked_at) {
-                            if let Some(i) = stdout[0..i].rfind("thread") {
-                                encountered = true;
-                                res = res.add_kind_locationless(format!(
-                                    "Panic message from container \"{name}\":\n{}\n",
-                                    &stdout[i..]
-                                ));
-                            }
-                        }
-
-                        if (!encountered) && (!comres.successful_or_terminated()) {
+        for (name, state) in self.set.iter() {
+            // TODO not sure if we should have a generation counter to track different sets
+            // of `wait_*` failures, for now we will just always use all unsuccessful
+            // `PostActive` containers
+            if let RunState::PostActive(ref comres) = state.run_state {
+                if !comres.successful() {
+                    let mut encountered = false;
+                    let stdout = comres.stdout_as_utf8_lossy();
+                    if let Some(start) = stdout.rfind(error_stack) {
+                        if !stdout.contains(not_root_cause) {
+                            encountered = true;
                             res = res.add_kind_locationless(format!(
-                                "Error: Container \"{name}\" was unsuccessful but does not seem \
-                                 to have an error stack or panic message\n"
+                                "Error stack from container \"{name}\":\n{}\n",
+                                &stdout[start..]
                             ));
                         }
                     }
-                }
-                Err(e) => {
-                    res = res.add_kind_locationless(format!(
-                        "Command runner level error from container {name}:\n{e:?}\n"
-                    ));
+
+                    if let Some(i) = stdout.rfind(panicked_at) {
+                        if let Some(i) = stdout[0..i].rfind("thread") {
+                            encountered = true;
+                            res = res.add_kind_locationless(format!(
+                                "Panic message from container \"{name}\":\n{}\n",
+                                &stdout[i..]
+                            ));
+                        }
+                    }
+
+                    if (!encountered) && (!comres.successful_or_terminated()) {
+                        res = res.add_kind_locationless(format!(
+                            "Error: Container \"{name}\" was unsuccessful but does not seem to \
+                             have an error stack or panic message\n"
+                        ));
+                    }
                 }
             }
         }
@@ -674,6 +585,21 @@ impl ContainerNetwork {
         terminate_on_failure: bool,
         duration: Duration,
     ) -> Result<()> {
+        for name in names.iter() {
+            if let Some(state) = self.set.get(name) {
+                if !state.is_active() {
+                    return Err(Error::from(format!(
+                        "ContainerNetwork::wait_with_timeout -> name \"{name}\" is already \
+                         inactive"
+                    )));
+                }
+            } else {
+                return Err(Error::from(format!(
+                    "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the \
+                     network"
+                )));
+            }
+        }
         let start = Instant::now();
         let mut skip_fail = true;
         // we will check in a loop so that if a container has failed in the meantime, we
@@ -718,51 +644,40 @@ impl ContainerNetwork {
             }
 
             let name = &names[i];
-            let runner = self
-                .container_runners
-                .get_mut(name)
-                .stack_err_locationless(|| {
-                    format!(
-                        "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the \
-                         network"
-                    )
-                })?;
-            match runner.wait_with_timeout(Duration::ZERO).await {
-                Ok(()) => {
-                    let runner = self.container_runners.remove(name).unwrap();
-                    let first = runner.get_command_result().unwrap();
-                    let err = !first.successful();
-                    self.container_results.insert(name.clone(), Ok(first));
-                    if terminate_on_failure && err {
-                        sleep(Duration::from_millis(300)).await;
-                        self.terminate_all().await;
-                        return self.error_compilation().stack_err_locationless(|| {
-                            "ContainerNetwork::wait_with_timeout error compilation (check logs for \
-                             more):\n"
-                        })
-                    } else {
-                        // this must not happen before the `terminate_all` call or else
-                        // ctrl-c conditions or others can lead the container to not be removed
-                        self.active_container_ids.remove(name).unwrap();
-                    }
-                    names.remove(i);
-                }
-                Err(e) => {
-                    if !e.is_timeout() {
-                        self.active_container_ids.remove(name).unwrap();
-                        let mut runner = self.container_runners.remove(name).unwrap();
-                        runner.terminate().await?;
-                        self.container_results.insert(name.clone(), Err(e));
-                        if terminate_on_failure {
+            let state = self.set.get_mut(name).unwrap();
+            if let RunState::Active(ref mut runner) = state.run_state {
+                match runner.wait_with_timeout(Duration::ZERO).await {
+                    Ok(()) => {
+                        let comres = runner.take_command_result().unwrap();
+                        let err = !comres.successful();
+                        if terminate_on_failure && err {
+                            // give some time for other containers to react, they will be sending
+                            // ProbablyNotRootCause errors and other things
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
+                            return self.error_compilation().stack_err_locationless(|| {
+                                "ContainerNetwork::wait_with_timeout error compilation (check logs \
+                                 for more):\n"
+                            })
                         }
-                        return self.error_compilation().stack_err_locationless(|| {
-                            "ContainerNetwork::wait_with_timeout error compilation (check logs for \
-                             more):\n"
-                        })
+                        state.run_state = RunState::PostActive(comres);
+                        names.remove(i);
                     }
-                    i += 1;
+                    Err(e) => {
+                        if !e.is_timeout() {
+                            let _ = runner.terminate().await;
+                            if terminate_on_failure {
+                                // give some time like in the earlier case
+                                sleep(Duration::from_millis(300)).await;
+                                self.terminate_all().await;
+                            }
+                            return self.error_compilation().stack_err_locationless(|| {
+                                "ContainerNetwork::wait_with_timeout error compilation (check logs \
+                                 for more):\n"
+                            })
+                        }
+                        i += 1;
+                    }
                 }
             }
         }
@@ -789,13 +704,19 @@ impl ContainerNetwork {
         delay: Duration,
         name: &str,
     ) -> Result<IpAddr> {
-        let id = self
-            .active_container_ids
-            .get(name)
+        let state = self.set.get(name).stack_err_locationless(|| {
+            format!(
+                "ContainerNetwork::get_ip_addr(num_retries: {num_retries}, delay: {delay:?}, \
+                 name: {name}) -> could not find name in container network"
+            )
+        })?;
+        let id = state
+            .active_container_id
+            .as_ref()
             .stack_err_locationless(|| {
                 format!(
                     "ContainerNetwork::get_ip_addr(num_retries: {num_retries}, delay: {delay:?}, \
-                     name: {name}) -> could not find active container with name"
+                     name: {name}) -> found container, but it was not active"
                 )
             })?;
         let ip = wait_get_ip_addr(num_retries, delay, id)
