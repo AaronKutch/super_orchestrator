@@ -537,19 +537,13 @@ impl ContainerNetwork {
         // run all build commands
         for name in names.iter() {
             let state = self.set.get_mut(name).unwrap();
-            match state.container().build().await.stack_err_locationless(|| {
-                format!("ContainerNetwork::run when building the container for name \"{name}\"")
-            }) {
-                Ok(()) => (),
-                Err(e) => {
-                    // TODO do we need undo?
-                    e.stack_err_locationless(|| {
-                        format!(
-                            "ContainerNetwork::run when building the container for name \"{name}\""
-                        )
-                    })?;
-                }
-            }
+            state
+                .container()
+                .build()
+                .await
+                .stack_err_locationless(|| {
+                    format!("ContainerNetwork::run when building the container for name \"{name}\"")
+                })?;
         }
 
         if debug {
