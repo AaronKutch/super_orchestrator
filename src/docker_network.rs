@@ -142,6 +142,9 @@ pub struct ContainerNetwork {
     dockerfile_write_dir: Option<String>,
     log_dir: String,
     network_active: bool,
+    pub debug_build: bool,
+    pub debug_create: bool,
+    pub debug_extra: bool,
     already_tried_drop: bool,
 }
 
@@ -224,6 +227,9 @@ impl ContainerNetwork {
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
             log_dir: log_dir.as_ref().to_owned(),
             network_active: false,
+            debug_build: false,
+            debug_create: false,
+            debug_extra: false,
             already_tried_drop: false,
         }
     }
@@ -437,6 +443,7 @@ impl ContainerNetwork {
     }
 
     async fn run_internal(&mut self, names: &[String], debug: bool) -> Result<()> {
+        let debug_extra = self.debug_extra;
         if debug {
             info!(
                 "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
@@ -468,7 +475,7 @@ impl ContainerNetwork {
             set.insert(name.to_string());
         }
 
-        if debug {
+        if debug_extra {
             debug!("prechecking");
         }
 
@@ -530,23 +537,45 @@ impl ContainerNetwork {
             })?;
         }
 
-        if debug {
+        if debug_extra {
             debug!("building");
         }
 
-        // run all build commands
+        // TODO eventually move this capability to the struct level so that it handles many stage `ContainerNetwork::run`
+
+        // The trick with the build stage is that we want to build as little as we have
+        // to. The build stage only uses  `dockerfile` and `build_args` with respect to
+        // determinism, so here we order them and reduce redundancies.
+        let mut build_to_image = BTreeMap::<(Dockerfile, Vec<String>), (String, String)>::new();
+        let uuid = self.uuid();
         for name in names.iter() {
-            let state = self.set.get_mut(name).unwrap();
-            state
-                .container()
-                .build()
-                .await
-                .stack_err_locationless(|| {
-                    format!("ContainerNetwork::run when building the container for name \"{name}\"")
-                })?;
+            let container = &mut self.set.get_mut(name).unwrap().container;
+            if container.build_tag.is_none() {
+                match build_to_image
+                    .entry((container.dockerfile.clone(), container.build_args.clone()))
+                {
+                    Entry::Vacant(v) => {
+                        let image = format!("super_orchestrator_{name}_{uuid}");
+                        container.build_tag = Some(image.clone());
+                        v.insert((name.clone(), image.clone()));
+                    }
+                    Entry::Occupied(o) => {
+                        // set the `build_tag` to an already planned image
+                        container.build_tag = Some(o.get().1.clone());
+                    }
+                }
+            } // else it was explicitly set or built in a previous run
         }
 
-        if debug {
+        // run all the build commands that we actually need
+        for (name, _) in build_to_image.values() {
+            let state = self.set.get_mut(name).unwrap();
+            state.container().build().await.stack_err_locationless(|| {
+                format!("ContainerNetwork::run when building the container for name \"{name}\"")
+            })?;
+        }
+
+        if debug_extra {
             debug!("creating");
         }
 
@@ -604,7 +633,7 @@ impl ContainerNetwork {
             }
         }
 
-        if debug {
+        if debug_extra {
             debug!("starting");
         }
 
@@ -642,7 +671,7 @@ impl ContainerNetwork {
             }
         }
 
-        if debug {
+        if debug_extra {
             debug!("started");
         }
 

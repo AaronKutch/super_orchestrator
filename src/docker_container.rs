@@ -15,7 +15,7 @@ use crate::{
 // possible.
 
 /// Ways of using a dockerfile for building a container
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Dockerfile {
     /// Builds using an image in the format "name:tag" such as "fedora:38"
     /// (running will call something such as `docker pull name:tag`)
@@ -55,11 +55,12 @@ impl Dockerfile {
 /// path contained within the directory is also added as a volume.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
-    /// The name of the container as referenced by
+    /// The name of the container as it will be referenced by in a `DockerNetwork`
     pub name: String,
-    /// The name that the container is tagged with, note that the "name:tag"
-    /// dockerhub image argument would go in [Dockerfile::NameTag]
-    pub tag_name: String,
+    /// The name that the container is actually named with, note that the
+    /// "name:tag" dockerhub image argument would go in
+    /// [Dockerfile::NameTag] or in the `build_tag`
+    pub container_name: String,
     /// Hostname of the URL that could access the container (the container can
     /// alternatively be accessed by an ip address). Usually, this should be the
     /// same as `name`.
@@ -68,6 +69,9 @@ pub struct Container {
     pub dockerfile: Dockerfile,
     /// Any flags and args passed to to `docker build`
     pub build_args: Vec<String>,
+    /// The tag used for images, this is set automatically by `ContainerNetwork`
+    /// but can be set to override the image it would automatically build
+    pub build_tag: Option<String>,
     /// Any flags and args passed to to `docker create`
     pub create_args: Vec<String>,
     /// Passed as `--volume string0:string1` to the create args, but these have
@@ -102,7 +106,7 @@ pub struct Container {
 
 impl Container {
     /// Creates the information needed to describe a `Container`. `name` is used
-    /// for the `name`, `tag_name`, and `hostname`.
+    /// for the `name`, `container_name`, and `hostname`.
     pub fn new<S>(name: S, dockerfile: Dockerfile) -> Self
     where
         S: AsRef<str>,
@@ -110,7 +114,8 @@ impl Container {
         let name = name.as_ref();
         Self {
             name: name.to_owned(),
-            tag_name: name.to_owned(),
+            build_tag: None,
+            container_name: name.to_owned(),
             host_name: name.to_owned(),
             dockerfile,
             build_args: vec![],
@@ -348,9 +353,15 @@ impl Container {
     }
 
     /// Runs `docker build` to create a container corresponding to `self`
-    /// (preferably after [Container::precheck] is run).
+    /// (preferably after [Container::precheck] is run). `build_tag` needs to be
+    /// set unless `Dockerfile::NameTag` was used.
     pub async fn build(&self) -> Result<()> {
-        let tag_name = &self.tag_name;
+        // NOTE: `ContainerNetwork::run_internal` assumes that builds are uniquely
+        // determined from `dockerfile` and `build_args`.
+        let build_tag = &self
+            .build_tag
+            .as_ref()
+            .stack_err_locationless(|| "Container::build -> the `build_tag` needs to be set")?;
         match self.dockerfile {
             Dockerfile::NameTag(ref _name_tag) => {
                 // adds unnecessary time to common case, just catch it at
@@ -370,7 +381,7 @@ impl Container {
                 let mut dockerfile = acquire_file_path(path).await?;
                 // yes we do need to do this because of the weird way docker build works
                 let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
-                let mut build_args = vec!["build", "-t", &tag_name, "--file", &dockerfile_full];
+                let mut build_args = vec!["build", "-t", build_tag, "--file", &dockerfile_full];
                 dockerfile.pop();
                 let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
                 let mut tmp = vec![];
@@ -394,7 +405,7 @@ impl Container {
                 let dockerfile_write_file = self.dockerfile_write_file.as_ref().stack()?;
                 FileOptions::write_str(&dockerfile_write_file, contents).await?;
                 let mut build_args: Vec<&str> =
-                    vec!["build", "-t", &tag_name, "--file", &dockerfile_write_file];
+                    vec!["build", "-t", build_tag, "--file", &dockerfile_write_file];
                 let mut tmp: Vec<&str> = vec![];
                 for arg in &self.build_args {
                     tmp.push(arg);
@@ -423,14 +434,15 @@ impl Container {
     }
 
     /// Runs `docker create` to create a container corresponding to `self`
-    /// (preferably after running [Container::build]).
+    /// (preferably after running [Container::build]). `build_tag` needs to be
+    /// set unless `Dockerfile::NameTag` was used.
     pub async fn create(
         &self,
         network_name: &str,
         debug: bool,
         log_file: Option<&FileOptions>,
     ) -> Result<String> {
-        let tag_name = &self.tag_name;
+        let container_name = &self.container_name;
         let hostname = &self.host_name;
         let mut args = vec![
             "create",
@@ -440,7 +452,7 @@ impl Container {
             "--hostname",
             &hostname,
             "--name",
-            &tag_name,
+            &container_name,
         ];
 
         if let Some(workdir) = self.workdir.as_ref() {
@@ -479,15 +491,12 @@ impl Container {
                 args.push("-t");
                 args.push(name_tag);
             }
-            Dockerfile::Path(_) => {
-                // tag
+            Dockerfile::Path(_) | Dockerfile::Contents(_) => {
+                // use the tag of the build image
                 args.push("-t");
-                args.push(tag_name);
-            }
-            Dockerfile::Contents(_) => {
-                // tag
-                args.push("-t");
-                args.push(tag_name);
+                args.push(self.build_tag.as_ref().stack_err_locationless(|| {
+                    "Container::create -> `build_tag` needs to be set"
+                })?);
             }
         }
 
