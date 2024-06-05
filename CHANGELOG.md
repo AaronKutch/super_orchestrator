@@ -1,6 +1,10 @@
 # Changelog
 
 ## [0.13.0] - TODO
+### Fixes
+- Ctrl+C on `ContainerNetwork::wait_with_timeout` now consistently returns the correct error
+- Many, many small issues were fixed
+
 ### Changes
 - `Command::get_command_result` now returns `Option<&CommandResult>`, use `Command::take_command_result` for the original behavior
 - Removed `FileOptions::create` and `FileOptions::append`
