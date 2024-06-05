@@ -38,7 +38,6 @@ struct ContainerState {
     // variable and assume that panicking is happening or the state is cleaned up before giving
     // back to a user.
     active_container_id: Option<String>,
-    // this variable should be per-`ContainerState`` and not on a higher or lower level
     already_tried_drop: bool,
 }
 
@@ -109,6 +108,13 @@ impl ContainerState {
     }
 }
 
+/// A controlled network of containers.
+///
+/// This allows for much more control than docker-compose does. Every
+/// `ContainerNetwork` generates a new UUID for enabling multiple
+/// `ContainerNetworks` from the same base to run concurrently. By default these
+/// are not applied, but it is recommended to enable them if possible (which may
+/// require passing around the UUID parameter for hostnames).
 ///
 /// # Note
 ///
@@ -126,21 +132,21 @@ pub struct ContainerNetwork {
     dockerfile_write_dir: Option<String>,
     log_dir: String,
     network_active: bool,
+    already_tried_drop: bool,
 }
 
 impl Drop for ContainerNetwork {
     fn drop(&mut self) {
-        if self.network_active {
-            let _ = std::process::Command::new("docker")
-                .arg("network")
-                .arg("rm")
-                .arg(self.network_name())
-                .output();
+        // in case something panics recursively
+        if self.already_tried_drop {
+            return
         }
+        self.already_tried_drop = true;
         // here we are only concerned with logically active containers in a non
         // panicking situation, the `Drop` impl on each `ContainerState` handles the
         // rest if necessary
-        for state in self.set.values() {
+        let removed_set = mem::take(&mut self.set);
+        for (_, state) in &removed_set {
             // we purposely order in this way to avoid calling `panicking` in the
             // normal case
             if state.is_active() && (!std::thread::panicking()) {
@@ -151,6 +157,17 @@ impl Drop for ContainerNetwork {
                 break
             }
         }
+        for (_, state) in removed_set {
+            drop(state);
+        }
+        // all the containers should be removed now
+        if self.network_active {
+            let _ = std::process::Command::new("docker")
+                .arg("network")
+                .arg("rm")
+                .arg(self.network_name())
+                .output();
+        }
     }
 }
 
@@ -160,17 +177,15 @@ impl Drop for ContainerNetwork {
 impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
-    /// This function generates a UUID used for enabling multiple
-    /// `ContainerNetwork`s with the same names and ids to run simultaneously.
-    /// The uuid is appended to network names, container names, and hostnames.
-    /// Arguments involving container names automatically append the uuid.
-    ///
     /// `network_name` sets the name of the docker network that containers will
     /// be attached to, `containers` is the set of containers that can be
     /// referred to later by name, `dockerfile_write_dir` is the directory in
     /// which "__tmp.dockerfile" can be written if `Dockerfile::Contents` is
     /// used, `is_not_internal` turns off `--internal`, and `log_dir` is where
     /// ".log" log files will be written.
+    ///
+    /// The docker network is only actually created the first time a container
+    /// is run.
     ///
     /// Note: if `Dockerfile::Contents` is used, and if it uses resources like
     /// `COPY --from [resource]`, then the resource needs to be in
@@ -199,6 +214,7 @@ impl ContainerNetwork {
             dockerfile_write_dir: dockerfile_write_dir.map(|s| s.to_owned()),
             log_dir: log_dir.as_ref().to_owned(),
             network_active: false,
+            already_tried_drop: false,
         }
     }
 
@@ -479,7 +495,7 @@ impl ContainerNetwork {
             // remove old network if it exists (there is no option to ignore nonexistent
             // networks, drop exit status errors and let the creation command handle any
             // higher order errors)
-            /*let _ = Command::new("docker network rm", &[&self.network_name_with_uuid()])
+            /*let _ = Command::new("docker network rm", &[&self.network_name()])
             .debug(false)
             .stdout_log(&debug_log)
             .stderr_log(&debug_log)

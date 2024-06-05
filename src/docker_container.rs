@@ -100,7 +100,11 @@ pub struct Container {
 impl Container {
     /// Creates the information needed to describe a `Container`. `name` is used
     /// for the `name`, `tag_name`, and `hostname`.
-    pub fn new(name: &str, dockerfile: Dockerfile) -> Self {
+    pub fn new<S>(name: S, dockerfile: Dockerfile) -> Self
+    where
+        S: AsRef<str>,
+    {
+        let name = name.as_ref();
         Self {
             name: name.to_owned(),
             tag_name: name.to_owned(),
