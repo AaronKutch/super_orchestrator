@@ -311,9 +311,10 @@ impl Container {
     }
 
     /// Prechecks several things needed to successfully run `self`, and
-    /// normalizes paths like the volumes. This is automatically handled in
-    /// [ContainerNetwork::run]. Checks existence for `Dockerfile::Contents` but
-    /// does not preacquire `dockerfile_write_dir`.
+    /// normalizes paths like the volumes. This and subsequent steps are
+    /// automatically handled in [ContainerNetwork::run]. Checks existence
+    /// for `Dockerfile::Contents` but does not preacquire
+    /// `dockerfile_write_dir`.
     pub async fn precheck(&mut self) -> Result<()> {
         match self.dockerfile {
             Dockerfile::NameTag(_) => (),
@@ -346,9 +347,83 @@ impl Container {
         Ok(())
     }
 
-    /// Assuming that [Container::precheck] was run, this will use `docker
-    /// create` to create a container corresponding to `self`. This is
-    /// automatically handled in [ContainerNetwork::run].
+    /// Runs `docker build` to create a container corresponding to `self`
+    /// (preferably after [Container::precheck] is run).
+    pub async fn build(&self) -> Result<()> {
+        let tag_name = &self.tag_name;
+        match self.dockerfile {
+            Dockerfile::NameTag(ref _name_tag) => {
+                // adds unnecessary time to common case, just catch it at
+                // build time or else we should add a flag to do this step
+                // (which does update the image if it has new commits)
+                /*let comres = Command::new("docker pull", &[&name_tag])
+                    .debug(debug)
+                    .stdout_log(&debug_log)
+                    .stderr_log(&debug_log)
+                    .run_to_completion()
+                    .await?;
+                comres.assert_success().stack_err(|| {
+                    format!("could not pull image for `Dockerfile::Image({name_tag})`")
+                })?;*/
+            }
+            Dockerfile::Path(ref path) => {
+                let mut dockerfile = acquire_file_path(path).await?;
+                // yes we do need to do this because of the weird way docker build works
+                let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
+                let mut build_args = vec!["build", "-t", &tag_name, "--file", &dockerfile_full];
+                dockerfile.pop();
+                let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
+                let mut tmp = vec![];
+                for arg in &self.build_args {
+                    tmp.push(arg);
+                }
+                for s in &tmp {
+                    build_args.push(s);
+                }
+                build_args.push(&dockerfile_dir);
+                Command::new("docker")
+                    .args(build_args)
+                    .run_to_completion()
+                    .await?
+                    .assert_success()
+                    .stack_err_locationless(|| {
+                        format!("Container::build -> when using the dockerfile at {path:?}")
+                    })?;
+            }
+            Dockerfile::Contents(ref contents) => {
+                let dockerfile_write_file = self.dockerfile_write_file.as_ref().stack()?;
+                FileOptions::write_str(&dockerfile_write_file, contents).await?;
+                let mut build_args: Vec<&str> =
+                    vec!["build", "-t", &tag_name, "--file", &dockerfile_write_file];
+                let mut tmp: Vec<&str> = vec![];
+                for arg in &self.build_args {
+                    tmp.push(arg);
+                }
+                for s in &tmp {
+                    build_args.push(s);
+                }
+                let mut dockerfile_write_dir = PathBuf::from(dockerfile_write_file.to_owned());
+                dockerfile_write_dir.pop();
+                build_args.push(dockerfile_write_dir.to_str().unwrap());
+                Command::new("docker")
+                    .args(build_args)
+                    .run_to_completion()
+                    .await?
+                    .assert_success()
+                    .stack_err_locationless(|| {
+                        format!(
+                            "Container::build -> when using the `Dockerfile::Contents` written to \
+                             \"{dockerfile_write_file:?}\":\n{contents}\n"
+                        )
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Runs `docker create` to create a container corresponding to `self`
+    /// (preferably after running [Container::build]).
     pub async fn create(
         &self,
         network_name: &str,
@@ -403,80 +478,16 @@ impl Container {
                 // tag using `name_tag`
                 args.push("-t");
                 args.push(name_tag);
-
-                // adds unnecessary time to common case, just catch it at
-                // build time or else we should add a flag to do this step
-                // (which does update the image if it has new commits)
-                /*let comres = Command::new("docker pull", &[&name_tag])
-                    .debug(debug)
-                    .stdout_log(&debug_log)
-                    .stderr_log(&debug_log)
-                    .run_to_completion()
-                    .await?;
-                comres.assert_success().stack_err(|| {
-                    format!("could not pull image for `Dockerfile::Image({name_tag})`")
-                })?;*/
             }
-            Dockerfile::Path(ref path) => {
+            Dockerfile::Path(_) => {
                 // tag
                 args.push("-t");
                 args.push(tag_name);
-
-                let mut dockerfile = acquire_file_path(path).await?;
-                // yes we do need to do this because of the weird way docker build works
-                let dockerfile_full = dockerfile.to_str().unwrap().to_owned();
-                let mut build_args = vec!["build", "-t", &tag_name, "--file", &dockerfile_full];
-                dockerfile.pop();
-                let dockerfile_dir = dockerfile.to_str().unwrap().to_owned();
-                let mut tmp = vec![];
-                for arg in &self.build_args {
-                    tmp.push(arg);
-                }
-                for s in &tmp {
-                    build_args.push(s);
-                }
-                build_args.push(&dockerfile_dir);
-                Command::new("docker")
-                    .args(build_args)
-                    .log(log_file)
-                    .run_to_completion()
-                    .await?
-                    .assert_success()
-                    .stack_err_locationless(|| {
-                        format!("Container::create -> when using the dockerfile at {path:?}")
-                    })?;
             }
-            Dockerfile::Contents(ref contents) => {
-                let dockerfile_write_file = self.dockerfile_write_file.as_ref().stack()?;
+            Dockerfile::Contents(_) => {
                 // tag
                 args.push("-t");
                 args.push(tag_name);
-
-                FileOptions::write_str(&dockerfile_write_file, contents).await?;
-                let mut build_args: Vec<&str> =
-                    vec!["build", "-t", &tag_name, "--file", &dockerfile_write_file];
-                let mut tmp: Vec<&str> = vec![];
-                for arg in &self.build_args {
-                    tmp.push(arg);
-                }
-                for s in &tmp {
-                    build_args.push(s);
-                }
-                let mut dockerfile_write_dir = PathBuf::from(dockerfile_write_file.to_owned());
-                dockerfile_write_dir.pop();
-                build_args.push(dockerfile_write_dir.to_str().unwrap());
-                Command::new("docker")
-                    .args(build_args)
-                    .log(log_file)
-                    .run_to_completion()
-                    .await?
-                    .assert_success()
-                    .stack_err_locationless(|| {
-                        format!(
-                            "Container::create -> when using the `Dockerfile::Contents` written \
-                             to \"{dockerfile_write_file:?}\":\n{contents}\n"
-                        )
-                    })?;
             }
         }
 

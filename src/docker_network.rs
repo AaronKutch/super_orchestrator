@@ -8,7 +8,7 @@ use std::{
 
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -441,7 +441,7 @@ impl ContainerNetwork {
             info!(
                 "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
                 self.uuid_as_string()
-            )
+            );
         }
         // relatively cheap preverification should be done first to prevent much more
         // expensive later undos
@@ -466,6 +466,10 @@ impl ContainerNetwork {
                 )))
             }
             set.insert(name.to_string());
+        }
+
+        if debug {
+            debug!("prechecking");
         }
 
         let log_file = FileOptions::write2(
@@ -526,6 +530,32 @@ impl ContainerNetwork {
             })?;
         }
 
+        if debug {
+            debug!("building");
+        }
+
+        // run all build commands
+        for name in names.iter() {
+            let state = self.set.get_mut(name).unwrap();
+            match state.container().build().await.stack_err_locationless(|| {
+                format!("ContainerNetwork::run when building the container for name \"{name}\"")
+            }) {
+                Ok(()) => (),
+                Err(e) => {
+                    // TODO do we need undo?
+                    e.stack_err_locationless(|| {
+                        format!(
+                            "ContainerNetwork::run when building the container for name \"{name}\""
+                        )
+                    })?;
+                }
+            }
+        }
+
+        if debug {
+            debug!("creating");
+        }
+
         if !self.network_active {
             // remove old network if it exists (there is no option to ignore nonexistent
             // networks, drop exit status errors and let the creation command handle any
@@ -571,10 +601,20 @@ impl ContainerNetwork {
                     for name in &names[..i] {
                         self.set.get_mut(name).unwrap().terminate().await;
                     }
-                    return Err(e)
+                    e.stack_err_locationless(|| {
+                        format!(
+                            "ContainerNetwork::run when creating the container for name \"{name}\""
+                        )
+                    })?;
                 }
             }
         }
+
+        if debug {
+            debug!("starting");
+        }
+
+        // TODO do not log stdout by default
 
         // start containers
         for name in names {
@@ -606,6 +646,10 @@ impl ContainerNetwork {
                     return Err(e)
                 }
             }
+        }
+
+        if debug {
+            debug!("started");
         }
 
         Ok(())
