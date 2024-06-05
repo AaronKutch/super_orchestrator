@@ -7,17 +7,22 @@ use super_orchestrator::{
     FileOptions,
 };
 
+const BASE_CONTAINER: &str = "fedora:40";
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().init();
+    // note that you need the `DEBUG` level to see some of the debug output when it
+    // is enabled
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
     let logs_dir = "./logs";
 
     println!("\n\nexample 0\n");
 
     // a default container configuration with the fedora:38 image
-    let container = Container::new("container0", Dockerfile::name_tag("fedora:38"));
+    let container = Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER));
 
     // solo run `/usr/bin/ls -a /` inside the container
     let comres = container
@@ -32,7 +37,7 @@ async fn main() -> Result<()> {
     println!("\n\nexample 1\n");
 
     // sleep for 1 second
-    Container::new("container0", Dockerfile::name_tag("fedora:38"))
+    Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
         .entrypoint("/usr/bin/sleep", ["1"])
         .run(None, TIMEOUT, logs_dir, true)
         .await
@@ -43,7 +48,7 @@ async fn main() -> Result<()> {
     println!("\n\nexample 2\n");
 
     // purposely timeout
-    let comres = Container::new("container0", Dockerfile::name_tag("fedora:38"))
+    let comres = Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
         .entrypoint("/usr/bin/sleep", ["infinity"])
         .run(None, Duration::from_secs(1), logs_dir, true)
         .await;
@@ -54,7 +59,7 @@ async fn main() -> Result<()> {
 
     // read from a local folder that is mapped to the container's filesystem with a
     // volume
-    let comres = Container::new("container0", Dockerfile::name_tag("fedora:38"))
+    let comres = Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
         .entrypoint("/usr/bin/cat", ["/dockerfile_resources/example.txt"])
         .volume(
             "./dockerfiles/dockerfile_resources/",
@@ -76,12 +81,12 @@ async fn main() -> Result<()> {
     // for more complicated things we need `ContainerNetwork`s
     let mut cn = ContainerNetwork::new("test", None, logs_dir);
     cn.add_container(
-        Container::new("container0", Dockerfile::name_tag("fedora:38"))
+        Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
             .entrypoint("/usr/bin/sleep", ["3"]),
     )
     .stack()?;
     // run all containers
-    cn.run_all(true).await.stack()?;
+    cn.run_all().await.stack()?;
 
     let uuid = cn.uuid_as_string();
     // when communicating inside a container to another container in the network,

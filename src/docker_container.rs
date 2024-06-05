@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
-use tracing::info;
+use tracing::debug;
 
 use crate::{
     acquire_file_path, acquire_path, docker::ContainerNetwork, next_terminal_color, Command,
@@ -55,7 +55,8 @@ impl Dockerfile {
 /// path contained within the directory is also added as a volume.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Container {
-    /// The name of the container as it will be referenced by in a `DockerNetwork`
+    /// The name of the container as it will be referenced by in a
+    /// `DockerNetwork`
     pub name: String,
     /// The name that the container is actually named with, note that the
     /// "name:tag" dockerhub image argument would go in
@@ -102,6 +103,22 @@ pub struct Container {
     /// This can be explicitly set to override the default temporary file that
     /// `ContainerNetwork` uses
     pub dockerfile_write_file: Option<String>,
+}
+
+fn apply_debug(command: Command, name: &str, debug: bool) -> Command {
+    if debug {
+        let terminal_color = next_terminal_color();
+        command
+            .debug(true)
+            .stdout_debug_line_prefix(Some(
+                owo_colors::OwoColorize::color(&format!("{name}  | "), terminal_color).to_string(),
+            ))
+            .stderr_debug_line_prefix(Some(
+                owo_colors::OwoColorize::color(&format!("{name} E| "), terminal_color).to_string(),
+            ))
+    } else {
+        command
+    }
 }
 
 impl Container {
@@ -286,7 +303,8 @@ impl Container {
 
     /// Runs this container by itself in a default `ContainerNetwork` with
     /// "super_orchestrator_{uuid}" as the network name, waiting for completion
-    /// with a timeout.
+    /// with a timeout. Setting `debug` is equivalent to setting `debug_build`
+    /// and `debug_create` on a `ContainerNetwork`.
     pub async fn run(
         self,
         dockerfile_write_dir: Option<&str>,
@@ -296,11 +314,12 @@ impl Container {
     ) -> Result<CommandResult> {
         // TODO UUID for this for instance
         let mut cn = ContainerNetwork::new("super_orchestrator", dockerfile_write_dir, log_dir);
+        cn.debug_build(debug).debug_create(debug);
         let name = self.name.clone();
         cn.add_container(self).stack_err_locationless(|| {
             "Container::run when trying to create a `ContainerNetwork`"
         })?;
-        cn.run_all(debug)
+        cn.run_all()
             .await
             .stack_err_locationless(|| "Container::run when trying to run a `ContainerNetwork`")?;
         cn.wait_with_timeout_all(true, timeout)
@@ -355,7 +374,7 @@ impl Container {
     /// Runs `docker build` to create a container corresponding to `self`
     /// (preferably after [Container::precheck] is run). `build_tag` needs to be
     /// set unless `Dockerfile::NameTag` was used.
-    pub async fn build(&self) -> Result<()> {
+    pub async fn build(&self, debug_build: bool) -> Result<()> {
         // NOTE: `ContainerNetwork::run_internal` assumes that builds are uniquely
         // determined from `dockerfile` and `build_args`.
         let build_tag = &self
@@ -392,8 +411,15 @@ impl Container {
                     build_args.push(s);
                 }
                 build_args.push(&dockerfile_dir);
-                Command::new("docker")
-                    .args(build_args)
+                let command = apply_debug(
+                    Command::new("docker").args(build_args),
+                    &self.name,
+                    debug_build,
+                );
+                if debug_build {
+                    debug!("Container::build command: {command:#?}");
+                }
+                command
                     .run_to_completion()
                     .await?
                     .assert_success()
@@ -416,8 +442,15 @@ impl Container {
                 let mut dockerfile_write_dir = PathBuf::from(dockerfile_write_file.to_owned());
                 dockerfile_write_dir.pop();
                 build_args.push(dockerfile_write_dir.to_str().unwrap());
-                Command::new("docker")
-                    .args(build_args)
+                let command = apply_debug(
+                    Command::new("docker").args(build_args),
+                    &self.name,
+                    debug_build,
+                );
+                if debug_build {
+                    debug!("Container::build command: {command:#?}");
+                }
+                command
                     .run_to_completion()
                     .await?
                     .assert_success()
@@ -439,8 +472,8 @@ impl Container {
     pub async fn create(
         &self,
         network_name: &str,
-        debug: bool,
         log_file: Option<&FileOptions>,
+        debug_create: bool,
     ) -> Result<String> {
         let container_name = &self.container_name;
         let hostname = &self.host_name;
@@ -512,10 +545,10 @@ impl Container {
         for s in &tmp {
             args.push(s);
         }
-        let command = Command::new("docker").args(args).log(log_file);
-        if debug {
-            // purposely use this format
-            info!("`Container` creation command: {command:#?}");
+        let command =
+            apply_debug(Command::new("docker").args(args), &self.name, debug_create).log(log_file);
+        if debug_create {
+            debug!("Container::create command: {command:#?}");
         }
         match command.run_to_completion().await {
             Ok(output) => {
@@ -547,24 +580,11 @@ impl Container {
         stderr_log: Option<&FileOptions>,
     ) -> Result<CommandRunner> {
         let name = &self.name;
-        let terminal_color = if true {
-            next_terminal_color()
-        } else {
-            owo_colors::AnsiColors::Default
-        };
-        let mut command = Command::new("docker start --attach").arg(container_id);
-        if self.debug {
-            command = command
-                .debug(true)
-                .stdout_debug_line_prefix(Some(
-                    owo_colors::OwoColorize::color(&format!("{name}  | "), terminal_color)
-                        .to_string(),
-                ))
-                .stderr_debug_line_prefix(Some(
-                    owo_colors::OwoColorize::color(&format!("{name} E| "), terminal_color)
-                        .to_string(),
-                ));
-        }
+        let mut command = apply_debug(
+            Command::new("docker start --attach").arg(container_id),
+            name,
+            self.debug,
+        );
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
         }

@@ -140,7 +140,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.add_common_volumes([(logs_dir, "/logs")]);
 
-    cn.run_all(true).await.stack()?;
+    cn.run_all().await.stack()?;
 
     // only wait on the "test_runner" because the postgres container will run by
     // itself forever

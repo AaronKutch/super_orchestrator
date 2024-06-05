@@ -21,6 +21,7 @@
 - Running containers forward with their corresponding name as the line prefix instead
 - Container building and creation messages are no longer `debug`
 - Container debug and log settings are per-container now
+- The `ContainerNetwork` is silent by default now
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`

@@ -8,7 +8,7 @@ use std::{
 
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -426,7 +426,7 @@ impl ContainerNetwork {
     /// creating any containers. If an error happens in the middle of creating
     /// and starting the containers, any of the `names` that had been created
     /// are terminated before the function returns.
-    pub async fn run<I, S>(&mut self, names: I, debug: bool) -> Result<()>
+    pub async fn run<I, S>(&mut self, names: I) -> Result<()>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -437,18 +437,14 @@ impl ContainerNetwork {
                 .into_iter()
                 .map(|s| s.as_ref().to_owned())
                 .collect::<Vec<String>>(),
-            debug,
         )
         .await
     }
 
-    async fn run_internal(&mut self, names: &[String], debug: bool) -> Result<()> {
+    async fn run_internal(&mut self, names: &[String]) -> Result<()> {
         let debug_extra = self.debug_extra;
-        if debug {
-            info!(
-                "`ContainerNetwork::run(debug: true, ..)` with UUID {}",
-                self.uuid_as_string()
-            );
+        if self.debug_build || self.debug_create || self.debug_extra {
+            debug!("ContainerNetwork::run with UUID {}", self.uuid_as_string());
         }
         // relatively cheap preverification should be done first to prevent much more
         // expensive later undos
@@ -541,7 +537,8 @@ impl ContainerNetwork {
             debug!("building");
         }
 
-        // TODO eventually move this capability to the struct level so that it handles many stage `ContainerNetwork::run`
+        // TODO eventually move this capability to the struct level so that it handles
+        // many stage `ContainerNetwork::run`
 
         // The trick with the build stage is that we want to build as little as we have
         // to. The build stage only uses  `dockerfile` and `build_args` with respect to
@@ -570,9 +567,13 @@ impl ContainerNetwork {
         // run all the build commands that we actually need
         for (name, _) in build_to_image.values() {
             let state = self.set.get_mut(name).unwrap();
-            state.container().build().await.stack_err_locationless(|| {
-                format!("ContainerNetwork::run when building the container for name \"{name}\"")
-            })?;
+            state
+                .container()
+                .build(self.debug_build)
+                .await
+                .stack_err_locationless(|| {
+                    format!("ContainerNetwork::run when building the container for name \"{name}\"")
+                })?;
         }
 
         if debug_extra {
@@ -611,7 +612,7 @@ impl ContainerNetwork {
             let state = self.set.get_mut(name).unwrap();
             match state
                 .container()
-                .create(network_name, debug, Some(&log_file))
+                .create(network_name, Some(&log_file), self.debug_create)
                 .await
                 .stack_err_locationless(|| {
                     format!("ContainerNetwork::run when creating the container for name \"{name}\"")
@@ -678,13 +679,13 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    pub async fn run_all(&mut self, debug: bool) -> Result<()> {
+    pub async fn run_all(&mut self) -> Result<()> {
         let names = self.inactive_names();
         let mut v: Vec<&str> = vec![];
         for name in &names {
             v.push(name);
         }
-        self.run(&v, debug)
+        self.run(&v)
             .await
             .stack_err_locationless(|| "ContainerNetwork::run_all")
     }
@@ -909,5 +910,31 @@ impl ContainerNetwork {
                 )
             })?;
         Ok(ip)
+    }
+
+    /// Sets whether the `Container::build` commands should produce debug output
+    pub fn debug_build(&mut self, debug_build: bool) -> &mut Self {
+        self.debug_build = debug_build;
+        self
+    }
+
+    /// Sets whether the `Container::create` commands should produce debug
+    /// output
+    pub fn debug_create(&mut self, debug_create: bool) -> &mut Self {
+        self.debug_create = debug_create;
+        self
+    }
+
+    /// Sets other debug info
+    pub fn debug_extra(&mut self, debug_extra: bool) -> &mut Self {
+        self.debug_extra = debug_extra;
+        self
+    }
+
+    /// Sets all debug flags at once
+    pub fn debug_all(&mut self, debug_all: bool) -> &mut Self {
+        self.debug_build(debug_all);
+        self.debug_create(debug_all);
+        self.debug_extra(debug_all)
     }
 }

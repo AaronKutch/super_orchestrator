@@ -21,6 +21,10 @@ use super_orchestrator::{
 use tokio::time::sleep;
 use tracing::info;
 
+const BASE_CONTAINER: &str = "alpine:3.20";
+// need this for Alpine
+const TARGET: &str = "x86_64-unknown-linux-musl";
+
 const TIMEOUT: Duration = Duration::from_secs(300);
 const STD_TRIES: u64 = 300;
 const STD_DELAY: Duration = Duration::from_millis(300);
@@ -60,7 +64,11 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().init();
+    // note that you need the `DEBUG` level to see some of the debug output when it
+    // is enabled
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
     let mut args = Args::parse();
     if let Some(s) = &args.json_args {
         args = serde_json::from_str(s).stack()?;
@@ -78,9 +86,11 @@ async fn main() -> Result<()> {
     }
 }
 
-// an example inline dockerfile, but this could be dynamically generated
-const CONTAINER2_DOCKERFILE: &str = r#"
-FROM fedora:38
+// a dynamically generated dockerfile
+fn container2_dockerfile() -> String {
+    format!(
+        r##"
+FROM {BASE_CONTAINER}
 
 # note: when adding from a local file, the file must be located under the same
 # directory as the temporary dockerfile, which is why ".../dockerfile_resources"
@@ -89,13 +99,21 @@ ADD ./dockerfile_resources/example.txt /resources/example.txt
 
 # this is read by Clap
 ENV ARG_FROM_ENV="environment var from dockerfile"
-"#;
+"##
+    )
+}
 
 async fn container_runner(args: &Args) -> Result<()> {
     let logs_dir = "./logs";
     let dockerfiles_dir = "./dockerfiles";
+    // note: some operating systems have incredibly bad error reporting when
+    // incompatible binaries are accidentally used. If you see an error like "exec
+    // /docker_entrypoint_pattern: no such file or directory" yet you can verify
+    // there is in fact a file there, it turns out that if e.g. a GNU compiled
+    // binary is used on a system that expects MUSL compiled binaries, then it will
+    // say "no such file or directory" even though some file exists.
     let bin_entrypoint = "docker_entrypoint_pattern";
-    let container_target = "x86_64-unknown-linux-gnu";
+    let container_target = TARGET;
 
     // build internal runner with `--release`
     //sh([
@@ -137,9 +155,14 @@ async fn container_runner(args: &Args) -> Result<()> {
     ];
 
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
+
+    // note that this turns on debug output for all stages, and also remember to set
+    // the `tracing` consumer to display `DEBUG` level output
+    cn.debug_all(true);
+
     // a container with a plain fedora:38 image
     cn.add_container(
-        Container::new("container0", Dockerfile::name_tag("fedora:38"))
+        Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
             .external_entrypoint(entrypoint, ["--entry-name", "container0"])
             .await
             .stack()?,
@@ -159,7 +182,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     // uses the literal string, allowing for self-contained complicated systems in a
     // single file
     cn.add_container(
-        Container::new("container2", Dockerfile::contents(CONTAINER2_DOCKERFILE))
+        Container::new("container2", Dockerfile::contents(container2_dockerfile()))
             .external_entrypoint(entrypoint, container2_args)
             .await
             .stack()?,
@@ -183,7 +206,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     ctrlc_init().unwrap();
 
-    cn.run_all(true).await.stack()?;
+    cn.run_all().await.stack()?;
 
     // container2 ends early
     cn.wait_with_timeout(&mut vec!["container2".to_owned()], true, TIMEOUT)
@@ -205,8 +228,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 async fn container0_runner(_args: &Args) -> Result<()> {
     // it might seem annoying to use `stack` at every fallible point, but this is
     // more than worth it when trying to decipher where an error is coming from
-    let container1_host = &format!("container1:26000");
-    let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, container1_host)
+    let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, "container1:26000")
         .await
         .stack()?;
     let s = "hello world".to_owned();

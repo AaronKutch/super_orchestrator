@@ -1,1 +1,1 @@
-FROM fedora:38
+FROM alpine:3.20
