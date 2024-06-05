@@ -10,8 +10,8 @@ async fn main() -> Result<()> {
     // note: in regular use you would use `.await.stack()?` on the ends
     // to tell what lines are failing
 
-    // remove special temporary
-    remove_files_in_dir("./dockerfiles", &["__tmp.dockerfile"]).await?;
+    // remove special temporaries
+    remove_files_in_dir("./dockerfiles", &["__tmp.dockerfile", ".tmp.dockerfile"]).await?;
     // remove log files only
     remove_files_in_dir("./logs", &[".log"]).await?;
 

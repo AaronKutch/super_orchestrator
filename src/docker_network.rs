@@ -12,7 +12,6 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path,
     docker::{Container, Dockerfile},
     docker_helpers::wait_get_ip_addr,
     Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
@@ -146,7 +145,7 @@ impl Drop for ContainerNetwork {
         // panicking situation, the `Drop` impl on each `ContainerState` handles the
         // rest if necessary
         let removed_set = mem::take(&mut self.set);
-        for (_, state) in &removed_set {
+        for state in removed_set.values() {
             // we purposely order in this way to avoid calling `panicking` in the
             // normal case
             if state.is_active() && (!std::thread::panicking()) {
@@ -181,8 +180,8 @@ impl ContainerNetwork {
     /// be attached to, `containers` is the set of containers that can be
     /// referred to later by name, `dockerfile_write_dir` is the directory in
     /// which "__tmp.dockerfile" can be written if `Dockerfile::Contents` is
-    /// used, `is_not_internal` turns off `--internal`, and `log_dir` is where
-    /// ".log" log files will be written.
+    /// used (unless the `dockerfile_write_file`s are explicitly set), and
+    /// `log_dir` is where ".log" log files will be written.
     ///
     /// The docker network is only actually created the first time a container
     /// is run.
@@ -458,31 +457,6 @@ impl ContainerNetwork {
             set.insert(name.to_string());
         }
 
-        let mut get_dockerfile_write_dir = false;
-        for name in names {
-            match self.set[name].container().dockerfile {
-                Dockerfile::NameTag(_) => {}
-                Dockerfile::Path(ref path) => {
-                    acquire_file_path(path).await.stack_err_locationless(|| {
-                        "ContainerNetwork::run -> could not acquire the path in a \
-                         `Dockerfile::Path`"
-                    })?;
-                }
-                Dockerfile::Contents(_) => get_dockerfile_write_dir = true,
-            }
-        }
-        let mut dockerfile_write_file = None;
-        if get_dockerfile_write_dir {
-            let file_options = FileOptions::write2(
-                self.dockerfile_write_dir.as_ref().unwrap(),
-                "__tmp.dockerfile",
-            );
-            let path = file_options.preacquire().await.stack_err_locationless(|| {
-                "ContainerNetwork::run -> could not acquire the `dockerfile_write_dir`"
-            })?;
-            dockerfile_write_file = Some(path);
-        }
-
         let log_file = FileOptions::write2(
             &self.log_dir,
             format!("container_network_{}.log", self.network_name()),
@@ -490,6 +464,56 @@ impl ContainerNetwork {
         log_file.preacquire().await.stack_err_locationless(|| {
             "ContainerNetwork::run -> could not acquire logs directory"
         })?;
+
+        for name in names {
+            let container = &mut self.set.get_mut(name).unwrap().container;
+            match container.dockerfile {
+                Dockerfile::NameTag(_) => (),
+                Dockerfile::Path(_) => (),
+                Dockerfile::Contents(_) => {
+                    if let Some(file_path) = &container.dockerfile_write_file {
+                        FileOptions::write(file_path)
+                            .preacquire()
+                            .await
+                            .stack_err_locationless(|| {
+                                format!(
+                                    "ContainerNetwork::run -> could not acquire the explicitly \
+                                     set `dockerfile_write_file` on container with name \"{name}\""
+                                )
+                            })?;
+                    } else if let Some(dir) = &self.dockerfile_write_dir {
+                        let path = FileOptions::write2(dir, format!("{name}.tmp.dockerfile"))
+                            .preacquire()
+                            .await
+                            .stack_err_locationless(|| {
+                                "ContainerNetwork::run -> could not acquire the \
+                                 `dockerfile_write_dir`"
+                            })?;
+                        container.dockerfile_write_file = Some(
+                            path.to_str()
+                                .stack_err_locationless(|| {
+                                    "ContainerNetwork::run -> could not acquire the \
+                                     `dockerfile_write_dir` as a UTF8 path"
+                                })?
+                                .to_owned(),
+                        );
+                    } else {
+                        return Err(Error::from_kind_locationless(format!(
+                            "ContainerNetwork::run -> the `dockerfile_write_dir` on the \
+                             `ContainerNetwork` or the `dockerfile_write_file` on container with \
+                             name \"{name}\" needs to be set"
+                        )));
+                    }
+                }
+            }
+        }
+
+        for name in names {
+            let container = &mut self.set.get_mut(name).unwrap().container;
+            container.precheck().await.stack_err_locationless(|| {
+                format!("ContainerNetwork::run -> when prechecking container {container:#?}")
+            })?;
+        }
 
         if !self.network_active {
             // remove old network if it exists (there is no option to ignore nonexistent
@@ -517,14 +541,13 @@ impl ContainerNetwork {
             self.network_active = true;
         }
 
-        // run all the creation first so that everything is pulled and prepared
+        // run all of the creation first so that everything is pulled and prepared
         let network_name = &self.network_name;
         for (i, name) in names.iter().enumerate() {
             let state = self.set.get_mut(name).unwrap();
-
             match state
                 .container()
-                .create(network_name, &dockerfile_write_file, debug, Some(&log_file))
+                .create(network_name, debug, Some(&log_file))
                 .await
                 .stack_err_locationless(|| {
                     format!("ContainerNetwork::run when creating the container for name \"{name}\"")
@@ -645,6 +668,9 @@ impl ContainerNetwork {
         }
         Err(res)
     }
+
+    // TODO separate the terminate_on and wait_on sets, have a separate terminate_on
+    // list?
 
     /// If `terminate_on_failure`, then if there is a timeout or any
     /// container from `names` has an error, then the whole network will be
