@@ -10,6 +10,8 @@ documentation = "https://docs.rs/super_orchestrator"
 keywords = ["container", "docker"]
 description = "programmable container orchestration tools"
 
+# TODO turn into workspace with testcrate and examples crate
+
 [dependencies]
 bstr = "1"
 ctrlc = { version = "3", default-features = false }

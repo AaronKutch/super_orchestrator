@@ -545,7 +545,8 @@ impl CommandRunner {
                 .child_process
                 .as_mut()
                 .stack_err_locationless(|| {
-                    "`CommandRunner` has already had some termination method called"
+                    "CommandRunner::wait_with_timeout -> some termination method has already been \
+                     called"
                 })?
                 .try_wait()
             {

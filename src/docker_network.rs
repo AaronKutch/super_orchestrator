@@ -58,7 +58,8 @@ impl Drop for ContainerState {
 }
 
 impl ContainerState {
-    // returns if there was an error from a `CommandRunner`
+    // returns if there was an error from a `CommandRunner`.
+    #[must_use]
     pub async fn terminate(&mut self) -> bool {
         if let Some(id) = self.active_container_id.take() {
             let _ = Command::new("docker rm -f")
@@ -69,26 +70,28 @@ impl ContainerState {
         let state = mem::take(&mut self.run_state);
         match state {
             RunState::PreActive => false,
-            RunState::Active(mut runner) => {
-                // do in this way because of duplicate terminations that can happen from Ctrl+C
-                let res = runner.terminate().await;
-                if let Some(comres) = runner.take_command_result() {
-                    self.run_state = RunState::PostActive(Ok(comres));
-                    false
-                } else if let Err(e) = res {
+            RunState::Active(mut runner) => match runner.terminate().await {
+                Ok(()) => {
+                    if let Some(comres) = runner.take_command_result() {
+                        let err = !comres.successful();
+                        self.run_state = RunState::PostActive(Ok(comres));
+                        err
+                    } else {
+                        self.run_state = RunState::PostActive(Err(Error::from_kind_locationless(
+                            "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
+                             container, did not find a command result for some reason",
+                        )));
+                        true
+                    }
+                }
+                Err(e) => {
                     self.run_state = RunState::PostActive(Err(e.add_kind_locationless(
                         "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
                          container, encountered an unexpected error",
                     )));
                     true
-                } else {
-                    self.run_state = RunState::PostActive(Err(Error::from_kind_locationless(
-                        "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
-                         container, did not find a command result for some reason",
-                    )));
-                    true
                 }
-            }
+            },
             RunState::PostActive(x) => {
                 self.run_state = RunState::PostActive(x);
                 false
@@ -387,7 +390,7 @@ impl ContainerNetwork {
         for name in names {
             let name = name.as_ref();
             if let Some(state) = self.set.get_mut(name) {
-                state.terminate().await;
+                let _ = state.terminate().await;
             }
         }
     }
@@ -396,7 +399,7 @@ impl ContainerNetwork {
     /// network
     pub async fn terminate_containers(&mut self) {
         for state in self.set.values_mut() {
-            state.terminate().await;
+            let _ = state.terminate().await;
         }
     }
 
@@ -623,7 +626,7 @@ impl ContainerNetwork {
                 Err(e) => {
                     // need to fix all the containers in the intermediate state
                     for name in &names[..i] {
-                        self.set.get_mut(name).unwrap().terminate().await;
+                        let _ = self.set.get_mut(name).unwrap().terminate().await;
                     }
                     e.stack_err_locationless(|| {
                         format!(
@@ -665,7 +668,7 @@ impl ContainerNetwork {
                 }
                 Err(e) => {
                     for name in names.iter() {
-                        self.set.get_mut(name).unwrap().terminate().await;
+                        let _ = self.set.get_mut(name).unwrap().terminate().await;
                     }
                     return Err(e)
                 }
@@ -832,7 +835,21 @@ impl ContainerNetwork {
             if let RunState::Active(ref mut runner) = state.run_state {
                 match runner.wait_with_timeout(Duration::ZERO).await {
                     Ok(()) => {
-                        let err = state.terminate().await;
+                        // avoid double terminate
+                        let err = {
+                            if let Some(comres) = runner.take_command_result() {
+                                let err = !comres.successful();
+                                state.run_state = RunState::PostActive(Ok(comres));
+                                err
+                            } else {
+                                state.run_state =
+                                    RunState::PostActive(Err(Error::from_kind_locationless(
+                                        "ContainerNetwork::wait_with_timeout -> when runner was \
+                                         done, did not find a command result for some reason",
+                                    )));
+                                true
+                            }
+                        };
                         if terminate_on_failure && err {
                             // give some time for other containers to react, they will be sending
                             // ProbablyNotRootCause errors and other things
