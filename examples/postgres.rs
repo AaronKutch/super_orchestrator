@@ -17,14 +17,15 @@ use super_orchestrator::{
 use tokio::{fs, time::sleep};
 use tracing::info;
 
-// time until the program ends after everything is deployed
-const END_TIMEOUT: Duration = Duration::from_secs(1_000_000_000);
+const BASE_CONTAINER: &str = "fedora:40";
+const TARGET: &str = "x86_64-unknown-linux-gnu";
+const TIMEOUT: Duration = Duration::from_secs(3600);
 
 #[rustfmt::skip]
 fn test_dockerfile() -> String {
     let dynamic = "something";
     format!(
-        r#"FROM fedora:38
+        r#"FROM {BASE_CONTAINER}
 
 # dependencies for `psql`
 RUN dnf install -y postgresql libpq-devel
@@ -42,8 +43,6 @@ ENV SOMETHING="example/{dynamic}"
 struct Args {
     #[arg(long)]
     entry_name: Option<String>,
-    #[arg(long)]
-    uuid: Option<String>,
     #[arg(long, default_value_t = String::from("./logs/"))]
     pg_data_base_path: String,
     #[arg(long, default_value_t = String::from("pg_data/"))]
@@ -57,7 +56,7 @@ async fn main() -> Result<()> {
 
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
-            "test_runner" => test_runner(&args).await,
+            "test_runner" => test_runner().await,
             _ => Err(Error::from(format!("entry_name \"{s}\" is not recognized"))),
         }
     } else {
@@ -69,7 +68,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     let logs_dir = "./logs";
     let dockerfiles_dir = "./dockerfiles";
     let bin_entrypoint = "postgres";
-    let container_target = "x86_64-unknown-linux-gnu";
+    let container_target = TARGET;
 
     // build internal runner with `--release`
     //sh("cargo build --release --bin", &[
@@ -102,24 +101,18 @@ async fn container_runner(args: &Args) -> Result<()> {
         fs::create_dir_all(&pg_data_path).await.stack()?;
     }
 
-    let containers = vec![
+    let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
+    cn.add_container(
         Container::new("test_runner", Dockerfile::contents(test_dockerfile()))
             .external_entrypoint(entrypoint, ["--entry-name", "test_runner"])
             .await
             .stack()?
             // if exposing a port beyond the machine, use something like this on the
             // container
-            .create_args(["-p", "8000:8000"]),
-    ];
-
-    let mut cn =
-        ContainerNetwork::new("test", containers, Some(dockerfiles_dir), true, logs_dir).stack()?;
-    cn.add_common_volumes([(logs_dir, "/logs")]);
-    let uuid = cn.uuid_as_string();
-    cn.add_common_entrypoint_args(["--uuid", &uuid]);
-
-    // Adding the postgres container afterwards so that it doesn't receive all the
-    // common flags.
+            //.create_args(["-p", "0.0.0.0:5432:5432"]),
+            .create_args(["-p", "127.0.0.1:5432:5432"]),
+    )
+    .stack()?;
 
     // NOTE: weird things happen if volumes to the same container overlap, e.g. if
     // the local logs directory were added when the `pg_data` directory is also in
@@ -144,19 +137,16 @@ async fn container_runner(args: &Args) -> Result<()> {
             // arguments like this may be needed
             ("POSTGRES_INITDB_ARGS", "-E UTF8 --locale=C"),
         ])
-        // if you want to have a stable `http://postgres:5432/` address instead of
-        // just `http://postgres_{uuid}:5432/` (both can still be used though),
-        // but know there will be address conflicts
-        .no_uuid_for_host_name(),
     )
     .stack()?;
 
-    cn.run_all(true).await.stack()?;
+    cn.add_common_volumes([(logs_dir, "/logs")]);
 
-    // for long runs
-    //cn.wait_with_timeout_all(true, END_TIMEOUT).await.stack()?;
+    cn.run_all().await.stack()?;
 
-    cn.wait_with_timeout(&mut vec!["test_runner".to_owned()], true, END_TIMEOUT)
+    // only wait on the "test_runner" because the postgres container will run by
+    // itself forever
+    cn.wait_with_timeout(["test_runner"], true, TIMEOUT)
         .await
         .stack()?;
 
@@ -167,26 +157,21 @@ async fn container_runner(args: &Args) -> Result<()> {
     Ok(())
 }
 
-async fn test_runner(args: &Args) -> Result<()> {
-    let uuid = &args.uuid.as_deref().stack()?;
-
-    async fn postgres_health(uuid: &str) -> Result<()> {
-        Command::new(format!(
-            "psql --host=postgres_{uuid} -U postgres --command=\\l"
-        ))
-        .env("PGPASSWORD", "root")
-        .run_to_completion()
-        .await
-        .stack()?
-        .assert_success()
-        .stack()?;
+async fn test_runner() -> Result<()> {
+    async fn postgres_health() -> Result<()> {
+        Command::new("psql --host=postgres -U postgres --command=\\l")
+            .env("PGPASSWORD", "root")
+            .run_to_completion()
+            .await
+            .stack()?
+            .assert_success()
+            .stack()?;
         Ok(())
     }
-    wait_for_ok(10, Duration::from_secs(1), || postgres_health(uuid))
+    wait_for_ok(10, Duration::from_secs(1), postgres_health)
         .await
         .stack()?;
 
-    // check that no uuid host works
     Command::new("psql --host=postgres -U postgres --command=\\l")
         .env("PGPASSWORD", "root")
         .debug(true)
@@ -199,9 +184,11 @@ async fn test_runner(args: &Args) -> Result<()> {
     info!("postgres is ready");
 
     // for long runs
-    //sleep(END_TIMEOUT).await;
+    //sleep(TIMEOUT).await;
 
     sleep(Duration::ZERO).await;
+
+    info!("stopping");
 
     Ok(())
 }

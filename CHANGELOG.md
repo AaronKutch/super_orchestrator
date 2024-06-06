@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.13.0] - 2024-06-06
+### Fixes
+- Large container networks with common build definitions are dramatically faster to start
+- Fixed a long standing issue where stdout and stderr were combined from container runners
+- unsuccesful `CommandResult`s from `Container::run` are returned now 
+- Used `*_locationless` in many more places so that errors would not be cluttered with in-library
+  locations (but all string messages now clearly state the function origin)
+- Ctrl+C on `ContainerNetwork::wait_with_timeout` now consistently returns the correct error
+- Many, many small issues were fixed
+
+### Changes
+- Total refactor of the docker module. `ContainerNetwork::new` no longer has the vector of
+  containers or internal boolean argument, instead `add_container` should be used and the
+  `--internal` should be passed through network arguments
+- `Command::get_command_result` now returns `Option<&CommandResult>`, use
+  `Command::take_command_result` for the original behavior
+- Removed `FileOptions::create` and `FileOptions::append` in favor of new functions
+- Improved some debug and display outputs
+- `CommandRunner::child_process` now holds the `ChildStdout` and `ChildStderr` if the streams have
+  no recording
+- Running containers forward with their corresponding name as the line prefix instead
+- Container building and creation messages are no longer `debug`
+- Container debug and log settings are per-container now, with only debug being on by default
+- The `ContainerNetwork` is silent by default now
+- auto_exec implementations should use `-it` by default
+- *.tmp.dockerfile should be .gitignored now in the dockerfiles directory
+
+### Additions
+- Added several `FileOptions` functions and functions for `ReadOrWrite`
+- Added some helper functions to `Command`
+- Added the ability to customize the `Command` debug line prefix
+- Added missing functions to `CommandResultNoDebug`
+
 ## [0.12.1] - 2024-05-20
 ### Fixes
 - Fixed several minor issues with the `Command` recorder forwarding to stdout

@@ -25,6 +25,8 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     if args.nonutf8 {
+        // testing that the recorder handles non-UTF8 correctly by converting to the
+        // replacement symbol
         let mut bytes = vec![];
         bytes.extend("\u{1f60a}".as_bytes());
         for i in 0..=u8::MAX {
@@ -40,6 +42,14 @@ async fn main() -> Result<()> {
             }
         }
         bytes.push(b'\n');
+        std::io::stdout()
+            .write_all("(stdout)".as_bytes())
+            .stack()
+            .unwrap();
+        std::io::stderr()
+            .write_all("(stderr)".as_bytes())
+            .stack()
+            .unwrap();
         // check that starting with a cutoff multibyte char is continued
         let mut i = 5;
         for chunk in bytes.chunk_by(|_, _| {
@@ -145,6 +155,34 @@ async fn main() -> Result<()> {
     ensure!(comres.stderr_as_utf8().is_err());
     dbg!(comres.stdout_as_utf8_lossy());
     dbg!(comres.stderr_as_utf8_lossy());
+    dbg!(comres).assert_success().stack()?;
+
+    // check command debug
+    let command = Command::new("ls")
+        .arg("-la")
+        .env_clear(true)
+        .envs([("TEST0", "test0"), ("TEST1", "test1")])
+        .cwd("./")
+        .recording(false)
+        .stderr_debug(true)
+        .stderr_log(Some(FileOptions::write("./hello.txt")))
+        .record_limit(Some(9))
+        .log_limit(Some(8))
+        .forget_on_drop(true);
+    dbg!(command);
+
+    // check custom prefixes
+    let command = Command::new("cargo r --example commands -- --print --to-stdout hello")
+        .debug(true)
+        .stdout_debug_line_prefix(Some("stdout |".to_owned()))
+        .stderr_debug_line_prefix(Some("stderr |".to_owned()));
+    dbg!(&command);
+    command
+        .run_to_completion()
+        .await
+        .stack()?
+        .assert_success()
+        .stack()?;
 
     Ok(())
 }

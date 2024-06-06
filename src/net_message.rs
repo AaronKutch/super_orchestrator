@@ -70,7 +70,7 @@ impl NetMessenger {
         let socket_addr = lookup_host(host)
             .await?
             .next()
-            .stack_err(|| "no socket addresses from lookup_host(host)")?;
+            .stack_err(|| "NetMessenger::listen -> no socket addresses from lookup_host(host)")?;
         let listener = TcpListener::bind(socket_addr).await.stack()?;
         // we use the cancel safety of `tokio::net::TcpListener::accept
         select! {
@@ -90,9 +90,10 @@ impl NetMessenger {
         let socket_addrs = wait_for_ok_lookup_host(num_retries, delay, host)
             .await
             .stack()?;
-        let socket_addr = *socket_addrs
-            .first()
-            .stack_err(|| "wait_for_ok_lookup_host was ok but returned no socket addresses")?;
+        let socket_addr = *socket_addrs.first().stack_err(|| {
+            "NetMessenger::connect -> wait_for_ok_lookup_host was ok but returned no socket \
+             addresses"
+        })?;
         let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
             .await
             .stack()?;
@@ -193,6 +194,7 @@ impl NetMessenger {
             .read_exact(&mut self.buf[0..data_len])
             .await
             .stack()?;
-        postcard::from_bytes(&self.buf[0..data_len]).stack_err(|| "failed to deserialize message")
+        postcard::from_bytes(&self.buf[0..data_len])
+            .stack_err(|| "NetMessenger::recv() -> failed to deserialize message")
     }
 }

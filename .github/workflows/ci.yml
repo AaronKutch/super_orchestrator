@@ -17,11 +17,13 @@ jobs:
         run: |
           rustup set profile minimal
           rustup default stable
+          rustup target add x86_64-unknown-linux-musl
       - name: Run test suite
         run: |
           cargo test --all-features
           cargo test --release --all-features
           cargo r --example paths
+          cargo r --example file_options
           cargo r --example basic_commands
           cargo r --example commands
           cargo r --example basic_containers
