@@ -187,9 +187,6 @@ impl Drop for ContainerNetwork {
     }
 }
 
-// TODO parallelize, order `Dockerfile`s for startup and all parallel for
-// bringing down
-
 impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
@@ -235,6 +232,22 @@ impl ContainerNetwork {
             debug_extra: false,
             already_tried_drop: false,
         }
+    }
+
+    /// Same as [ContainerNetwork::new], but it adds a UUID suffix to the
+    /// `network_name``
+    pub fn new_with_uuid<S0, S1>(
+        network_name: S0,
+        dockerfile_write_dir: Option<&str>,
+        log_dir: S1,
+    ) -> Self
+    where
+        S0: AsRef<str>,
+        S1: AsRef<str>,
+    {
+        let mut cn = Self::new(network_name, dockerfile_write_dir, log_dir);
+        cn.network_name = format!("{}_{}", cn.network_name, cn.uuid);
+        cn
     }
 
     /// Adds arguments to be passed to `docker network create` (which will be
@@ -596,7 +609,6 @@ impl ContainerNetwork {
             let comres = Command::new("docker network create --internal")
                 .args(self.network_args.iter())
                 .arg(self.network_name())
-                .log(Some(&log_file))
                 .run_to_completion()
                 .await
                 .stack_err_locationless(|| {
@@ -615,7 +627,7 @@ impl ContainerNetwork {
             let state = self.set.get_mut(name).unwrap();
             match state
                 .container()
-                .create(network_name, Some(&log_file), self.debug_create)
+                .create(network_name, None, self.debug_create)
                 .await
                 .stack_err_locationless(|| {
                     format!("ContainerNetwork::run when creating the container for name \"{name}\"")
@@ -641,23 +653,27 @@ impl ContainerNetwork {
             debug!("starting");
         }
 
-        // TODO do not log stdout by default
-
         // start containers
         for name in names {
             let state = self.set.get_mut(name).unwrap();
-            let stdout_log = state.container.stdout_log.clone().unwrap_or_else(|| {
-                FileOptions::write2(&self.log_dir, format!("container_{}_stdout.log", name))
-            });
-            let stderr_log = state.container.stderr_log.clone().unwrap_or_else(|| {
-                FileOptions::write2(&self.log_dir, format!("container_{}_stderr.log", name))
-            });
+            let (stdout_log, stderr_log) = if state.container.log {
+                (
+                    Some(state.container.stdout_log.clone().unwrap_or_else(|| {
+                        FileOptions::write2(&self.log_dir, format!("{}_stdout.log", name))
+                    })),
+                    Some(state.container.stderr_log.clone().unwrap_or_else(|| {
+                        FileOptions::write2(&self.log_dir, format!("{}_stderr.log", name))
+                    })),
+                )
+            } else {
+                (None, None)
+            };
             match state
                 .container()
                 .start(
                     state.active_container_id.as_ref().unwrap(),
-                    Some(&stdout_log),
-                    Some(&stderr_log),
+                    stdout_log.as_ref(),
+                    stderr_log.as_ref(),
                 )
                 .await
                 .stack_err_locationless(|| {

@@ -22,9 +22,10 @@
   no recording
 - Running containers forward with their corresponding name as the line prefix instead
 - Container building and creation messages are no longer `debug`
-- Container debug and log settings are per-container now
+- Container debug and log settings are per-container now, with only debug being on by default
 - The `ContainerNetwork` is silent by default now
 - auto_exec implementations should use `-it` by default
+- *.tmp.dockerfile should be .gitignored now in the dockerfiles directory
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`

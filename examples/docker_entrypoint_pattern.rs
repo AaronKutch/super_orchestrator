@@ -193,6 +193,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     // in a single file
     cn.add_container(
         Container::new("container2", Dockerfile::contents(container2_dockerfile()))
+            // also send output to logs
+            .log(true)
             .external_entrypoint(entrypoint, container2_args)
             .await
             .stack()?,

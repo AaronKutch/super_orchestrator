@@ -305,8 +305,6 @@ pub(crate) async fn command_runner<C: Into<Stdio>>(
     } else {
         None
     };
-    // TODO if we are going to do this we should allow getting active stdout from
-    // the mutex
     let stdout_record = Arc::new(Mutex::new(VecDeque::new()));
     let stdout_record_clone = if this.stdout_recording && (this.record_limit != Some(0)) {
         Some(Arc::clone(&stdout_record))

@@ -91,8 +91,8 @@ pub struct Container {
     /// Set by default, this tells the `ContainerNetwork` to forward
     /// stdout/stderr from `docker start`
     pub debug: bool,
-    /// Set by default, this tells the `ContainerNetwork` to copy stdout/stderr
-    /// to log files in the log directory
+    /// Unset by default, this tells the `ContainerNetwork` to copy
+    /// stdout/stderr to log files in the log directory
     pub log: bool,
     /// If `log` is set, then this will override the file that the
     /// `ContainerNetwork` chooses
@@ -143,7 +143,7 @@ impl Container {
             entrypoint_file: None,
             entrypoint_args: vec![],
             debug: true,
-            log: true,
+            log: false,
             stdout_log: None,
             stderr_log: None,
             dockerfile_write_file: None,
@@ -312,8 +312,8 @@ impl Container {
         log_dir: &str,
         debug: bool,
     ) -> Result<CommandResult> {
-        // TODO UUID for this for instance
-        let mut cn = ContainerNetwork::new("super_orchestrator", dockerfile_write_dir, log_dir);
+        let mut cn =
+            ContainerNetwork::new_with_uuid("super_orchestrator", dockerfile_write_dir, log_dir);
         cn.debug_build(debug).debug_create(debug);
         let name = self.name.clone();
         cn.add_container(self).stack_err_locationless(|| {
