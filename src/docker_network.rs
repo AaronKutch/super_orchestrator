@@ -17,6 +17,8 @@ use crate::{
     Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 
+// TODO reintroduce UUID capability
+
 #[derive(Debug, Default)]
 #[allow(clippy::large_enum_variant)]
 enum RunState {
