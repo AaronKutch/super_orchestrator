@@ -1,11 +1,12 @@
 //! Note: change working directory to this crate's root in two separate
 //! terminals. In one terminal, run
-//! `cargo r --example auto_exec -- --container-name container0`
-//! and in the other `cargo r --example docker_entrypoint_pattern`. Note that on
-//! windows you will need to use WSL 2 or else the cross compilation will fail
-//! at linking stage. The first terminal should catch a running container, and
-//! you can run commands on it or ctrl-c to end the container early. The second
-//! will finish after building and 20 seconds.
+//! `cargo r --example auto_exec -- --prefix container0`
+//! and in the other `cargo r --example docker_entrypoint_pattern`. The
+//! `auto_exec` binary will automatically attach to the container with the
+//! matching prefix. Note that on windows you will need to use WSL 2 or else the
+//! cross compilation will fail at linking stage. The first terminal should
+//! catch a running container, and you can run commands on it or ctrl-c to end
+//! the container early. The second will finish after building and 20 seconds.
 
 use std::time::Duration;
 
@@ -71,7 +72,10 @@ async fn main() -> Result<()> {
         .init();
     let mut args = Args::parse();
     if let Some(s) = &args.json_args {
+        let arg_from_env = args.arg_from_env;
         args = serde_json::from_str(s).stack()?;
+        // except for the env var which we want to not override
+        args.arg_from_env = arg_from_env;
     }
 
     if let Some(ref s) = args.entry_name {

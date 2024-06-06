@@ -24,6 +24,7 @@
 - Container building and creation messages are no longer `debug`
 - Container debug and log settings are per-container now
 - The `ContainerNetwork` is silent by default now
+- auto_exec implementations should use `-it` by default
 
 ### Additions
 - Added several `FileOptions` functions and functions for `ReadOrWrite`
