@@ -319,13 +319,17 @@ impl Container {
         cn.add_container(self).stack_err_locationless(|| {
             "Container::run when trying to create a `ContainerNetwork`"
         })?;
+
+        // in order to get unsuccesful `CommandResult`s, we do not terminate on failure
+        // and need to remember to `terminate_all` before returning other kinds of
+        // errors
         cn.run_all()
             .await
             .stack_err_locationless(|| "Container::run when trying to run a `ContainerNetwork`")?;
-        cn.wait_with_timeout_all(true, timeout)
-            .await
-            .stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
+        let res = cn.wait_with_timeout_all(false, timeout).await;
         cn.terminate_all().await;
+        res.stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
+
         cn.remove_container(name)
             .await
             .unwrap()

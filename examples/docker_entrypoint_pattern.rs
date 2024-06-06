@@ -138,29 +138,13 @@ async fn container_runner(args: &Args) -> Result<()> {
     .stack()?;
     let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
 
-    // Container entrypoint binaries have no arguments passed to them by default. To
-    // propogate all of the same arguments automatically, we clone the `Args` make
-    // any changes we need, and serialize it to be sent through the `--json-args`
-    // option. If we pass "--pass-along-example" when calling the container runner
-    // subprocess, it will get propogated to all the containers as well.
-    let mut container2_args = args.clone();
-    // pass a different `entry_name` to each of them to tell them what to specialize
-    // into, so that the whole system can be described by one file and one
-    // cross compilation (this can of course be customized an infinite number of
-    // ways, I have found this entrypoint pattern to be the most useful).
-    container2_args.entry_name = Some("container2".to_owned());
-    let container2_args = vec![
-        "--json-args".to_owned(),
-        serde_json::to_string(&container2_args).unwrap(),
-    ];
-
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
 
     // note that this turns on debug output for all stages, and also remember to set
     // the `tracing` consumer to display `DEBUG` level output
     cn.debug_all(true);
 
-    // a container with a plain fedora:38 image
+    // a container with a plain name:tag image
     cn.add_container(
         Container::new("container0", Dockerfile::name_tag(BASE_CONTAINER))
             .external_entrypoint(entrypoint, ["--entry-name", "container0"])
@@ -179,8 +163,30 @@ async fn container_runner(args: &Args) -> Result<()> {
         .stack()?,
     )
     .stack()?;
-    // uses the literal string, allowing for self-contained complicated systems in a
-    // single file
+
+    // in more complicated uses of super_orchestrator, users will add one more
+    // abstraction layer around `ContainerNetwork`s and `Container`s to
+    // automatically deal with the preferred argument passing method, here we are
+    // just writing them out
+
+    // Container entrypoint binaries have no arguments passed to them by default. To
+    // propogate all of the same arguments automatically, we clone the `Args` make
+    // any changes we need, and serialize it to be sent through the `--json-args`
+    // option. If we pass "--pass-along-example" when calling the container runner
+    // subprocess, it will get propogated to all the containers as well.
+    let mut container2_args = args.clone();
+    // pass a different `entry_name` to each of them to tell them what to specialize
+    // into, so that the whole system can be described by one file and one
+    // cross compilation (this can of course be customized an infinite number of
+    // ways, I have found this entrypoint pattern to be the most useful).
+    container2_args.entry_name = Some("container2".to_owned());
+    let container2_args = vec![
+        "--json-args".to_owned(),
+        serde_json::to_string(&container2_args).unwrap(),
+    ];
+
+    // uses `container2_dockerfile`, allowing for self-contained complicated systems
+    // in a single file
     cn.add_container(
         Container::new("container2", Dockerfile::contents(container2_dockerfile()))
             .external_entrypoint(entrypoint, container2_args)
@@ -226,8 +232,11 @@ async fn container_runner(args: &Args) -> Result<()> {
 }
 
 async fn container0_runner(_args: &Args) -> Result<()> {
-    // it might seem annoying to use `stack` at every fallible point, but this is
-    // more than worth it when trying to decipher where an error is coming from
+    // It might seem annoying to use `stack` at every fallible point, but this is
+    // more than worth it when trying to decipher where an error is coming from. In
+    // nontrivial async `tokio` usage, the backtraces get clobbered with task runner
+    // functions, which is why I designed `stacked_errors` to enable programmed
+    // backtraces.
     let mut nm = NetMessenger::connect(STD_TRIES, STD_DELAY, "container1:26000")
         .await
         .stack()?;
