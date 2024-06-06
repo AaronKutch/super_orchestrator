@@ -221,7 +221,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.run_all().await.stack()?;
 
     // container2 ends early
-    cn.wait_with_timeout(&mut vec!["container2".to_owned()], true, TIMEOUT)
+    cn.wait_with_timeout(["container2"], true, TIMEOUT)
         .await
         .stack()?;
     ensure_eq!(cn.active_names(), &["container0", "container1"]);

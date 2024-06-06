@@ -794,9 +794,31 @@ impl ContainerNetwork {
     ///
     /// If called with `Duration::ZERO`, this will always complete successfully
     /// if all containers were terminated before this call.
-    pub async fn wait_with_timeout(
+    pub async fn wait_with_timeout<I, S>(
         &mut self,
-        names: &mut Vec<String>,
+        names: I,
+        terminate_on_failure: bool,
+        duration: Duration,
+    ) -> Result<()>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        // avoid polymorphizing
+        self.wait_with_timeout_internal(
+            names
+                .into_iter()
+                .map(|s| s.as_ref().to_owned())
+                .collect::<Vec<String>>(),
+            terminate_on_failure,
+            duration,
+        )
+        .await
+    }
+
+    async fn wait_with_timeout_internal(
+        &mut self,
+        mut names: Vec<String>,
         terminate_on_failure: bool,
         duration: Duration,
     ) -> Result<()> {
@@ -815,6 +837,17 @@ impl ContainerNetwork {
                 )));
             }
         }
+
+        // the loop needs to loop over all active names, but we return when these are
+        // all done
+        let mut target_names: BTreeSet<String> = names.iter().cloned().collect();
+        // push other active names on the end
+        for active_name in self.active_names() {
+            if !target_names.contains(&active_name) {
+                names.push(active_name);
+            }
+        }
+
         let start = Instant::now();
         let mut skip_fail = true;
         // we will check in a loop so that if a container has failed in the meantime, we
@@ -829,7 +862,7 @@ impl ContainerNetwork {
                     "ContainerNetwork::wait_with_timeout terminating because of `CTRLC_ISSUED`",
                 ))
             }
-            if names.is_empty() {
+            if target_names.is_empty() {
                 break
             }
             if i >= names.len() {
@@ -850,7 +883,7 @@ impl ContainerNetwork {
                         }
                         return Err(Error::timeout().add_kind_locationless(format!(
                             "ContainerNetwork::wait_with_timeout timeout waiting for container \
-                             names {names:?} to complete"
+                             names {target_names:?} to complete"
                         )))
                     }
                 } else {
@@ -888,7 +921,8 @@ impl ContainerNetwork {
                                  for more):\n"
                             })
                         }
-                        names.remove(i);
+                        let name = names.remove(i);
+                        target_names.remove(&name);
                     }
                     Err(e) => {
                         if !e.is_timeout() {
@@ -923,8 +957,7 @@ impl ContainerNetwork {
         terminate_on_failure: bool,
         duration: Duration,
     ) -> Result<()> {
-        let mut names = self.active_names();
-        self.wait_with_timeout(&mut names, terminate_on_failure, duration)
+        self.wait_with_timeout(self.active_names(), terminate_on_failure, duration)
             .await
     }
 
