@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.12.1"
+version = "0.13.0"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -9,14 +9,13 @@ repository = "https://github.com/AaronKutch/super_orchestrator"
 documentation = "https://docs.rs/super_orchestrator"
 keywords = ["container", "docker"]
 description = "programmable container orchestration tools"
-
 # TODO turn into workspace with testcrate and examples crate
 
 [dependencies]
 bstr = "1"
 ctrlc = { version = "3", default-features = false }
 dunce = "1.0"
-nix = { version = "0.28", optional = true, default-features = false, features = ["signal"] }
+nix = { version = "0.29", optional = true, default-features = false, features = ["signal"] }
 owo-colors = { version = "4.0", default-features = false }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }

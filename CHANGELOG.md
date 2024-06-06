@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.13.0] - TODO
+## [0.13.0] - 2024-06-06
 ### Fixes
 - Large container networks with common build definitions are dramatically faster to start
 - Fixed a long standing issue where stdout and stderr were combined from container runners
