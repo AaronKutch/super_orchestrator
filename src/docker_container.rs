@@ -521,12 +521,10 @@ impl Container {
         match self.dockerfile {
             Dockerfile::NameTag(ref name_tag) => {
                 // tag using `name_tag`
-                args.push("-t");
                 args.push(name_tag);
             }
             Dockerfile::Path(_) | Dockerfile::Contents(_) => {
                 // use the tag of the build image
-                args.push("-t");
                 args.push(self.build_tag.as_ref().stack_err_locationless(|| {
                     "Container::create -> `build_tag` needs to be set"
                 })?);

@@ -270,6 +270,7 @@ async fn container2_runner(args: &Args) -> Result<()> {
 
     info!("the environment var is {:?}", args.arg_from_env);
     info!("the boolean is {:?}", args.boolean);
+    eprintln!("testing stderr");
 
     // check that the file is in this container's filesystem
     ensure_eq!(

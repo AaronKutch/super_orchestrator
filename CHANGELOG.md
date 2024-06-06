@@ -3,6 +3,7 @@
 ## [0.13.0] - TODO
 ### Fixes
 - Large container networks with common build definitions are dramatically faster to start
+- Fixed a long standing issue where stdout and stderr were combined from container runners
 - Used `*_locationless` in many more places so that errors would not be cluttered with in-library
   locations (but all string messages now clearly state the function origin)
 - Ctrl+C on `ContainerNetwork::wait_with_timeout` now consistently returns the correct error
