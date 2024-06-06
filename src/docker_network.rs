@@ -140,13 +140,18 @@ impl ContainerState {
 pub struct ContainerNetwork {
     uuid: Uuid,
     network_name: String,
+    /// Arguments passed to `docker network create` when any container is first
+    /// run
     pub network_args: Vec<String>,
     set: BTreeMap<String, ContainerState>,
     dockerfile_write_dir: Option<String>,
     log_dir: String,
     network_active: bool,
+    /// If build commands should be `debug`
     pub debug_build: bool,
+    /// If create commands should be `debug`
     pub debug_create: bool,
+    /// If extra debug output should be enabled
     pub debug_extra: bool,
     already_tried_drop: bool,
 }
@@ -191,11 +196,10 @@ impl ContainerNetwork {
     /// Creates a new `ContainerNetwork`.
     ///
     /// `network_name` sets the name of the docker network that containers will
-    /// be attached to, `containers` is the set of containers that can be
-    /// referred to later by name, `dockerfile_write_dir` is the directory in
-    /// which "__tmp.dockerfile" can be written if `Dockerfile::Contents` is
-    /// used (unless the `dockerfile_write_file`s are explicitly set), and
-    /// `log_dir` is where ".log" log files will be written.
+    /// be attached to, `dockerfile_write_dir` is the directory in
+    /// which ".tmp.dockerfile" files can be written if `Dockerfile::Contents`
+    /// is used (unless the `dockerfile_write_file`s are explicitly set),
+    /// and `log_dir` is where ".log" log files will be written.
     ///
     /// The docker network is only actually created the first time a container
     /// is run.
@@ -272,7 +276,7 @@ impl ContainerNetwork {
         self.uuid.to_string()
     }
 
-    /// Returns the full network name
+    /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
     }
@@ -698,6 +702,8 @@ impl ContainerNetwork {
         Ok(())
     }
 
+    /// [ContainerNetwork::run] on all inactive containers in the network. Note
+    /// that terminated containers that weren't removed are recreated.
     pub async fn run_all(&mut self) -> Result<()> {
         let names = self.inactive_names();
         let mut v: Vec<&str> = vec![];
@@ -767,16 +773,22 @@ impl ContainerNetwork {
         Err(res)
     }
 
-    // TODO separate the terminate_on and wait_on sets, have a separate terminate_on
-    // list?
-
+    /// Waits for the containers with `names` to all complete, or returns if
+    /// `duration` timeout is exceeded.
+    ///
     /// If `terminate_on_failure`, then if there is a timeout or any
     /// container from `names` has an error, then the whole network will be
     /// terminated.
     ///
+    /// By default, if any container stops normally but with an unsuccessful
+    /// return value (not just the `names` but any container in the network),
+    /// the `wait_with_timeout` function will return or terminate everything if
+    /// `terminate_on_failure`. This can be changed by setting the
+    /// `allow_unsuccessful` flag on the desired `Container`s.
+    ///
     /// Note that if a CTRL-C/sigterm signal is sent and
-    /// [ctrlc_init](crate::ctrlc_init) has been run, then either terminating
-    /// runners or an internal [CTRLC_ISSUED] check will trigger
+    /// [ctrlc_init](crate::ctrlc_init) has been run, then an internal
+    /// [CTRLC_ISSUED] check will trigger
     /// [terminate_all](ContainerNetwork::terminate_all). Otherwise,
     /// containers may continue to run in the background.
     ///
@@ -866,7 +878,7 @@ impl ContainerNetwork {
                                 true
                             }
                         };
-                        if terminate_on_failure && err {
+                        if terminate_on_failure && err && (!state.container.allow_unsuccessful) {
                             // give some time for other containers to react, they will be sending
                             // ProbablyNotRootCause errors and other things
                             sleep(Duration::from_millis(300)).await;
@@ -886,10 +898,16 @@ impl ContainerNetwork {
                                 sleep(Duration::from_millis(300)).await;
                                 self.terminate_all().await;
                             }
-                            return self.error_compilation().stack_err_locationless(|| {
-                                "ContainerNetwork::wait_with_timeout error compilation (check logs \
-                                 for more):\n"
-                            })
+                            return self
+                                .error_compilation()
+                                .stack_err_locationless(|| {
+                                    "ContainerNetwork::wait_with_timeout encountered OS-level \
+                                     `CommandRunner` error"
+                                })
+                                .stack_err_locationless(|| {
+                                    "ContainerNetwork::wait_with_timeout error compilation (check \
+                                     logs for more):\n"
+                                })
                         }
                         i += 1;
                     }

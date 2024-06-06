@@ -20,7 +20,8 @@ pub use paths::*;
 pub use stacked_errors;
 /// Docker container management
 ///
-/// See the `docker_entrypoint_pattern` and `postgres` crate examples
+/// See the `basic_containers`, `docker_entrypoint_pattern`, and `postgres`
+/// crate examples
 pub mod docker {
     pub use super::{docker_container::*, docker_network::*};
 }

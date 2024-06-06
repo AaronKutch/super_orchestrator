@@ -9,7 +9,7 @@ use tokio::{
 
 use crate::{acquire_dir_path, acquire_file_path, close_file};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct WriteOptions {
     /// creates file if nonexistent
     pub create: bool,
@@ -17,7 +17,7 @@ pub struct WriteOptions {
     pub append: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ReadOrWrite {
     Read,
     Write(WriteOptions),
@@ -38,7 +38,7 @@ impl ReadOrWrite {
 
 /// A wrapper combining capabilities from `tokio::fs::{OpenOptions, File}` with
 /// a lot of opinionated defaults and `close_file`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FileOptions {
     /// What should be a path to a file
     pub path: PathBuf,

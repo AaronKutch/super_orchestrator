@@ -17,13 +17,15 @@ use super_orchestrator::{
 use tokio::{fs, time::sleep};
 use tracing::info;
 
+const BASE_CONTAINER: &str = "fedora:40";
+const TARGET: &str = "x86_64-unknown-linux-gnu";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
 #[rustfmt::skip]
 fn test_dockerfile() -> String {
     let dynamic = "something";
     format!(
-        r#"FROM fedora:38
+        r#"FROM {BASE_CONTAINER}
 
 # dependencies for `psql`
 RUN dnf install -y postgresql libpq-devel
@@ -66,7 +68,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     let logs_dir = "./logs";
     let dockerfiles_dir = "./dockerfiles";
     let bin_entrypoint = "postgres";
-    let container_target = "x86_64-unknown-linux-gnu";
+    let container_target = TARGET;
 
     // build internal runner with `--release`
     //sh("cargo build --release --bin", &[

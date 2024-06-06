@@ -15,15 +15,16 @@ use crate::{
 // possible.
 
 /// Ways of using a dockerfile for building a container
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Dockerfile {
-    /// Builds using an image in the format "name:tag" such as "fedora:38"
-    /// (running will call something such as `docker pull name:tag`)
+    /// Builds using an image in the format "name:tag" such as "fedora:40" or
+    /// "alpine:3.20" (running will call something such as `docker pull
+    /// name:tag`)
     NameTag(String),
     /// Builds from a dockerfile on a path (e.x.
     /// "./tests/dockerfiles/example.dockerfile")
     Path(String),
-    /// Builds from contents that are written to "__tmp.dockerfile" in a
+    /// Builds from contents that are written to "{name}.tmp.dockerfile" in a
     /// directory determined by the `ContainerNetwork`. Note that resources used
     /// by this dockerfile may need to be in the same directory.
     Contents(String),
@@ -46,14 +47,15 @@ impl Dockerfile {
     }
 }
 
-/// Container running information, put this into a `ContainerNetwork`
+/// Configuration for running a container
 ///
 /// # Note
 ///
-/// Weird things happen if volumes to the same container overlap, e.g. if
-/// the directory used for logs is added as a volume, and a volume to another
-/// path contained within the directory is also added as a volume.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Broken behavior results on the docker side if volumes to the same container
+/// overlap, e.g. if the directory used for logs is added as a volume, and a
+/// volume to another path contained within the same directory is also added as
+/// a volume.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Container {
     /// The name of the container as it will be referenced by in a
     /// `DockerNetwork`
@@ -63,8 +65,9 @@ pub struct Container {
     /// [Dockerfile::NameTag] or in the `build_tag`
     pub container_name: String,
     /// Hostname of the URL that could access the container (the container can
-    /// alternatively be accessed by an ip address). Usually, this should be the
-    /// same as `name`.
+    /// alternatively be accessed by an ip address via
+    /// [wait_get_ip_addr](crate::docker_helpers::wait_get_ip_addr)). Usually,
+    /// this should be the same as `name`.
     pub host_name: String,
     /// The dockerfile
     pub dockerfile: Dockerfile,
@@ -88,6 +91,8 @@ pub struct Container {
     /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
+    /// Changes what some functions allow to fail when running the container
+    pub allow_unsuccessful: bool,
     /// Set by default, this tells the `ContainerNetwork` to forward
     /// stdout/stderr from `docker start`
     pub debug: bool,
@@ -142,6 +147,7 @@ impl Container {
             environment_vars: vec![],
             entrypoint_file: None,
             entrypoint_args: vec![],
+            allow_unsuccessful: false,
             debug: true,
             log: false,
             stdout_log: None,
@@ -206,10 +212,10 @@ impl Container {
         self
     }
 
-    /// Adds a volume
-    pub fn volume(mut self, key: impl AsRef<str>, val: impl AsRef<str>) -> Self {
+    /// Adds a volume to map a local path to a path in the container
+    pub fn volume(mut self, local: impl AsRef<str>, container: impl AsRef<str>) -> Self {
         self.volumes
-            .push((key.as_ref().to_owned(), val.as_ref().to_owned()));
+            .push((local.as_ref().to_owned(), container.as_ref().to_owned()));
         self
     }
 
@@ -282,6 +288,12 @@ impl Container {
         self
     }
 
+    /// Sets whether a container is allowed to have an unsuccesful output
+    pub fn allow_unsuccessful(mut self, allow_unsuccessful: bool) -> Self {
+        self.allow_unsuccessful = allow_unsuccessful;
+        self
+    }
+
     /// Sets whether container stdout/stderr should be forwarded
     pub fn debug(mut self, debug: bool) -> Self {
         self.debug = debug;
@@ -304,7 +316,10 @@ impl Container {
     /// Runs this container by itself in a default `ContainerNetwork` with
     /// "super_orchestrator_{uuid}" as the network name, waiting for completion
     /// with a timeout. Setting `debug` is equivalent to setting `debug_build`
-    /// and `debug_create` on a `ContainerNetwork`.
+    /// and `debug_create` on a `ContainerNetwork`. Unconditionally sets
+    /// `allow_unsuccessful`, so the `CommandResult` has to be checked if there
+    /// was an unsuccessful error return status from within the container
+    /// itself.
     pub async fn run(
         self,
         dockerfile_write_dir: Option<&str>,
@@ -316,9 +331,10 @@ impl Container {
             ContainerNetwork::new_with_uuid("super_orchestrator", dockerfile_write_dir, log_dir);
         cn.debug_build(debug).debug_create(debug);
         let name = self.name.clone();
-        cn.add_container(self).stack_err_locationless(|| {
-            "Container::run when trying to create a `ContainerNetwork`"
-        })?;
+        cn.add_container(self.allow_unsuccessful(true))
+            .stack_err_locationless(|| {
+                "Container::run when trying to create a `ContainerNetwork`"
+            })?;
 
         // in order to get unsuccesful `CommandResult`s, we do not terminate on failure
         // and need to remember to `terminate_all` before returning other kinds of
@@ -326,9 +342,10 @@ impl Container {
         cn.run_all()
             .await
             .stack_err_locationless(|| "Container::run when trying to run a `ContainerNetwork`")?;
-        let res = cn.wait_with_timeout_all(false, timeout).await;
+        cn.wait_with_timeout_all(true, timeout)
+            .await
+            .stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
         cn.terminate_all().await;
-        res.stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
 
         cn.remove_container(name)
             .await
@@ -339,10 +356,10 @@ impl Container {
     }
 
     /// Prechecks several things needed to successfully run `self`, and
-    /// normalizes paths like the volumes. This and subsequent steps are
-    /// automatically handled in [ContainerNetwork::run]. Checks existence
-    /// for `Dockerfile::Contents` but does not preacquire
-    /// `dockerfile_write_dir`.
+    /// normalizes paths like the local parts of volumes. This and subsequent
+    /// steps are automatically handled in [ContainerNetwork::run]. Checks
+    /// `dockerfile_write_dir.is_some()` if `Dockerfile::Contents` but does not
+    /// preacquire `dockerfile_write_dir`.
     pub async fn precheck(&mut self) -> Result<()> {
         match self.dockerfile {
             Dockerfile::NameTag(_) => (),
