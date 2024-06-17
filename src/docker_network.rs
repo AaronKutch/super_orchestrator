@@ -718,8 +718,8 @@ impl ContainerNetwork {
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:
-    /// [" or " panicked at " parts of stdouts. Omits stacks that have
-    /// "ProbablyNotRootCauseError".
+    /// [" or " panicked at " parts. Checks stderr first and falls back to
+    /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         let not_root_cause = "ProbablyNotRootCauseError";
         let error_stack = "Error { stack: [";
@@ -734,24 +734,50 @@ impl ContainerNetwork {
                     Ok(comres) => {
                         if !comres.successful() {
                             let mut encountered = false;
-                            let stdout = comres.stdout_as_utf8_lossy();
-                            if let Some(start) = stdout.rfind(error_stack) {
-                                if !stdout.contains(not_root_cause) {
+
+                            // check stderr
+                            let stderr = comres.stderr_as_utf8_lossy();
+                            if let Some(start) = stderr.rfind(error_stack) {
+                                if !stderr.contains(not_root_cause) {
                                     encountered = true;
                                     res = res.add_kind_locationless(format!(
-                                        "Error stack from container \"{name}\":\n{}\n",
-                                        &stdout[start..]
+                                        "Error stack from container \"{name}\" stderr:\n{}\n",
+                                        &stderr[start..]
                                     ));
                                 }
                             }
 
-                            if let Some(i) = stdout.rfind(panicked_at) {
-                                if let Some(i) = stdout[0..i].rfind("thread") {
+                            if let Some(i) = stderr.rfind(panicked_at) {
+                                if let Some(i) = stderr[0..i].rfind("thread") {
                                     encountered = true;
                                     res = res.add_kind_locationless(format!(
-                                        "Panic message from container \"{name}\":\n{}\n",
-                                        &stdout[i..]
+                                        "Panic message from container \"{name}\" stderr:\n{}\n",
+                                        &stderr[i..]
                                     ));
+                                }
+                            }
+
+                            // check stdout only if stderr had nothing
+                            if !encountered {
+                                let stdout = comres.stdout_as_utf8_lossy();
+                                if let Some(start) = stdout.rfind(error_stack) {
+                                    if !stdout.contains(not_root_cause) {
+                                        encountered = true;
+                                        res = res.add_kind_locationless(format!(
+                                            "Error stack from container \"{name}\" stdout:\n{}\n",
+                                            &stdout[start..]
+                                        ));
+                                    }
+                                }
+
+                                if let Some(i) = stdout.rfind(panicked_at) {
+                                    if let Some(i) = stdout[0..i].rfind("thread") {
+                                        encountered = true;
+                                        res = res.add_kind_locationless(format!(
+                                            "Panic message from container \"{name}\" stdout:\n{}\n",
+                                            &stdout[i..]
+                                        ));
+                                    }
                                 }
                             }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.13.1] - 2024-06-17
+### Fixes
+- `ContainerNetwork` error compilations now use the stderr, and fallback to stdout
+
 ## [0.13.0] - 2024-06-06
 ### Fixes
 - Large container networks with common build definitions are dramatically faster to start

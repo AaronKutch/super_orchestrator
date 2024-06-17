@@ -166,7 +166,7 @@ impl NetMessenger {
     /// specified type, you should always use the turbofish to specify `T`,
     /// because it is otherwise possible to get an unexpected type because
     /// of `Deref` coercion.
-    pub async fn recv<T: ?Sized + DeserializeOwned>(&mut self) -> Result<T> {
+    pub async fn recv<T: DeserializeOwned>(&mut self) -> Result<T> {
         // TODO handle timeouts
         let expected_id = type_hash::<T>();
         let mut actual_id = [0u8; 16];
