@@ -41,6 +41,8 @@ pub fn ctrlc_issued_reset() -> bool {
 pub fn type_hash<T: ?Sized>() -> [u8; 16] {
     // we can't make this `const` currently because of `type_name`, however it
     // should compile down to the result in practice, at least on release mode
+
+    // TODO `type_name` should be const soon
     use sha3::{Digest, Sha3_256};
     let name = type_name::<T>();
     let mut hasher = Sha3_256::new();
