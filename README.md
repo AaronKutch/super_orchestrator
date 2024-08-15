@@ -15,11 +15,44 @@ environments).
 
 The "nix_support" feature enables some functions to be able to send UNIX signals to commands.
 
+## Cross compilation
+
 Cross compilation on Windows is practically impossible (believe me, I have tried going down the
-rabbit hole twice, just use WSL 2 or MSYS2 instead). The dockerfile entrypoint pattern has a
-workaround for this that builds on straight windows by cross compiling within a container while
-retaining build artifacts (but be aware that this may break if the cargo version in the container
-is not up to date).
+rabbit hole twice, just use WSL 2 or MSYS2 instead). The dockerfile entrypoint pattern examples that
+use cross compilation will not work on straight Windows. However, it is possible in general to cross
+compile inside a container and still keep build artifacts for fast recompilation by voluming
+`CARGO_HOME`. An example of what this looks like is
+```
+if cfg!(windows) {
+    Container::new(
+            "builder",
+            Dockerfile::contents(/* build container definition */),
+        )
+        .volume(
+            home::cargo_home().stack()?.to_str().stack()?, // using the `home` crate
+            "/root/.cargo", // if building in a typical Linux container
+        )
+        .volume(/* base directory */, "/needs_build")
+        .workdir("/needs_build")
+        .entrypoint_args(["sh", "-c", &format!("cargo -vV && {build_cmd}",)])
+        .run(
+            Some(/* dockerfiles_dir */),
+            Duration::from_secs(3600),
+            /* logs_dir */,
+            true,
+        )
+        .await
+        .stack()?
+        .assert_success()
+        .stack()?;
+}
+```
+I would include functions to do this in `super_orchestrator` itself, but at this level we are just
+making too many environmental assumptions. If the cargo version used locally and in the build
+container are too incompatible, there may be problems. This ultimately must be automated per-repo
+and the `dockerfile_entrypoint_pattern` is just a starter example.
+
+## Docker inconsistencies
 
 Docker is usually good with consistency and being able to run the same thing between different
 environments, but there are a few things that have different defaults (meaning something that runs
@@ -36,4 +69,5 @@ container.create_args([
     "net.ipv6.conf.all.forwarding=1", // for packet forwarding if needed
 ])
 ```
-- The "--internal" network argument does not have the intended effect on all platforms
+- The "--internal" network argument does not have the intended effect on all platforms, even on some
+  WSL 2 Linux distributions.

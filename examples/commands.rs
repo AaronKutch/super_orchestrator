@@ -4,6 +4,7 @@ use clap::Parser;
 use stacked_errors::{ensure, ensure_eq, StackableErr};
 use super_orchestrator::{remove_files_in_dir, stacked_errors::Result, Command, FileOptions};
 use tokio::time::sleep;
+use tracing::info;
 
 // this program calls itself to get stdout and stderr examples
 #[derive(Parser, Debug)]
@@ -100,9 +101,15 @@ async fn main() -> Result<()> {
     .await
     .stack()?;
 
+    // strange "filename or extension is too long" issue with Windows
+    let many_bytes = if cfg!(windows) {
+        String::from_iter(iter::repeat('e').take(10 * 1024))
+    } else {
+        String::from_iter(iter::repeat('e').take(105 * 1024))
+    };
+
     // record and file size limiting, useful for some long running programs that may
     // end up with more output than there is memory.
-    let many_bytes = String::from_iter(iter::repeat('e').take(105 * 1024));
     let comres = Command::new("cargo r --example commands --quiet -- --print")
         .arg("--to-stdout")
         .arg(&many_bytes)
@@ -183,6 +190,8 @@ async fn main() -> Result<()> {
         .stack()?
         .assert_success()
         .stack()?;
+
+    info!("test completed successfully");
 
     Ok(())
 }

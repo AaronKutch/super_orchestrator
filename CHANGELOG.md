@@ -4,6 +4,7 @@
 ### Fixes
 - Fixed an erroneous `--internal` that was left in network creation, this prevented exposing ports
   on some platforms
+- Added some important documentation to the README and `Container`
 
 ## [0.13.1] - 2024-06-17
 ### Fixes
