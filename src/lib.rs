@@ -1,3 +1,5 @@
+//! See README.md for more
+
 mod command;
 mod command_runner;
 mod docker_container;

@@ -612,7 +612,7 @@ impl ContainerNetwork {
             .stderr_log(&debug_log)
             .run_to_completion()
             .await;*/
-            let comres = Command::new("docker network create --internal")
+            let comres = Command::new("docker network create")
                 .args(self.network_args.iter())
                 .arg(self.network_name())
                 .run_to_completion()

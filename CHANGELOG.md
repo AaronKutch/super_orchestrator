@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.2] - 2024-08-15
+### Fixes
+- Fixed an erroneous `--internal` that was left in network creation, this prevented exposing ports
+  on some platforms
+- Added some important documentation to the README and `Container`
+
 ## [0.13.1] - 2024-06-17
 ### Fixes
 - `ContainerNetwork` error compilations now use the stderr, and fallback to stdout

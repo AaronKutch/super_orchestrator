@@ -47,14 +47,31 @@ impl Dockerfile {
     }
 }
 
-/// Configuration for running a container
+/// Configuration for running a container.
+///
+/// The `docker run` command can be split into separate `docker build`, `docker
+/// create`, and `docker start` commands (which are what `super_orchestrator`
+/// calls instead for precision and reuse). `docker build` and `docker create`
+/// take different subsets of options from `docker run`. If you want to pass
+/// arguments that you would when manually running `docker run`, e.x.
+/// `docker run --no-cache -p 127.0.0.1:5432:5432`, then you need to look at
+/// `docker build --help` and `docker create --help` to figure out which
+/// subcommand the options belong to. In this case "--no-cache" belongs to
+/// `docker build` and "-p" belongs to `docker create`. This means that you
+/// would call
+/// `Container::new(...).build_args(["--no-cache"]).create_args(["-p",
+/// "127.0.0.1:5432:5432"])` to create container configuration that would run
+/// with the right options.
+///
+/// Remember that there are debug options you can set to print out the exact
+/// commands that are being called internally.
 ///
 /// # Note
 ///
-/// Broken behavior results on the docker side if volumes to the same container
-/// overlap, e.g. if the directory used for logs is added as a volume, and a
-/// volume to another path contained within the same directory is also added as
-/// a volume.
+/// Broken behavior often results on the docker side if volumes to the same
+/// container overlap, e.g. if the directory used for logs is added as a volume,
+/// and a volume to another path contained within the same directory is also
+/// added as a volume.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Container {
     /// The name of the container as it will be referenced by in a
@@ -357,9 +374,10 @@ impl Container {
 
     /// Prechecks several things needed to successfully run `self`, and
     /// normalizes paths like the local parts of volumes. This and subsequent
-    /// steps are automatically handled in [ContainerNetwork::run]. Checks
-    /// `dockerfile_write_dir.is_some()` if `Dockerfile::Contents` but does not
-    /// preacquire `dockerfile_write_dir`.
+    /// steps are automatically handled in [Container::run] or
+    /// [ContainerNetwork::run]. Checks `dockerfile_write_dir.is_some()` if
+    /// `Dockerfile::Contents` but does not preacquire
+    /// `dockerfile_write_dir`.
     pub async fn precheck(&mut self) -> Result<()> {
         match self.dockerfile {
             Dockerfile::NameTag(_) => (),

@@ -8,6 +8,7 @@ use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt},
 };
+use tracing::info;
 
 #[tokio::main]
 #[rustfmt::skip]
@@ -119,6 +120,8 @@ acquire_file_path(file_path:"#)
             .stack()?,
         "test part 2"
     );
+
+    info!("test completed successfully");
 
     Ok(())
 }
