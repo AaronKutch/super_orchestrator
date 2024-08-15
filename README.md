@@ -22,8 +22,9 @@ retaining build artifacts (but be aware that this may break if the cargo version
 is not up to date).
 
 Docker is usually good with consistency and being able to run the same thing between different
-environments, but there are a few things that have different defaults, most notably things involving
-network access. When enabling IPv6, you should use the arguments
+environments, but there are a few things that have different defaults (meaning something that runs
+perfectly on one environment may fail in another), most notably things involving network access.
+- When enabling IPv6, you should use the arguments
 ```
 container.create_args([
     "--cap-add=NET_ADMIN", // if doing anything requiring admin access for network stuff
@@ -35,3 +36,4 @@ container.create_args([
     "net.ipv6.conf.all.forwarding=1", // for packet forwarding if needed
 ])
 ```
+- The "--internal" network argument does not have the intended effect on all platforms
