@@ -133,7 +133,7 @@ impl NetMessenger {
                     continue
                 }
                 Err(e) => {
-                    return Err(Error::from_err(e))
+                    return Err(Error::box_from(e))
                         .stack_err_locationless(|| "failed to serialize message")?
                 }
             }

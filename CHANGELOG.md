@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.14.0] - 2024-11-21
+### Changes
+- Updated to `stacked_errors` 0.6 which changes the MSRV to 1.81
+- Changed `external_entrypoint` to add a UUID to the binary and prevent accidental name collisions
+
 ## [0.13.2] - 2024-08-15
 ### Fixes
 - Fixed an erroneous `--internal` that was left in network creation, this prevented exposing ports
