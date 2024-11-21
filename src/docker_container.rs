@@ -3,6 +3,7 @@ use std::{path::PathBuf, time::Duration};
 use serde::{Deserialize, Serialize};
 use stacked_errors::{Error, Result, StackableErr};
 use tracing::debug;
+use uuid::Uuid;
 
 use crate::{
     acquire_file_path, acquire_path, docker::ContainerNetwork, next_terminal_color, Command,
@@ -175,8 +176,9 @@ impl Container {
 
     /// This is used in the entrypoint pattern where an externally compiled
     /// binary is used as the entrypoint for the container. This adds a volume
-    /// from `entrypoint_binary` to "/{binary_file_name}", sets
-    /// `entrypoint_file` to that, and also adds the
+    /// from `entrypoint_binary` to "/{binary_file_name}_{uuid}" (the UUID is
+    /// for preventing accidental collisions with things in the file system),
+    /// sets `entrypoint_file` to that, and also adds the
     /// `entrypoint_args`. Returns an error if the binary file path cannot be
     /// acquired.
     pub async fn external_entrypoint<I, S>(
@@ -199,7 +201,8 @@ impl Container {
             .to_str()
             .unwrap()
             .to_owned();
-        let entrypoint_file = format!("/{binary_file_name}");
+        let uuid = Uuid::new_v4();
+        let entrypoint_file = format!("/{binary_file_name}_{uuid}");
         self.entrypoint_file = Some(entrypoint_file.clone());
         self.volumes.push((
             binary_path.as_os_str().to_str().unwrap().to_owned(),

@@ -182,6 +182,7 @@ pub async fn close_file(mut file: File) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// This is a guarded kind of removal that only removes all files in a directory
 /// that match an element of `ends_with`. If the element starts with ".",
 /// extensions are matched against, otherwise whole file names are matched
