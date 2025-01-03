@@ -16,7 +16,7 @@ use super_orchestrator::{
 use tokio::{fs, time::sleep};
 use tracing::info;
 
-const BASE_CONTAINER: &str = "fedora:40";
+const BASE_CONTAINER: &str = "fedora:41";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
@@ -101,6 +101,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     }
 
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
+    // display all of the build steps
+    cn.debug_all(true);
     cn.add_container(
         Container::new("test_runner", Dockerfile::contents(test_dockerfile()))
             .external_entrypoint(entrypoint, ["--entry-name", "test_runner"])

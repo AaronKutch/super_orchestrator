@@ -22,7 +22,7 @@ use super_orchestrator::{
 use tokio::time::sleep;
 use tracing::info;
 
-const BASE_CONTAINER: &str = "alpine:3.20";
+const BASE_CONTAINER: &str = "alpine:3.21";
 // need this for Alpine
 const TARGET: &str = "x86_64-unknown-linux-musl";
 
@@ -207,6 +207,9 @@ async fn container_runner(args: &Args) -> Result<()> {
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
     cn.add_common_entrypoint_args(["--uuid", &uuid]);
+
+    // debug the build step
+    cn.debug_build(true);
 
     // Whenever using the docker entrypoint pattern or similar setup where there is
     // a dedicated container runner function that is just calling

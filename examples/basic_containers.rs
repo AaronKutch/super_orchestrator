@@ -121,5 +121,7 @@ async fn main() -> Result<()> {
     // always run this at the end, ensuring the containers are logically terminated
     cn.terminate_all().await;
 
+    info!("test completed successfully");
+
     Ok(())
 }

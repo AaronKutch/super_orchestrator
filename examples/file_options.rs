@@ -72,8 +72,7 @@ async fn main() -> Result<()> {
         e.contains(r#"FileOptions::write_str
 FileOptions::acquire_file()
 FileOptions { path: "./nonexistent/example.log", options: Write(WriteOptions { create: true, append: false }) }.preacquire() could not acquire directory
-acquire_dir_path(dir_path: "./nonexistent")
-BoxedError"#)
+acquire_dir_path(dir_path: "./nonexistent")"#)
     );
 
     let e = FileOptions::read_to_string("./logs/nonexistent.log")
