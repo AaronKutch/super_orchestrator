@@ -135,11 +135,11 @@ where
 ///                 if let Some(addr) = addrs.next() {
 ///                     Ok(addr)
 ///                 } else {
-///                     Err(Error::from("empty addrs"))
+///                     Err(Error::from_err("empty addrs"))
 ///                 }
 ///             }
-///             Err(e) => Err(Error::from(e))
-///                 .stack_err(|| format!("wait_for_ok_lookup_host(.., host: {host})")),
+///             Err(e) => Err(Error::from_err(e))
+///                 .stack_err(format!("wait_for_ok_lookup_host(.., host: {host})")),
 ///         }
 ///     }
 ///     wait_for_ok(num_retries, delay, || f(host)).await
@@ -190,11 +190,8 @@ pub async fn close_file(mut file: File) -> Result<()> {
 /// # Example
 ///
 /// ```no_run
-/// use super_orchestrator::{
-///     acquire_file_path, remove_files_in_dir,
-///     stacked_errors::{ensure, Result},
-///     FileOptions,
-/// };
+/// use stacked_errors::{ensure, Result};
+/// use super_orchestrator::{acquire_file_path, remove_files_in_dir, FileOptions};
 /// async fn ex() -> Result<()> {
 ///     // note: in regular use you would use `.await.stack()?` on the ends
 ///     // to tell what lines are failing
