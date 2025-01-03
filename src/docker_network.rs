@@ -723,7 +723,7 @@ impl ContainerNetwork {
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         let not_root_cause = "ProbablyNotRootCauseError";
-        let error_stack = "Error { stack: [";
+        let error_marker = "Error: ";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
         for (name, state) in self.set.iter() {
@@ -738,11 +738,11 @@ impl ContainerNetwork {
 
                             // check stderr
                             let stderr = comres.stderr_as_utf8_lossy();
-                            if let Some(start) = stderr.rfind(error_stack) {
+                            if let Some(start) = stderr.rfind(error_marker) {
                                 if !stderr.contains(not_root_cause) {
                                     encountered = true;
                                     res = res.add_err_locationless(format!(
-                                        "Error stack from container \"{name}\" stderr:\n{}\n",
+                                        "Error from container \"{name}\" stderr:\n{}\n",
                                         &stderr[start..]
                                     ));
                                 }
@@ -761,11 +761,11 @@ impl ContainerNetwork {
                             // check stdout only if stderr had nothing
                             if !encountered {
                                 let stdout = comres.stdout_as_utf8_lossy();
-                                if let Some(start) = stdout.rfind(error_stack) {
+                                if let Some(start) = stdout.rfind(error_marker) {
                                     if !stdout.contains(not_root_cause) {
                                         encountered = true;
                                         res = res.add_err_locationless(format!(
-                                            "Error stack from container \"{name}\" stdout:\n{}\n",
+                                            "Error from container \"{name}\" stdout:\n{}\n",
                                             &stdout[start..]
                                         ));
                                     }
@@ -785,7 +785,7 @@ impl ContainerNetwork {
                             if (!encountered) && (!comres.successful_or_terminated()) {
                                 res = res.add_err_locationless(format!(
                                     "Error: Container \"{name}\" was unsuccessful but does not \
-                                     seem to have an error stack or panic message\n"
+                                     seem to have an error or panic message\n"
                                 ));
                             }
                         }

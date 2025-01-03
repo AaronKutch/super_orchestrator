@@ -63,13 +63,12 @@ async fn main() -> Result<()> {
     let e = FileOptions::write_str("./nonexistent/example.log", "test")
         .await
         .stack()
-        .unwrap_err()
-        .to_string();
-    debug!("{}", e);
+        .unwrap_err();
+    debug!("{:?}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
-        e.contains(r#"FileOptions::write_str
+        e.to_string().contains(r#"FileOptions::write_str
 FileOptions::acquire_file()
 FileOptions { path: "./nonexistent/example.log", options: Write(WriteOptions { create: true, append: false }) }.preacquire() could not acquire directory
 acquire_dir_path(dir_path: "./nonexistent")"#)
@@ -78,13 +77,12 @@ acquire_dir_path(dir_path: "./nonexistent")"#)
     let e = FileOptions::read_to_string("./logs/nonexistent.log")
         .await
         .stack()
-        .unwrap_err()
-        .to_string();
-    debug!("{}", e);
+        .unwrap_err();
+    debug!("{:?}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
-        e.contains(r#"FileOptions::read_to_string
+        e.to_string().contains(r#"FileOptions::read_to_string
 FileOptions::acquire_file()
 FileOptions { path: "./logs/nonexistent.log", options: Read }.precheck() could not acquire path to combined directory and file name
 acquire_file_path(file_path:"#)
