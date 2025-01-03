@@ -159,7 +159,7 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
                     return Err(e.add_err_locationless(TimeoutError {})).stack_err_locationless(
                         format!(
                             "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) timeout, \
-                             last error stack was"
+                             last error stack was:"
                         ),
                     )
                 }
