@@ -21,16 +21,17 @@ postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 sha3 = "0.10"
-stacked_errors = "0.6"
+#stacked_errors = "0.6"
 #stacked_errors = { git = "https://github.com/AaronKutch/stacked_errors", rev = "3f216ecfaad63f58b9ca9e44c9b5814f4637c21b" }
-#stacked_errors = { path = "../stacked_errors" }
+stacked_errors = { path = "../stacked_errors" }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
 
 [dev-dependencies]
 clap = { version = "4", features = ["derive", "env"] }
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 default = []

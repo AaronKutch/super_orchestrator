@@ -10,7 +10,7 @@ use std::{
 };
 
 pub(crate) use color_cycle::next_terminal_color;
-use stacked_errors::{Error, ErrorKind, Result, StackableErr};
+use stacked_errors::{bail_locationless, Result, StackableErr, TimeoutError};
 use tokio::{
     fs::{read_dir, remove_file, File},
     io::AsyncWriteExt,
@@ -27,7 +27,7 @@ pub fn ctrlc_init() -> Result<()> {
     ctrlc::set_handler(move || {
         CTRLC_ISSUED.store(true, Ordering::SeqCst);
     })
-    .stack_err(|| "ctrlc_init() -> `ctrlc::set_handler` failed")?;
+    .stack_err("ctrlc_init() -> `ctrlc::set_handler` failed")?;
     Ok(())
 }
 
@@ -75,7 +75,7 @@ where
         }
     }
     let comres = command
-        .stack_err_locationless(|| "super_orchestrator::sh was called with an empty iterator")?
+        .stack_err_locationless("super_orchestrator::sh was called with an empty iterator")?
         .debug(true)
         .run_to_completion()
         .await?;
@@ -83,7 +83,7 @@ where
     comres
         .stdout_as_utf8()
         .map(|s| s.to_owned())
-        .stack_err_locationless(|| "super_orchestrator::sh -> `Command` output was not UTF-8")
+        .stack_err_locationless("super_orchestrator::sh -> `Command` output was not UTF-8")
 }
 
 /// [sh] but without debug mode
@@ -101,14 +101,14 @@ where
         }
     }
     let comres = command
-        .stack_err_locationless(|| "sh_no_debug was called with an empty iterator")?
+        .stack_err_locationless("sh_no_debug was called with an empty iterator")?
         .run_to_completion()
         .await?;
     comres.assert_success()?;
     comres
         .stdout_as_utf8()
         .map(|s| s.to_owned())
-        .stack_err_locationless(|| "sh_no_debug -> `Command` output was not UTF-8")
+        .stack_err_locationless("sh_no_debug -> `Command` output was not UTF-8")
 }
 
 /// Repeatedly polls `f` until it returns an `Ok` which is returned, or
@@ -156,13 +156,12 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
             Ok(o) => return Ok(o),
             Err(e) => {
                 if i == 0 {
-                    return Err(e.add_kind_locationless(ErrorKind::TimeoutError))
-                        .stack_err_locationless(|| {
-                            format!(
-                                "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) \
-                                 timeout, last error stack was"
-                            )
-                        })
+                    return Err(e.add_err_locationless(TimeoutError {})).stack_err_locationless(
+                        format!(
+                            "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) timeout, \
+                             last error stack was"
+                        ),
+                    )
                 }
                 i -= 1;
             }
@@ -177,8 +176,8 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
 /// make sure the file has actually been completely written to the filesystem
 /// and closed before the end of this function.
 pub async fn close_file(mut file: File) -> Result<()> {
-    file.flush().await?;
-    file.sync_all().await?;
+    file.flush().await.stack()?;
+    file.sync_all().await.stack()?;
     Ok(())
 }
 
@@ -277,13 +276,13 @@ where
     for (i, s) in ends_with.iter().enumerate() {
         let mut s = s.as_str();
         if s.is_empty() {
-            return Err(Error::from_kind_locationless(format!(
+            bail_locationless!(
                 "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} is \
                  empty",
                 dir.as_ref(),
                 ends_with,
                 i
-            )))
+            )
         }
         let is_extension = s.starts_with('.');
         if is_extension {
@@ -291,7 +290,7 @@ where
         }
         let path = PathBuf::from(s);
         let mut iter = path.components();
-        let component = iter.next().stack_err_locationless(|| {
+        let component = iter.next().stack_err_with_locationless(|| {
             format!(
                 "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} has no \
                  component",
@@ -301,13 +300,13 @@ where
             )
         })?;
         if iter.next().is_some() {
-            return Err(Error::from_kind_locationless(format!(
+            bail_locationless!(
                 "remove_files_in_dir(dir: {:?}, ends_with: {:?}) -> `ends_with` element {} has \
                  more than one component",
                 dir.as_ref(),
                 ends_with,
                 i
-            )))
+            )
         }
         if is_extension {
             extension_set.insert(component.as_os_str().to_owned());
@@ -318,7 +317,7 @@ where
 
     let dir_path_buf = acquire_dir_path(dir.as_ref())
         .await
-        .stack_err_locationless(|| {
+        .stack_err_with_locationless(|| {
             format!(
                 "remove_files_in_dir(dir: {:?}, ends_with: {:?})",
                 dir.as_ref(),
@@ -331,11 +330,11 @@ where
     // TODO should we be doing folder locking or something?
     let mut iter = read_dir(dir_path_buf.clone())
         .await
-        .stack_err(|| unexpected_error)?;
+        .stack_err(unexpected_error)?;
     loop {
-        let entry = iter.next_entry().await.stack_err(|| unexpected_error)?;
+        let entry = iter.next_entry().await.stack_err(unexpected_error)?;
         if let Some(entry) = entry {
-            let file_type = entry.file_type().await.stack_err(|| unexpected_error)?;
+            let file_type = entry.file_type().await.stack_err(unexpected_error)?;
             if file_type.is_file() {
                 let file_only_path = PathBuf::from(entry.file_name());
                 // check against the whole file name
@@ -367,7 +366,7 @@ where
                 if rm_file {
                     let mut combined = dir_path_buf.clone();
                     combined.push(file_only_path);
-                    remove_file(combined).await.stack_err(|| unexpected_error)?;
+                    remove_file(combined).await.stack_err(unexpected_error)?;
                 }
             }
         } else {

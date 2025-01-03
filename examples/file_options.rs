@@ -1,19 +1,17 @@
 use std::path::PathBuf;
 
-use stacked_errors::{ensure, ensure_eq, StackableErr};
-use super_orchestrator::{
-    close_file, remove_files_in_dir, stacked_errors::Result, FileOptions, ReadOrWrite,
-};
+use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
+use super_orchestrator::{close_file, remove_files_in_dir, FileOptions, ReadOrWrite};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 #[tokio::main]
 #[rustfmt::skip]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().with_env_filter("debug").init();
 
     remove_files_in_dir("./logs/", &["example.log"])
         .await
@@ -67,7 +65,7 @@ async fn main() -> Result<()> {
         .stack()
         .unwrap_err()
         .to_string();
-    println!("{}", e);
+    debug!("{}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
@@ -83,7 +81,7 @@ BoxedError"#)
         .stack()
         .unwrap_err()
         .to_string();
-    println!("{}", e);
+    debug!("{}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
@@ -99,13 +97,13 @@ acquire_file_path(file_path:"#)
         .preacquire()
         .await
         .stack()?;
-    println!("checked path: {file_path:?}");
+    debug!("checked path: {file_path:?}");
 
     let file: File = FileOptions::read("./logs/example.log")
         .acquire_file()
         .await
         .stack()?;
-    println!("file: {file:?}");
+    debug!("file: {file:?}");
 
     let mut file = FileOptions::new("./logs/example.log", ReadOrWrite::write(false, true))
         .acquire_file()

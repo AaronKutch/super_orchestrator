@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{collections::VecDeque, fmt::Debug, process::Stdio, sync::Arc, time::Duration};
 
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{bail_locationless, Error, Result, StackableErr};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -289,9 +289,11 @@ pub(crate) async fn command_runner<C: Into<Stdio>>(
         cmd.env_clear();
     }
     if let Some(ref cwd) = this.cwd {
-        let cwd = acquire_dir_path(cwd).await.stack_err_locationless(|| {
-            format!("{this:?}.run() -> failed to acquire current working directory")
-        })?;
+        let cwd = acquire_dir_path(cwd)
+            .await
+            .stack_err_with_locationless(|| {
+                format!("{this:?}.run() -> failed to acquire current working directory")
+            })?;
         cmd.current_dir(cwd);
     }
     // do as much as possible before spawning the process
@@ -330,7 +332,9 @@ pub(crate) async fn command_runner<C: Into<Stdio>>(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .stack_err_locationless(|| format!("{this:?}.run() -> failed to spawn child process"))?;
+        .stack_err_with_locationless(|| {
+            format!("{this:?}.run() -> failed to spawn child process")
+        })?;
     let child_id = child.id().unwrap();
     let terminal_color = if this.stdout_debug || this.stderr_debug {
         next_terminal_color()
@@ -413,9 +417,10 @@ impl CommandRunner {
     /// to take effect. This does not set `self.result`.
     pub fn start_terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process.start_kill().stack_err(|| {
-                "CommandRunner::start_terminate -> running `start_kill` on the child process failed"
-            })
+            child_process.start_kill().stack_err(
+                "CommandRunner::start_terminate -> running `start_kill` on the child process \
+                 failed",
+            )
         } else {
             Ok(())
         }
@@ -429,9 +434,9 @@ impl CommandRunner {
     /// `self.result` is set, and `self.result.status` is set to `None`.
     pub async fn terminate(&mut self) -> Result<()> {
         if let Some(child_process) = self.child_process.as_mut() {
-            child_process.kill().await.stack_err(|| {
-                "CommandRunner::terminate -> running `kill` on the child process failed"
-            })?;
+            child_process.kill().await.stack_err(
+                "CommandRunner::terminate -> running `kill` on the child process failed",
+            )?;
             drop(self.child_process.take().unwrap());
             let stdout = self.stdout_record.lock().await.iter().cloned().collect();
             let stderr = self.stderr_record.lock().await.iter().cloned().collect();
@@ -443,9 +448,9 @@ impl CommandRunner {
             });
             Ok(())
         } else {
-            Err(Error::from_kind_locationless(
-                "CommandRunner::terminate -> a termination method has already been called",
-            ))
+            bail_locationless!(
+                "CommandRunner::terminate -> a termination method has already been called"
+            )
         }
     }
 
@@ -467,13 +472,13 @@ impl CommandRunner {
             nix::unistd::Pid::from_raw(
                 i32::try_from(
                     self.pid()
-                        .stack_err(|| "CommandRunner::send_unix_signal -> PID overflow")?,
+                        .stack_err("CommandRunner::send_unix_signal -> PID overflow")?,
                 )
-                .stack_err(|| "CommandRunner::send_unix_signal -> PID creation fail")?,
+                .stack_err("CommandRunner::send_unix_signal -> PID creation fail")?,
             ),
             unix_signal,
         )
-        .stack_err(|| "CommandRunner::send_unix_signal -> `nix::sys::signal::kill` failed")?;
+        .stack_err("CommandRunner::send_unix_signal -> `nix::sys::signal::kill` failed")?;
         Ok(())
     }
 
@@ -493,16 +498,16 @@ impl CommandRunner {
         let output = self
             .child_process
             .take()
-            .stack_err_locationless(|| {
-                "`CommandRunner` has already had some termination method called"
-            })?
+            .stack_err_locationless(
+                "`CommandRunner` has already had some termination method called",
+            )?
             .wait_with_output()
             .await
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!("{self:?}.wait_with_output() -> failed when waiting on child process")
             })?;
         while let Some(handle) = self.handles.pop() {
-            handle.await.stack_err_locationless(|| {
+            handle.await.stack_err_with_locationless(|| {
                 format!("{self:?}.wait_with_output() -> `Command` task panicked")
             })?;
         }
@@ -542,10 +547,10 @@ impl CommandRunner {
             match self
                 .child_process
                 .as_mut()
-                .stack_err_locationless(|| {
+                .stack_err_locationless(
                     "CommandRunner::wait_with_timeout -> some termination method has already been \
-                     called"
-                })?
+                     called",
+                )?
                 .try_wait()
             {
                 Ok(o) => {
@@ -554,10 +559,10 @@ impl CommandRunner {
                     }
                 }
                 Err(e) => {
-                    return Err(Error::from_kind_locationless(e)).stack_err_locationless(|| {
+                    return Err(Error::from_err_locationless(e)).stack_err_locationless(
                         "CommandRunner::wait_with_timeout failed at `try_wait` before reaching \
-                         timeout or completed command"
-                    })
+                         timeout or completed command",
+                    )
                 }
             }
             if elapsed > duration {

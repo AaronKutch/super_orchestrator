@@ -1,7 +1,7 @@
 use std::{any::type_name, cmp::max, net::SocketAddr, time::Duration};
 
 use serde::{de::DeserializeOwned, Serialize};
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{bail, Error, Result, StackableErr};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{lookup_host, TcpListener, TcpStream},
@@ -24,7 +24,7 @@ pub async fn wait_for_ok_lookup_host(
     async fn f(host: &str) -> Result<Vec<SocketAddr>> {
         match lookup_host(host).await {
             Ok(addrs) => Ok(addrs.into_iter().collect()),
-            Err(e) => Err(e).stack_err(|| format!("wait_for_ok_lookup_host(.., host: {host})")),
+            Err(e) => Err(e).stack_err(format!("wait_for_ok_lookup_host(.., host: {host})")),
         }
     }
     wait_for_ok(num_retries, delay, || f(host)).await
@@ -39,9 +39,9 @@ pub async fn wait_for_ok_tcp_stream_connect(
     async fn f(socket_addr: SocketAddr) -> Result<TcpStream> {
         match TcpStream::connect(socket_addr).await {
             Ok(stream) => Ok(stream),
-            Err(e) => Err(e).stack_err(|| {
-                format!("wait_for_ok_tcp_stream_connect(.., socket_addr: {socket_addr})")
-            }),
+            Err(e) => Err(e).stack_err(format!(
+                "wait_for_ok_tcp_stream_connect(.., socket_addr: {socket_addr})"
+            )),
         }
     }
     wait_for_ok(num_retries, delay, || f(socket_addr)).await
@@ -68,9 +68,10 @@ impl NetMessenger {
     /// `timeout` is reached first.
     pub async fn listen(host: &str, timeout: Duration) -> Result<Self> {
         let socket_addr = lookup_host(host)
-            .await?
+            .await
+            .stack()?
             .next()
-            .stack_err(|| "NetMessenger::listen -> no socket addresses from lookup_host(host)")?;
+            .stack_err("NetMessenger::listen -> no socket addresses from lookup_host(host)")?;
         let listener = TcpListener::bind(socket_addr).await.stack()?;
         // we use the cancel safety of `tokio::net::TcpListener::accept
         select! {
@@ -90,10 +91,10 @@ impl NetMessenger {
         let socket_addrs = wait_for_ok_lookup_host(num_retries, delay, host)
             .await
             .stack()?;
-        let socket_addr = *socket_addrs.first().stack_err(|| {
+        let socket_addr = *socket_addrs.first().stack_err(
             "NetMessenger::connect -> wait_for_ok_lookup_host was ok but returned no socket \
-             addresses"
-        })?;
+             addresses",
+        )?;
         let stream = wait_for_ok_tcp_stream_connect(num_retries, delay, socket_addr)
             .await
             .stack()?;
@@ -133,8 +134,8 @@ impl NetMessenger {
                     continue
                 }
                 Err(e) => {
-                    return Err(Error::box_from(e))
-                        .stack_err_locationless(|| "failed to serialize message")?
+                    return Err(Error::from_err(e))
+                        .stack_err_locationless("failed to serialize message")?
                 }
             }
             break
@@ -143,16 +144,16 @@ impl NetMessenger {
         let id = type_hash::<T>();
         if let Err(e) = self.stream.write_all(&id).await {
             return Err(Error::probably_not_root_cause()
-                .add_kind_locationless(format!(
+                .add_err_locationless(format!(
                     "NetMessenger::send::<{}>::() could not write_all, this may be because the \
                      other side was abruptly terminated",
                     type_name::<T>()
                 ))
-                .add_kind_locationless(e))
+                .add_err_locationless(e))
         }
         // later errors are probably real network errors
         self.stream
-            .write_u64_le(u64::try_from(self.buf.len())?)
+            .write_u64_le(u64::try_from(self.buf.len()).stack()?)
             .await
             .stack()?;
         self.stream.write_all(&self.buf).await.stack()?;
@@ -172,21 +173,21 @@ impl NetMessenger {
         let mut actual_id = [0u8; 16];
         if let Err(e) = self.stream.read_exact(&mut actual_id).await {
             return Err(Error::probably_not_root_cause()
-                .add_kind_locationless(format!(
+                .add_err_locationless(format!(
                     "NetMessenger::recv::<{}>::() could not read_exact, this may be because the \
                      other side was abruptly terminated",
                     type_name::<T>()
                 ))
-                .add_kind_locationless(e))
+                .add_err_locationless(e))
         }
         // later errors are probably real network errors
         if expected_id != actual_id {
-            return Err(Error::from(format!(
+            bail!(
                 "NetMessenger::recv() -> incoming type did not match expected type ({})",
                 type_name::<T>()
-            )))
+            )
         }
-        let data_len = usize::try_from(self.stream.read_u64_le().await.stack()?)?;
+        let data_len = usize::try_from(self.stream.read_u64_le().await.stack()?).stack()?;
         if data_len > self.buf.len() {
             self.buf.resize_with(data_len, || 0);
         }
@@ -195,6 +196,6 @@ impl NetMessenger {
             .await
             .stack()?;
         postcard::from_bytes(&self.buf[0..data_len])
-            .stack_err(|| "NetMessenger::recv() -> failed to deserialize message")
+            .stack_err("NetMessenger::recv() -> failed to deserialize message")
     }
 }

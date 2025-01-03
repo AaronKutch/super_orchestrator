@@ -1,10 +1,10 @@
 use std::{net::IpAddr, process::Stdio, time::Duration};
 
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{bail, stacked_get, Result, StackableErr};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::{ctrlc_issued_reset, sh, stacked_get, wait_for_ok, Command};
+use crate::{ctrlc_issued_reset, sh, wait_for_ok, Command};
 
 const STD_DELAY: Duration = Duration::from_millis(300);
 const IP_RETRIES: u64 = 10;
@@ -22,10 +22,10 @@ pub async fn wait_get_ip_addr(
             .arg(container_id)
             .run_to_completion()
             .await
-            .stack_err(|| "could not run `docker inspect`")?;
+            .stack_err("could not run `docker inspect`")?;
         comres
             .assert_success()
-            .stack_err(|| "get_ip_addr -> `docker inspect` was not successful")?;
+            .stack_err("get_ip_addr -> `docker inspect` was not successful")?;
         //println!("{}", comres.stdout_as_utf8().stack()?);
         let v: serde_json::Value =
             serde_json::from_str(comres.stdout_as_utf8().stack()?).stack()?;
@@ -35,14 +35,14 @@ pub async fn wait_get_ip_addr(
         let network = networks.iter().next().stack()?.1;
         let addr = stacked_get!(network["IPAddress"]).as_str().stack()?;
         if addr.is_empty() {
-            return Err(Error::from("IP address has not been assigned yet"))
+            bail!("IP address has not been assigned yet")
         }
         let ip_addr: std::result::Result<IpAddr, _> = addr.parse();
         ip_addr.stack()
     }
     wait_for_ok(num_retries, delay, || f(container_id))
         .await
-        .stack_err(|| format!("wait_get_ip_addr(container_id: {container_id})"))
+        .stack_err_with(|| format!("wait_get_ip_addr(container_id: {container_id})"))
 }
 
 /// Intended to be called from the main() of a standalone binary, or run from

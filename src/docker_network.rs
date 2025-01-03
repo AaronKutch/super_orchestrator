@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{bail_locationless, Error, Result, StackableErr};
 use tokio::time::{sleep, Instant};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -79,7 +79,7 @@ impl ContainerState {
                         self.run_state = RunState::PostActive(Ok(comres));
                         err
                     } else {
-                        self.run_state = RunState::PostActive(Err(Error::from_kind_locationless(
+                        self.run_state = RunState::PostActive(Err(Error::from_err_locationless(
                             "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
                              container, did not find a command result for some reason",
                         )));
@@ -87,7 +87,7 @@ impl ContainerState {
                     }
                 }
                 Err(e) => {
-                    self.run_state = RunState::PostActive(Err(e.add_kind_locationless(
+                    self.run_state = RunState::PostActive(Err(e.add_err_locationless(
                         "ContainerNetwork -> when terminating a `CommandRunner` attached to a \
                          container, encountered an unexpected error",
                     )));
@@ -288,21 +288,21 @@ impl ContainerNetwork {
         if self.dockerfile_write_dir.is_none()
             && matches!(container.dockerfile, Dockerfile::Contents(_))
         {
-            return Err(Error::from_kind_locationless(
+            bail_locationless!(
                 "ContainerNetwork::add_container -> a container is built with \
                  `Dockerfile::Contents`, but `dockerfile_write_dir` is unset",
-            ))
+            )
         }
         match self.set.entry(container.name.clone()) {
             Entry::Vacant(v) => {
                 v.insert(ContainerState::new(container));
             }
             Entry::Occupied(_) => {
-                return Err(Error::from_kind_locationless(format!(
+                bail_locationless!(
                     "ContainerNetwork::add_container -> two containers were supplied with the \
                      same name \"{}\"",
                     container.name
-                )))
+                )
             }
         }
         Ok(self)
@@ -324,9 +324,9 @@ impl ContainerNetwork {
                 _ => Ok(None),
             }
         } else {
-            Err(Error::from(format!(
+            bail_locationless!(
                 "ContainerNetwork::remove_name -> could not find name \"{name}\" in the network"
-            )))
+            )
         }
     }
 
@@ -473,22 +473,22 @@ impl ContainerNetwork {
         let mut set = BTreeSet::new();
         for name in names {
             if set.contains(name) {
-                return Err(Error::from_kind_locationless(format!(
+                bail_locationless!(
                     "ContainerNetwork::run -> two containers were supplied with the same name \
                      \"{name}\""
-                )))
+                )
             }
             if let Some(state) = self.set.get(name) {
                 if state.is_active() {
-                    return Err(Error::from_kind_locationless(format!(
+                    bail_locationless!(
                         "ContainerNetwork::run -> name \"{name}\" is already an active container"
-                    )))
+                    )
                 }
             } else {
-                return Err(Error::from_kind_locationless(format!(
+                bail_locationless!(
                     "ContainerNetwork::run -> argument name \"{name}\" is not contained in the \
                      network"
-                )))
+                )
             }
             set.insert(name.to_string());
         }
@@ -501,9 +501,10 @@ impl ContainerNetwork {
             &self.log_dir,
             format!("container_network_{}.log", self.network_name()),
         );
-        log_file.preacquire().await.stack_err_locationless(|| {
-            "ContainerNetwork::run -> could not acquire logs directory"
-        })?;
+        log_file
+            .preacquire()
+            .await
+            .stack_err_locationless("ContainerNetwork::run -> could not acquire logs directory")?;
 
         for name in names {
             let container = &mut self.set.get_mut(name).unwrap().container;
@@ -515,7 +516,7 @@ impl ContainerNetwork {
                         FileOptions::write(file_path)
                             .preacquire()
                             .await
-                            .stack_err_locationless(|| {
+                            .stack_err_with_locationless(|| {
                                 format!(
                                     "ContainerNetwork::run -> could not acquire the explicitly \
                                      set `dockerfile_write_file` on container with name \"{name}\""
@@ -525,24 +526,24 @@ impl ContainerNetwork {
                         let path = FileOptions::write2(dir, format!("{name}.tmp.dockerfile"))
                             .preacquire()
                             .await
-                            .stack_err_locationless(|| {
+                            .stack_err_locationless(
                                 "ContainerNetwork::run -> could not acquire the \
-                                 `dockerfile_write_dir`"
-                            })?;
+                                 `dockerfile_write_dir`",
+                            )?;
                         container.dockerfile_write_file = Some(
                             path.to_str()
-                                .stack_err_locationless(|| {
+                                .stack_err_locationless(
                                     "ContainerNetwork::run -> could not acquire the \
-                                     `dockerfile_write_dir` as a UTF8 path"
-                                })?
+                                     `dockerfile_write_dir` as a UTF8 path",
+                                )?
                                 .to_owned(),
                         );
                     } else {
-                        return Err(Error::from_kind_locationless(format!(
+                        bail_locationless!(
                             "ContainerNetwork::run -> the `dockerfile_write_dir` on the \
                              `ContainerNetwork` or the `dockerfile_write_file` on container with \
                              name \"{name}\" needs to be set"
-                        )));
+                        );
                     }
                 }
             }
@@ -550,7 +551,7 @@ impl ContainerNetwork {
 
         for name in names {
             let container = &mut self.set.get_mut(name).unwrap().container;
-            container.precheck().await.stack_err_locationless(|| {
+            container.precheck().await.stack_err_with_locationless(|| {
                 format!("ContainerNetwork::run -> when prechecking container {container:#?}")
             })?;
         }
@@ -593,7 +594,7 @@ impl ContainerNetwork {
                 .container()
                 .build(self.debug_build)
                 .await
-                .stack_err_locationless(|| {
+                .stack_err_with_locationless(|| {
                     format!("ContainerNetwork::run when building the container for name \"{name}\"")
                 })?;
         }
@@ -617,13 +618,13 @@ impl ContainerNetwork {
                 .arg(self.network_name())
                 .run_to_completion()
                 .await
-                .stack_err_locationless(|| {
-                    "ContainerNetwork::run -> when running network creation command"
-                })?;
+                .stack_err_locationless(
+                    "ContainerNetwork::run -> when running network creation command",
+                )?;
             // TODO we can get the network id
             comres
                 .assert_success()
-                .stack_err_locationless(|| "ContainerNetwork::run -> failed to create network")?;
+                .stack_err_locationless("ContainerNetwork::run -> failed to create network")?;
             self.network_active = true;
         }
 
@@ -635,7 +636,7 @@ impl ContainerNetwork {
                 .container()
                 .create(network_name, None, self.debug_create)
                 .await
-                .stack_err_locationless(|| {
+                .stack_err_with_locationless(|| {
                     format!("ContainerNetwork::run when creating the container for name \"{name}\"")
                 }) {
                 Ok(docker_id) => {
@@ -646,7 +647,7 @@ impl ContainerNetwork {
                     for name in &names[..i] {
                         let _ = self.set.get_mut(name).unwrap().terminate().await;
                     }
-                    e.stack_err_locationless(|| {
+                    e.stack_err_with_locationless(|| {
                         format!(
                             "ContainerNetwork::run when creating the container for name \"{name}\""
                         )
@@ -682,7 +683,7 @@ impl ContainerNetwork {
                     stderr_log.as_ref(),
                 )
                 .await
-                .stack_err_locationless(|| {
+                .stack_err_with_locationless(|| {
                     format!("ContainerNetwork::run when starting the container for name \"{name}\"")
                 }) {
                 Ok(runner) => {
@@ -714,7 +715,7 @@ impl ContainerNetwork {
         }
         self.run(&v)
             .await
-            .stack_err_locationless(|| "ContainerNetwork::run_all")
+            .stack_err_locationless("ContainerNetwork::run_all")
     }
 
     /// Looks through the results and includes the last "Error: Error { stack:
@@ -740,7 +741,7 @@ impl ContainerNetwork {
                             if let Some(start) = stderr.rfind(error_stack) {
                                 if !stderr.contains(not_root_cause) {
                                     encountered = true;
-                                    res = res.add_kind_locationless(format!(
+                                    res = res.add_err_locationless(format!(
                                         "Error stack from container \"{name}\" stderr:\n{}\n",
                                         &stderr[start..]
                                     ));
@@ -750,7 +751,7 @@ impl ContainerNetwork {
                             if let Some(i) = stderr.rfind(panicked_at) {
                                 if let Some(i) = stderr[0..i].rfind("thread") {
                                     encountered = true;
-                                    res = res.add_kind_locationless(format!(
+                                    res = res.add_err_locationless(format!(
                                         "Panic message from container \"{name}\" stderr:\n{}\n",
                                         &stderr[i..]
                                     ));
@@ -763,7 +764,7 @@ impl ContainerNetwork {
                                 if let Some(start) = stdout.rfind(error_stack) {
                                     if !stdout.contains(not_root_cause) {
                                         encountered = true;
-                                        res = res.add_kind_locationless(format!(
+                                        res = res.add_err_locationless(format!(
                                             "Error stack from container \"{name}\" stdout:\n{}\n",
                                             &stdout[start..]
                                         ));
@@ -773,7 +774,7 @@ impl ContainerNetwork {
                                 if let Some(i) = stdout.rfind(panicked_at) {
                                     if let Some(i) = stdout[0..i].rfind("thread") {
                                         encountered = true;
-                                        res = res.add_kind_locationless(format!(
+                                        res = res.add_err_locationless(format!(
                                             "Panic message from container \"{name}\" stdout:\n{}\n",
                                             &stdout[i..]
                                         ));
@@ -782,7 +783,7 @@ impl ContainerNetwork {
                             }
 
                             if (!encountered) && (!comres.successful_or_terminated()) {
-                                res = res.add_kind_locationless(format!(
+                                res = res.add_err_locationless(format!(
                                     "Error: Container \"{name}\" was unsuccessful but does not \
                                      seem to have an error stack or panic message\n"
                                 ));
@@ -790,7 +791,7 @@ impl ContainerNetwork {
                         }
                     }
                     Err(e) => {
-                        res = res.add_kind_locationless(format!(
+                        res = res.add_err_locationless(format!(
                             "Error: The internal handling of Container \"{name}\" produced this \
                              error:\n {e:?}"
                         ));
@@ -853,16 +854,16 @@ impl ContainerNetwork {
         for name in names.iter() {
             if let Some(state) = self.set.get(name) {
                 if !state.is_active() {
-                    return Err(Error::from(format!(
+                    bail_locationless!(
                         "ContainerNetwork::wait_with_timeout -> name \"{name}\" is already \
                          inactive"
-                    )));
+                    );
                 }
             } else {
-                return Err(Error::from(format!(
+                bail_locationless!(
                     "ContainerNetwork::wait_with_timeout -> name \"{name}\" not found in the \
                      network"
-                )));
+                );
             }
         }
 
@@ -886,9 +887,9 @@ impl ContainerNetwork {
                 // most of the time, a terminating runner will cause a stop before this, but
                 // still check
                 self.terminate_all().await;
-                return Err(Error::from_kind_locationless(
+                bail_locationless!(
                     "ContainerNetwork::wait_with_timeout terminating because of `CTRLC_ISSUED`",
-                ))
+                )
             }
             if target_names.is_empty() {
                 break
@@ -909,7 +910,7 @@ impl ContainerNetwork {
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
                         }
-                        return Err(Error::timeout().add_kind_locationless(format!(
+                        return Err(Error::timeout().add_err_locationless(format!(
                             "ContainerNetwork::wait_with_timeout timeout waiting for container \
                              names {target_names:?} to complete"
                         )))
@@ -932,7 +933,7 @@ impl ContainerNetwork {
                                 err
                             } else {
                                 state.run_state =
-                                    RunState::PostActive(Err(Error::from_kind_locationless(
+                                    RunState::PostActive(Err(Error::from_err_locationless(
                                         "ContainerNetwork::wait_with_timeout -> when runner was \
                                          done, did not find a command result for some reason",
                                     )));
@@ -944,10 +945,10 @@ impl ContainerNetwork {
                             // ProbablyNotRootCause errors and other things
                             sleep(Duration::from_millis(300)).await;
                             self.terminate_all().await;
-                            return self.error_compilation().stack_err_locationless(|| {
-                                "ContainerNetwork::wait_with_timeout error compilation (check logs \
-                                 for more):\n"
-                            })
+                            return self.error_compilation().stack_err_locationless(
+                                "ContainerNetwork::wait_with_timeout error compilation (check \
+                                 logs for more):\n",
+                            )
                         }
                         let name = names.remove(i);
                         target_names.remove(&name);
@@ -962,14 +963,14 @@ impl ContainerNetwork {
                             }
                             return self
                                 .error_compilation()
-                                .stack_err_locationless(|| {
+                                .stack_err_locationless(
                                     "ContainerNetwork::wait_with_timeout encountered OS-level \
-                                     `CommandRunner` error"
-                                })
-                                .stack_err_locationless(|| {
+                                     `CommandRunner` error",
+                                )
+                                .stack_err_locationless(
                                     "ContainerNetwork::wait_with_timeout error compilation (check \
-                                     logs for more):\n"
-                                })
+                                     logs for more):\n",
+                                )
                         }
                         i += 1;
                     }
@@ -998,7 +999,7 @@ impl ContainerNetwork {
         delay: Duration,
         name: &str,
     ) -> Result<IpAddr> {
-        let state = self.set.get(name).stack_err_locationless(|| {
+        let state = self.set.get(name).stack_err_with_locationless(|| {
             format!(
                 "ContainerNetwork::get_ip_addr(num_retries: {num_retries}, delay: {delay:?}, \
                  name: {name}) -> could not find name in container network"
@@ -1007,7 +1008,7 @@ impl ContainerNetwork {
         let id = state
             .active_container_id
             .as_ref()
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!(
                     "ContainerNetwork::get_ip_addr(num_retries: {num_retries}, delay: {delay:?}, \
                      name: {name}) -> found container, but it was not active"
@@ -1015,7 +1016,7 @@ impl ContainerNetwork {
             })?;
         let ip = wait_get_ip_addr(num_retries, delay, id)
             .await
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!(
                     "ContainerNetwork::get_ip_addr(num_retries: {num_retries}, delay: {delay:?}, \
                      name: {name})"
