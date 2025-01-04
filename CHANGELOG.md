@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.15.0] - TODO
+## [0.15.0] - 2025-01-03
 ### Crate
 - Updated to `stacked_errors` 0.7 which has significantly better debug
 
