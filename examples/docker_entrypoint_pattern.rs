@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use stacked_errors::{ensure_eq, Error, Result, StackableErr};
+use stacked_errors::{bail, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
     ctrlc_init,
     docker::{Container, ContainerNetwork, Dockerfile},
@@ -22,7 +22,7 @@ use super_orchestrator::{
 use tokio::time::sleep;
 use tracing::info;
 
-const BASE_CONTAINER: &str = "alpine:3.20";
+const BASE_CONTAINER: &str = "alpine:3.21";
 // need this for Alpine
 const TARGET: &str = "x86_64-unknown-linux-musl";
 
@@ -80,13 +80,13 @@ async fn main() -> Result<()> {
 
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
-            "container0" => container0_runner(&args).await.stack(),
-            "container1" => container1_runner(&args).await.stack(),
-            "container2" => container2_runner(&args).await.stack(),
-            _ => Err(Error::from(format!("entrypoint \"{s}\" is not recognized"))),
+            "container0" => container0_runner(&args).await,
+            "container1" => container1_runner(&args).await,
+            "container2" => container2_runner(&args).await,
+            _ => bail!("entrypoint \"{s}\" is not recognized"),
         }
     } else {
-        container_runner(&args).await.stack()
+        container_runner(&args).await
     }
 }
 
@@ -207,6 +207,9 @@ async fn container_runner(args: &Args) -> Result<()> {
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
     cn.add_common_entrypoint_args(["--uuid", &uuid]);
+
+    // debug the build step
+    cn.debug_build(true);
 
     // Whenever using the docker entrypoint pattern or similar setup where there is
     // a dedicated container runner function that is just calling

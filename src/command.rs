@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use stacked_errors::{DisplayStr, Error, Result, StackableErr};
+use stacked_errors::{bail_locationless, DisplayStr, Result, StackableErr};
 use tokio::io::AsyncWriteExt;
 
 use crate::{command_runner, CommandRunner, FileOptions};
@@ -372,7 +372,7 @@ impl Command {
     pub async fn run_to_completion(self) -> Result<CommandResult> {
         self.run()
             .await
-            .stack_err_locationless(|| "Command::run_to_completion")?
+            .stack_err_locationless("Command::run_to_completion")?
             .wait_with_output()
             .await
     }
@@ -383,11 +383,11 @@ impl Command {
         let mut runner = self
             .run_with_stdin(Stdio::piped())
             .await
-            .stack_err_locationless(|| "Command::run_with_input_to_completion")?;
+            .stack_err_locationless("Command::run_with_input_to_completion")?;
         let mut stdin = runner.child_process.as_mut().unwrap().stdin.take().unwrap();
-        stdin.write_all(input).await.stack_err_locationless(|| {
-            "Command::run_with_input_to_completion -> failed to write_all to process stdin"
-        })?;
+        stdin.write_all(input).await.stack_err_locationless(
+            "Command::run_with_input_to_completion -> failed to write_all to process stdin",
+        )?;
         // needs to close to actually finish
         drop(stdin);
         runner.wait_with_output().await
@@ -468,14 +468,12 @@ impl CommandResult {
             if status.success() {
                 Ok(())
             } else {
-                Err(Error::from_kind_locationless(format!(
-                    "{self:#?}.assert_success() -> unsuccessful"
-                )))
+                bail_locationless!("{self:#?}.assert_success() -> unsuccessful")
             }
         } else {
-            Err(Error::from_kind_locationless(format!(
+            bail_locationless!(
                 "{self:#?}.assert_success() -> termination was called before completion"
-            )))
+            )
         }
     }
 
@@ -563,14 +561,12 @@ impl CommandResultNoDebug {
             if status.success() {
                 Ok(())
             } else {
-                Err(Error::from_kind_locationless(format!(
-                    "{self:#?}.assert_success() -> unsuccessful"
-                )))
+                bail_locationless!("{self:#?}.assert_success() -> unsuccessful")
             }
         } else {
-            Err(Error::from_kind_locationless(format!(
+            bail_locationless!(
                 "{self:#?}.assert_success() -> termination was called before completion"
-            )))
+            )
         }
     }
 

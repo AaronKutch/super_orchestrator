@@ -118,12 +118,14 @@ impl FileOptions {
         let dir = self
             .path
             .parent()
-            .stack_err_locationless(|| "FileOptions::preacquire() -> empty path")?;
-        let mut path = acquire_dir_path(dir).await.stack_err_locationless(|| {
-            format!("{self:?}.preacquire() could not acquire directory")
-        })?;
+            .stack_err_locationless("FileOptions::preacquire() -> empty path")?;
+        let mut path = acquire_dir_path(dir)
+            .await
+            .stack_err_with_locationless(|| {
+                format!("{self:?}.preacquire() could not acquire directory")
+            })?;
         // we do this always for normalization purposes
-        let file_name = self.path.file_name().stack_err_locationless(|| {
+        let file_name = self.path.file_name().stack_err_with_locationless(|| {
             format!("{self:?}.precheck() could not acquire file name, was only a directory input?")
         })?;
         path.push(file_name);
@@ -135,11 +137,14 @@ impl FileOptions {
                 }
             }
         }
-        acquire_file_path(path).await.stack_err_locationless(|| {
-            format!(
-                "{self:?}.precheck() could not acquire path to combined directory and file name"
-            )
-        })
+        acquire_file_path(path)
+            .await
+            .stack_err_with_locationless(|| {
+                format!(
+                    "{self:?}.precheck() could not acquire path to combined directory and file \
+                     name"
+                )
+            })
     }
 
     /// Acquires a `File`, first running [preacquire](FileOptions::preacquire)
@@ -149,13 +154,13 @@ impl FileOptions {
         let path = self
             .preacquire()
             .await
-            .stack_err_locationless(|| "FileOptions::acquire_file()")?;
+            .stack_err_locationless("FileOptions::acquire_file()")?;
         Ok(match self.options {
             ReadOrWrite::Read => OpenOptions::new()
                 .read(true)
                 .open(path)
                 .await
-                .stack_err_locationless(|| format!("{self:?}.acquire_file()"))?,
+                .stack_err_with_locationless(|| format!("{self:?}.acquire_file()"))?,
             ReadOrWrite::Write(WriteOptions { create, append }) => {
                 if create {
                     OpenOptions::new()
@@ -165,7 +170,7 @@ impl FileOptions {
                         .append(append)
                         .open(path)
                         .await
-                        .stack_err_locationless(|| format!("{self:?}.acquire_file()"))?
+                        .stack_err_with_locationless(|| format!("{self:?}.acquire_file()"))?
                 } else {
                     OpenOptions::new()
                         .write(true)
@@ -173,7 +178,7 @@ impl FileOptions {
                         .append(append)
                         .open(path)
                         .await
-                        .stack_err_locationless(|| format!("{self:?}.acquire_file()"))?
+                        .stack_err_with_locationless(|| format!("{self:?}.acquire_file()"))?
                 }
             }
         })
@@ -185,11 +190,11 @@ impl FileOptions {
         let mut file = Self::read(file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::read_to_string")?;
+            .stack_err_locationless("FileOptions::read_to_string")?;
         let mut s = String::new();
         file.read_to_string(&mut s)
             .await
-            .stack_err_locationless(|| "FileOptions::read_to_string")?;
+            .stack_err_locationless("FileOptions::read_to_string")?;
         Ok(s)
     }
 
@@ -202,11 +207,11 @@ impl FileOptions {
         let mut file = Self::read2(directory, file_name)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::read2_to_string")?;
+            .stack_err_locationless("FileOptions::read2_to_string")?;
         let mut s = String::new();
         file.read_to_string(&mut s)
             .await
-            .stack_err_locationless(|| "FileOptions::read2_to_string")?;
+            .stack_err_locationless("FileOptions::read2_to_string")?;
         Ok(s)
     }
 
@@ -217,13 +222,13 @@ impl FileOptions {
         let mut file = Self::write(file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::write_str")?;
+            .stack_err_locationless("FileOptions::write_str")?;
         file.write_all(s.as_bytes())
             .await
-            .stack_err_locationless(|| "FileOptions::write_str")?;
-        close_file(file).await.stack_err_locationless(|| {
-            "FileOptions::write_str -> unexpected error when closing file"
-        })?;
+            .stack_err_locationless("FileOptions::write_str")?;
+        close_file(file).await.stack_err_locationless(
+            "FileOptions::write_str -> unexpected error when closing file",
+        )?;
         Ok(())
     }
 
@@ -238,13 +243,13 @@ impl FileOptions {
         let mut file = Self::write2(directory, file_name)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::write2_str")?;
+            .stack_err_locationless("FileOptions::write2_str")?;
         file.write_all(s.as_bytes())
             .await
-            .stack_err_locationless(|| "FileOptions::write2_str")?;
-        close_file(file).await.stack_err_locationless(|| {
-            "FileOptions::write2_str -> unexpected error when closing file"
-        })?;
+            .stack_err_locationless("FileOptions::write2_str")?;
+        close_file(file).await.stack_err_locationless(
+            "FileOptions::write2_str -> unexpected error when closing file",
+        )?;
         Ok(())
     }
 
@@ -254,11 +259,11 @@ impl FileOptions {
         let mut file = Self::read(file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::read_to_vec")?;
+            .stack_err_locationless("FileOptions::read_to_vec")?;
         let mut v = vec![];
         file.read_to_end(&mut v)
             .await
-            .stack_err_locationless(|| "FileOptions::read_to_vec")?;
+            .stack_err_locationless("FileOptions::read_to_vec")?;
         Ok(v)
     }
 
@@ -271,11 +276,11 @@ impl FileOptions {
         let mut file = Self::read2(directory, file_name)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::read2_to_vec")?;
+            .stack_err_locationless("FileOptions::read2_to_vec")?;
         let mut v = vec![];
         file.read_to_end(&mut v)
             .await
-            .stack_err_locationless(|| "FileOptions::read2_to_vec")?;
+            .stack_err_locationless("FileOptions::read2_to_vec")?;
         Ok(v)
     }
 
@@ -286,13 +291,13 @@ impl FileOptions {
         let mut file = Self::write(file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::write_bytes")?;
+            .stack_err_locationless("FileOptions::write_bytes")?;
         file.write_all(v.as_ref())
             .await
-            .stack_err_locationless(|| "FileOptions::write_bytes")?;
-        close_file(file).await.stack_err_locationless(|| {
-            "FileOptions::write_bytes -> unexpected error when closing file"
-        })?;
+            .stack_err_locationless("FileOptions::write_bytes")?;
+        close_file(file).await.stack_err_locationless(
+            "FileOptions::write_bytes -> unexpected error when closing file",
+        )?;
         Ok(())
     }
 
@@ -307,13 +312,13 @@ impl FileOptions {
         let mut file = Self::write2(directory, file_name)
             .acquire_file()
             .await
-            .stack_err_locationless(|| "FileOptions::write2_bytes")?;
+            .stack_err_locationless("FileOptions::write2_bytes")?;
         file.write_all(v.as_ref())
             .await
-            .stack_err_locationless(|| "FileOptions::write2_bytes")?;
-        close_file(file).await.stack_err_locationless(|| {
-            "FileOptions::write2_bytes -> unexpected error when closing file"
-        })?;
+            .stack_err_locationless("FileOptions::write2_bytes")?;
+        close_file(file).await.stack_err_locationless(
+            "FileOptions::write2_bytes -> unexpected error when closing file",
+        )?;
         Ok(())
     }
 
@@ -328,7 +333,7 @@ impl FileOptions {
         let src = Self::read(src_file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!(
                     "FileOptions::copy(src_file_path: {src_file_path:?}, dst_file_path: \
                      {dst_file_path:?}) when opening source"
@@ -337,7 +342,7 @@ impl FileOptions {
         let mut dst = Self::write(dst_file_path)
             .acquire_file()
             .await
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!(
                     "FileOptions::copy(src_file_path: {src_file_path:?}, dst_file_path: \
                      {dst_file_path:?}) when opening destination"
@@ -345,7 +350,7 @@ impl FileOptions {
             })?;
         tokio::io::copy_buf(&mut BufReader::new(src), &mut dst)
             .await
-            .stack_err_locationless(|| {
+            .stack_err_with_locationless(|| {
                 format!(
                     "FileOptions::copy(src_file_path: {src_file_path:?}, dst_file_path: \
                      {dst_file_path:?}) when copying"

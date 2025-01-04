@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use stacked_errors::{Error, Result, StackableErr};
+use stacked_errors::{bail_locationless, Error, Result, StackableErr};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -192,9 +192,9 @@ impl Container {
     {
         let binary_path = acquire_file_path(entrypoint_binary.as_ref())
             .await
-            .stack_err_locationless(|| {
-                "Container::external_entrypoint could not acquire the external entrypoint binary"
-            })?;
+            .stack_err_locationless(
+                "Container::external_entrypoint could not acquire the external entrypoint binary",
+            )?;
         let binary_file_name = binary_path
             .file_name()
             .unwrap()
@@ -352,27 +352,26 @@ impl Container {
         cn.debug_build(debug).debug_create(debug);
         let name = self.name.clone();
         cn.add_container(self.allow_unsuccessful(true))
-            .stack_err_locationless(|| {
-                "Container::run when trying to create a `ContainerNetwork`"
-            })?;
+            .stack_err_locationless("Container::run when trying to create a `ContainerNetwork`")?;
 
         // in order to get unsuccesful `CommandResult`s, we do not terminate on failure
         // and need to remember to `terminate_all` before returning other kinds of
         // errors
         cn.run_all()
             .await
-            .stack_err_locationless(|| "Container::run when trying to run a `ContainerNetwork`")?;
+            .stack_err_locationless("Container::run when trying to run a `ContainerNetwork`")?;
         cn.wait_with_timeout_all(true, timeout)
             .await
-            .stack_err_locationless(|| "Container::run when waiting on its `ContainerNetwork`")?;
+            .stack_err_locationless("Container::run when waiting on its `ContainerNetwork`")?;
         cn.terminate_all().await;
 
         cn.remove_container(name)
             .await
             .unwrap()
-            .stack_err_locationless(|| {
-                "Container::run could not get `CommandResult` because of some internal bug or error"
-            })
+            .stack_err_locationless(
+                "Container::run could not get `CommandResult` because of some internal bug or \
+                 error",
+            )
     }
 
     /// Prechecks several things needed to successfully run `self`, and
@@ -385,28 +384,26 @@ impl Container {
         match self.dockerfile {
             Dockerfile::NameTag(_) => (),
             Dockerfile::Path(ref path) => {
-                acquire_file_path(path).await.stack_err_locationless(|| {
-                    "Container::precheck -> could not acquire the path in a `Dockerfile::Path`"
-                })?;
+                acquire_file_path(path).await.stack_err_locationless(
+                    "Container::precheck -> could not acquire the path in a `Dockerfile::Path`",
+                )?;
             }
             Dockerfile::Contents(_) => {
                 if self.dockerfile_write_file.is_none() {
-                    return Err(Error::from_kind_locationless(
+                    bail_locationless!(
                         "Container::precheck -> `Dockerfile::Contents` requires a \
                          `dockerfile_write_dir`, but none was provided",
-                    ));
+                    );
                 }
             }
         }
 
         for (local_volume, _) in &mut self.volumes {
-            let path = acquire_path(&local_volume)
-                .await
-                .stack_err_locationless(|| {
-                    "Container::precheck -> could not acquire_path to local part of volume argument"
-                })?;
+            let path = acquire_path(&local_volume).await.stack_err_locationless(
+                "Container::precheck -> could not acquire_path to local part of volume argument",
+            )?;
             path.to_str()
-                .stack_err_locationless(|| "Container::precheck -> path was not UTF-8")?
+                .stack_err_locationless("Container::precheck -> path was not UTF-8")?
                 .clone_into(local_volume);
         }
 
@@ -422,7 +419,7 @@ impl Container {
         let build_tag = &self
             .build_tag
             .as_ref()
-            .stack_err_locationless(|| "Container::build -> the `build_tag` needs to be set")?;
+            .stack_err_locationless("Container::build -> the `build_tag` needs to be set")?;
         match self.dockerfile {
             Dockerfile::NameTag(ref _name_tag) => {
                 // adds unnecessary time to common case, just catch it at
@@ -465,7 +462,7 @@ impl Container {
                     .run_to_completion()
                     .await?
                     .assert_success()
-                    .stack_err_locationless(|| {
+                    .stack_err_with_locationless(|| {
                         format!("Container::build -> when using the dockerfile at {path:?}")
                     })?;
             }
@@ -496,7 +493,7 @@ impl Container {
                     .run_to_completion()
                     .await?
                     .assert_success()
-                    .stack_err_locationless(|| {
+                    .stack_err_with_locationless(|| {
                         format!(
                             "Container::build -> when using the `Dockerfile::Contents` written to \
                              \"{dockerfile_write_file:?}\":\n{contents}\n"
@@ -567,9 +564,11 @@ impl Container {
             }
             Dockerfile::Path(_) | Dockerfile::Contents(_) => {
                 // use the tag of the build image
-                args.push(self.build_tag.as_ref().stack_err_locationless(|| {
-                    "Container::create -> `build_tag` needs to be set"
-                })?);
+                args.push(
+                    self.build_tag.as_ref().stack_err_locationless(
+                        "Container::create -> `build_tag` needs to be set",
+                    )?,
+                );
             }
         }
 
@@ -599,14 +598,14 @@ impl Container {
                         docker_id.pop();
                         match String::from_utf8(docker_id) {
                             Ok(docker_id) => Ok(docker_id),
-                            Err(e) => Err(Error::from_kind_locationless(e)),
+                            Err(e) => Err(Error::from_err_locationless(e)),
                         }
                     }
                     Err(e) => Err(e),
                 }
             }
             Err(e) => {
-                Err(e).stack_err_locationless(|| "Container::create -> when creating the container")
+                Err(e).stack_err_locationless("Container::create -> when creating the container")
             }
         }
     }
@@ -631,7 +630,7 @@ impl Container {
         let runner = command
             .run()
             .await
-            .stack_err_locationless(|| "Container::start")?;
+            .stack_err_locationless("Container::start")?;
         Ok(runner)
     }
 }

@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
         .wait_get_ip_addr(20, Duration::from_millis(300), "example5")
         .await
         .stack()?;
-    dbg!(&host_ip);
+    info!("{}", &host_ip);
 
     // use port 0 to just detect that the host container exists
     wait_for_ok_lookup_host(2, Duration::from_millis(300), &format!("{host_ip:?}:0"))
@@ -120,6 +120,8 @@ async fn main() -> Result<()> {
     cn.wait_with_timeout_all(true, TIMEOUT).await.stack()?;
     // always run this at the end, ensuring the containers are logically terminated
     cn.terminate_all().await;
+
+    info!("test completed successfully");
 
     Ok(())
 }

@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use stacked_errors::{ensure, ensure_eq, StackableErr};
-use super_orchestrator::{
-    sh, stacked_errors::Result, Command, CommandResult, CommandResultNoDebug, FileOptions,
-};
+use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
+use super_orchestrator::{sh, Command, CommandResult, CommandResultNoDebug, FileOptions};
 use tokio::time::sleep;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -214,6 +213,8 @@ async fn main() -> Result<()> {
         .stack()?;
     comres.assert_success().stack()?;
     ensure_eq!(comres.stdout_as_utf8().unwrap(), "hello\n");
+
+    info!("test completed successfully");
 
     Ok(())
 }

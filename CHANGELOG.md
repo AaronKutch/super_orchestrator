@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.0] - 2025-01-03
+### Crate
+- Updated to `stacked_errors` 0.7 which has significantly better debug
+
+### Changes
+- Moved `stacked_get*` to `stacked_errors`
+- No longer export `stacked_errors` from this crate so that we don't have versioning problems when
+  `stacked_errors` becomes more stable.
+
 ## [0.14.0] - 2024-11-21
 ### Changes
 - Updated to `stacked_errors` 0.6 which changes the MSRV to 1.81

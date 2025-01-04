@@ -7,17 +7,16 @@
 use std::time::Duration;
 
 use clap::Parser;
+use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
     docker::{Container, ContainerNetwork, Dockerfile},
-    sh,
-    stacked_errors::{Error, Result, StackableErr},
-    wait_for_ok, Command,
+    sh, wait_for_ok, Command,
 };
 use tokio::{fs, time::sleep};
 use tracing::info;
 
-const BASE_CONTAINER: &str = "fedora:40";
+const BASE_CONTAINER: &str = "fedora:41";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
@@ -57,7 +56,7 @@ async fn main() -> Result<()> {
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
             "test_runner" => test_runner().await,
-            _ => Err(Error::from(format!("entry_name \"{s}\" is not recognized"))),
+            _ => bail!("entry_name \"{s}\" is not recognized"),
         }
     } else {
         container_runner(&args).await.stack()
@@ -95,13 +94,15 @@ async fn container_runner(args: &Args) -> Result<()> {
     // because postgres doesn't like the .gitignore
     let mut pg_data_path = acquire_dir_path(&args.pg_data_base_path)
         .await
-        .stack_err(|| "you need to run from the repo root")?;
+        .stack_err("you need to run from the repo root")?;
     pg_data_path.push(&args.pg_data_dir);
     if acquire_dir_path(&pg_data_path).await.is_err() {
         fs::create_dir_all(&pg_data_path).await.stack()?;
     }
 
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
+    // display all of the build steps
+    cn.debug_all(true);
     cn.add_container(
         Container::new("test_runner", Dockerfile::contents(test_dockerfile()))
             .external_entrypoint(entrypoint, ["--entry-name", "test_runner"])

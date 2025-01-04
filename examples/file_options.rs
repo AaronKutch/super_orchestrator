@@ -1,19 +1,17 @@
 use std::path::PathBuf;
 
-use stacked_errors::{ensure, ensure_eq, StackableErr};
-use super_orchestrator::{
-    close_file, remove_files_in_dir, stacked_errors::Result, FileOptions, ReadOrWrite,
-};
+use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
+use super_orchestrator::{close_file, remove_files_in_dir, FileOptions, ReadOrWrite};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 #[tokio::main]
 #[rustfmt::skip]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt().with_env_filter("debug").init();
 
     remove_files_in_dir("./logs/", &["example.log"])
         .await
@@ -65,32 +63,31 @@ async fn main() -> Result<()> {
     let e = FileOptions::write_str("./nonexistent/example.log", "test")
         .await
         .stack()
-        .unwrap_err()
-        .to_string();
-    println!("{}", e);
+        .unwrap_err();
+    debug!("{:?}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
-        e.contains(r#"FileOptions::write_str
-FileOptions::acquire_file()
-FileOptions { path: "./nonexistent/example.log", options: Write(WriteOptions { create: true, append: false }) }.preacquire() could not acquire directory
-acquire_dir_path(dir_path: "./nonexistent")
-BoxedError"#)
+        e.to_string().contains(r#"
+    FileOptions::write_str
+    FileOptions::acquire_file()
+    FileOptions { path: "./nonexistent/example.log", options: Write(WriteOptions { create: true, append: false }) }.preacquire() could not acquire directory
+    acquire_dir_path(dir_path: "./nonexistent")"#)
     );
 
     let e = FileOptions::read_to_string("./logs/nonexistent.log")
         .await
         .stack()
-        .unwrap_err()
-        .to_string();
-    println!("{}", e);
+        .unwrap_err();
+    debug!("{:?}", e);
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
-        e.contains(r#"FileOptions::read_to_string
-FileOptions::acquire_file()
-FileOptions { path: "./logs/nonexistent.log", options: Read }.precheck() could not acquire path to combined directory and file name
-acquire_file_path(file_path:"#)
+        e.to_string().contains(r#"
+    FileOptions::read_to_string
+    FileOptions::acquire_file()
+    FileOptions { path: "./logs/nonexistent.log", options: Read }.precheck() could not acquire path to combined directory and file name
+    acquire_file_path(file_path:"#)
     );
 
     // the shorthand functions can be broken down into more steps if needed
@@ -99,13 +96,13 @@ acquire_file_path(file_path:"#)
         .preacquire()
         .await
         .stack()?;
-    println!("checked path: {file_path:?}");
+    debug!("checked path: {file_path:?}");
 
     let file: File = FileOptions::read("./logs/example.log")
         .acquire_file()
         .await
         .stack()?;
-    println!("file: {file:?}");
+    debug!("file: {file:?}");
 
     let mut file = FileOptions::new("./logs/example.log", ReadOrWrite::write(false, true))
         .acquire_file()

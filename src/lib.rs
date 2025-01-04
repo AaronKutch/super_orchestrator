@@ -18,8 +18,6 @@ pub use file_options::*;
 pub use misc::*;
 pub use parsing::*;
 pub use paths::*;
-/// This reexport helps with dependency wrangling
-pub use stacked_errors;
 /// Docker container management
 ///
 /// See the `basic_containers`, `docker_entrypoint_pattern`, and `postgres`
