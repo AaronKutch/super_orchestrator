@@ -722,8 +722,39 @@ impl ContainerNetwork {
     /// [" or " panicked at " parts. Checks stderr first and falls back to
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
+        fn contains<'a>(
+            stderr: &'a str,
+            marker: &str,
+            ignore: &str,
+            find_thread: bool,
+        ) -> Option<&'a str> {
+            // the problem is that some library error types included in the middle of a
+            // error stack have "Error:", I have decided to truncate to the end of the
+            // result if it goes over 10000 characters
+            let mut stderr = stderr;
+            if let Some(start) = stderr.find(marker) {
+                if find_thread {
+                    // find the "thread" before the "panicked at "
+                    if let Some(i) = stderr[..start].rfind("thread") {
+                        stderr = &stderr[i..];
+                    }
+                } else {
+                    stderr = &stderr[start..];
+                }
+            }
+            let len = stderr.len();
+            if len > 10000 {
+                stderr = &stderr[(len - 10000)..];
+            }
+            if stderr.contains(ignore) {
+                None
+            } else {
+                Some(stderr)
+            }
+        }
+
         let not_root_cause = "ProbablyNotRootCauseError";
-        let error_marker = "Error: ";
+        let error_marker = "Error:";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
         for (name, state) in self.set.iter() {
@@ -738,47 +769,46 @@ impl ContainerNetwork {
 
                             // check stderr
                             let stderr = comres.stderr_as_utf8_lossy();
-                            if let Some(start) = stderr.rfind(error_marker) {
-                                if !stderr.contains(not_root_cause) {
-                                    encountered = true;
-                                    res = res.add_err_locationless(format!(
-                                        "Error from container \"{name}\" stderr:\n{}\n",
-                                        &stderr[start..]
-                                    ));
-                                }
+
+                            if let Some(stderr) =
+                                contains(&stderr, error_marker, not_root_cause, false)
+                            {
+                                encountered = true;
+                                res = res.add_err_locationless(format!(
+                                    "Error from container \"{name}\" stderr:\n{stderr}\n"
+                                ));
                             }
 
-                            if let Some(i) = stderr.rfind(panicked_at) {
-                                if let Some(i) = stderr[0..i].rfind("thread") {
-                                    encountered = true;
-                                    res = res.add_err_locationless(format!(
-                                        "Panic message from container \"{name}\" stderr:\n{}\n",
-                                        &stderr[i..]
-                                    ));
-                                }
+                            if let Some(stderr) =
+                                contains(&stderr, panicked_at, not_root_cause, true)
+                            {
+                                encountered = true;
+                                res = res.add_err_locationless(format!(
+                                    "Panic message from container \"{name}\" stderr:\n{stderr}\n"
+                                ));
                             }
 
                             // check stdout only if stderr had nothing
                             if !encountered {
                                 let stdout = comres.stdout_as_utf8_lossy();
-                                if let Some(start) = stdout.rfind(error_marker) {
-                                    if !stdout.contains(not_root_cause) {
-                                        encountered = true;
-                                        res = res.add_err_locationless(format!(
-                                            "Error from container \"{name}\" stdout:\n{}\n",
-                                            &stdout[start..]
-                                        ));
-                                    }
+
+                                if let Some(stdout) =
+                                    contains(&stdout, error_marker, not_root_cause, false)
+                                {
+                                    encountered = true;
+                                    res = res.add_err_locationless(format!(
+                                        "Error from container \"{name}\" stdout:\n{stdout}\n"
+                                    ));
                                 }
 
-                                if let Some(i) = stdout.rfind(panicked_at) {
-                                    if let Some(i) = stdout[0..i].rfind("thread") {
-                                        encountered = true;
-                                        res = res.add_err_locationless(format!(
-                                            "Panic message from container \"{name}\" stdout:\n{}\n",
-                                            &stdout[i..]
-                                        ));
-                                    }
+                                if let Some(stdout) =
+                                    contains(&stdout, panicked_at, not_root_cause, true)
+                                {
+                                    encountered = true;
+                                    res = res.add_err_locationless(format!(
+                                        "Panic message from container \"{name}\" \
+                                         stdout:\n{stdout}\n"
+                                    ));
                                 }
                             }
 

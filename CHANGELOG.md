@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.15.1] - 2025-01-10
+### Fixes
+- The docker network error compilation now searches for the earliest occurance of "Error:" and
+  truncates errors to the last 10000 characters.
+
 ## [0.15.0] - 2025-01-03
 ### Crate
 - Updated to `stacked_errors` 0.7 which has significantly better debug
