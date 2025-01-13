@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.15.2] - 2025-01-13
+### Fixes
+- Fix issue introduced with previous version
+
 ## [0.15.1] - 2025-01-10
 ### Fixes
 - The docker network error compilation now searches for the earliest occurance of "Error:" and

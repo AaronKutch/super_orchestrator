@@ -732,13 +732,16 @@ impl ContainerNetwork {
             // error stack have "Error:", I have decided to truncate to the end of the
             // result if it goes over 10000 characters
             let mut stderr = stderr;
+            let mut good = false;
             if let Some(start) = stderr.find(marker) {
                 if find_thread {
                     // find the "thread" before the "panicked at "
                     if let Some(i) = stderr[..start].rfind("thread") {
+                        good = true;
                         stderr = &stderr[i..];
                     }
                 } else {
+                    good = true;
                     stderr = &stderr[start..];
                 }
             }
@@ -747,9 +750,12 @@ impl ContainerNetwork {
                 stderr = &stderr[(len - 10000)..];
             }
             if stderr.contains(ignore) {
-                None
-            } else {
+                good = false
+            }
+            if good {
                 Some(stderr)
+            } else {
+                None
             }
         }
 
