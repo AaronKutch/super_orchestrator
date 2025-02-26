@@ -22,6 +22,11 @@ use crate::{acquire_dir_path, Command};
 /// Used by [crate::ctrlc_init] and [crate::ctrlc_issued_reset]
 pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
 
+pub fn random_name(name: impl std::fmt::Display) -> String {
+    // lazy programming at its finest
+    format!("{name}-{}", &uuid::Uuid::new_v4().to_string()[..6])
+}
+
 /// Sets up the ctrl-c handler
 pub fn ctrlc_init() -> Result<()> {
     ctrlc::set_handler(move || {

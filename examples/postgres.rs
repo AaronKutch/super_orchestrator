@@ -17,7 +17,11 @@ use tokio::{fs, time::sleep};
 use tracing::info;
 
 const BASE_CONTAINER: &str = "fedora:41";
-const TARGET: &str = "x86_64-unknown-linux-gnu";
+// musl builds are more portable because it's statically linked
+//
+// When testing with x86_64-unknown-linux-gnu, if container had older glibc
+// version, compared to host, the rust binary would not run.
+const TARGET: &str = "x86_64-unknown-linux-musl";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
 #[rustfmt::skip]
