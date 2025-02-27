@@ -102,13 +102,16 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_container(
         AddContainerOptions::Container {
             image: SuperDockerFile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
-                .bootstrap_musl(None, [
-                    "--entry-name",
-                    "test_runner",
-                    "--postgres-name",
-                    &postgres_name,
-                ], BootstrapOptions::Example,
-                ["--features", "bollard"]
+                .bootstrap_musl(
+                    None,
+                    [
+                        "--entry-name",
+                        "test_runner",
+                        "--postgres-name",
+                        &postgres_name,
+                    ],
+                    BootstrapOptions::Example,
+                    ["--features", "bollard"],
                 )
                 .await
                 .stack()?

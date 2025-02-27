@@ -190,8 +190,7 @@ impl SuperDockerFile {
         to: Option<String>,
         entrypoint_args: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self> {
-        let bootstrap_path =
-            to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
+        let bootstrap_path = to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
 
         let binary_path = std::env::current_exe()
             .stack()?
@@ -205,11 +204,13 @@ impl SuperDockerFile {
             .await
     }
 
-    /// Similar to bootstrap but if the current target is not x86_64-unknown-linux-musl, build and use musl binary else use
-    /// current binary. This is useful because musl is more portable and overall will just work
-    /// when using as container entrypoint.
+    /// Similar to bootstrap but if the current target is not
+    /// x86_64-unknown-linux-musl, build and use musl binary else use
+    /// current binary. This is useful because musl is more portable and overall
+    /// will just work when using as container entrypoint.
     ///
-    /// From cargo build --help, the relevant `target_selection_flag` s: --bin --example --test --bench
+    /// From cargo build --help, the relevant `target_selection_flag` s: --bin
+    /// --example --test --bench
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -221,10 +222,20 @@ impl SuperDockerFile {
         other_build_flags: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self> {
         let target_selection_flag = bootstrap_option.to_flag();
-        let musl_target_path: &[&str] = &["target", "x86_64-unknown-linux-musl", "release", target_selection_flag];
+        let musl_target_path: &[&str] = &[
+            "target",
+            "x86_64-unknown-linux-musl",
+            "release",
+            target_selection_flag,
+        ];
 
         let mut cur_binary_path = std::env::current_exe().stack()?;
-        let cur_binary_name = cur_binary_path.file_name().unwrap().to_str().stack()?.to_string();
+        let cur_binary_name = cur_binary_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .stack()?
+            .to_string();
         cur_binary_path.pop();
 
         let mut is_musl = true;
@@ -239,13 +250,15 @@ impl SuperDockerFile {
             cur_binary_path.pop();
         }
 
-        let bootstrap_path =
-            to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
+        let bootstrap_path = to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
 
         if !is_musl {
             tracing::debug!("Current binary is not linked with musl, building to accordingly");
 
-            let build_flags = other_build_flags.into_iter().map(Into::into).collect::<Vec<String>>();
+            let build_flags = other_build_flags
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<String>>();
             sh([
                 "cargo build -r --target x86_64-unknown-linux-musl",
                 target_selection_flag,
@@ -253,16 +266,21 @@ impl SuperDockerFile {
             ]
             .into_iter()
             .chain(build_flags.iter().map(String::as_str)))
-                .await
-                .stack()?;
-            let entrypoint = &format!("./target/x86_64-unknown-linux-musl/release/{}/{cur_binary_name}", bootstrap_option.to_path_str());
+            .await
+            .stack()?;
+            let entrypoint = &format!(
+                "./target/x86_64-unknown-linux-musl/release/{}/{cur_binary_name}",
+                bootstrap_option.to_path_str()
+            );
 
             self.with_entrypoint((entrypoint, Some(bootstrap_path)), entrypoint_args)
                 .await
                 .stack()
         } else {
             tracing::debug!("Current binary is linked with musl, using it!");
-            self.bootstrap(Some(bootstrap_path), entrypoint_args).await.stack()
+            self.bootstrap(Some(bootstrap_path), entrypoint_args)
+                .await
+                .stack()
         }
     }
 
@@ -317,7 +335,7 @@ impl SuperDockerFile {
             ..Default::default()
         };
 
-        let tarball = self.tarball.into_tarball().stack()?.into();
+        let tarball = self.tarball.into_tarball().stack()?;
 
         Ok((opts, tarball))
     }

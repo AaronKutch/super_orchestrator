@@ -1,4 +1,4 @@
-use std::{collections::HashSet, env::current_dir, io::IsTerminal, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::HashSet, io::IsTerminal, path::PathBuf, str::FromStr, sync::Arc};
 
 use stacked_errors::{Result, StackableErr};
 use tokio::io::AsyncWriteExt;
@@ -64,7 +64,7 @@ impl SuperNetwork {
     ///
     /// Uses default docker instance from
     /// [bollard::Docker::connect_with_defaults]
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %opts.name,
         )
@@ -83,7 +83,9 @@ impl SuperNetwork {
         {
             if opts.overwrite_existing {
                 tracing::debug!("Tearing down name match for {network_name} connection");
-                total_teardown(&network_name, std::iter::empty()).await.stack()?;
+                total_teardown(&network_name, std::iter::empty())
+                    .await
+                    .stack()?;
             } else {
                 return Err("network {network_name} already exists").stack();
             }
@@ -118,7 +120,7 @@ impl SuperNetwork {
     /// This DOESN'T call `docker create` or `docker start`. It may call `docker
     /// build` if necessary. This function will return error if the
     /// container is already registered in the network.
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
             container.name = %container.name,
@@ -134,25 +136,25 @@ impl SuperNetwork {
             return Err("Name is already registered").stack();
         }
 
-        if container.name.len() == 0 {
+        if container.name.is_empty() {
             return Err("Name for container can't be empty").stack();
         }
 
         let output_dir = if let Some(ref output_config) = self.opts.output_dir_config {
-            add_opts = AddContainerOptions::DockerFile { docker_file: match add_opts {
-                AddContainerOptions::Container { image } => image
-                    .to_docker_file(),
-                AddContainerOptions::DockerFile { docker_file } => docker_file,
-                AddContainerOptions::BollardArgs { bollard_args } =>
-                    SuperDockerFile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
-                    .await
-                    .stack()?
-                    .0
-                    .to_docker_file(),
-            }.appending_dockerfile_instructions(["RUN mkdir /super_out"])};
-
-            if output_config.save_logs {
-            }
+            add_opts = AddContainerOptions::DockerFile {
+                docker_file: match add_opts {
+                    AddContainerOptions::Container { image } => image.to_docker_file(),
+                    AddContainerOptions::DockerFile { docker_file } => docker_file,
+                    AddContainerOptions::BollardArgs { bollard_args } => {
+                        SuperDockerFile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
+                            .await
+                            .stack()?
+                            .0
+                            .to_docker_file()
+                    }
+                }
+                .appending_dockerfile_instructions(["RUN mkdir /super_out"]),
+            };
 
             let mut output_dir = PathBuf::from_str(&output_config.output_dir).stack()?;
             output_dir.push(&container.name);
@@ -161,29 +163,35 @@ impl SuperNetwork {
             if let Err(err) = tokio::fs::create_dir(&output_dir).await {
                 match err.kind() {
                     std::io::ErrorKind::AlreadyExists => {
-                        if output_dir_str == "/" { 
-                           return Err(format!("Trying to create output_dir at {output_dir_str} for {}", container.name)).stack();
+                        if output_dir_str == "/" {
+                            return Err(format!(
+                                "Trying to create output_dir at {output_dir_str} for {}",
+                                container.name
+                            ))
+                            .stack();
                         }
 
-                        tracing::warn!("Output directory for container {} already exists.", container.name);
-                    },
-                    _ => return Err(format!("Problems creating output_dir ({output_dir_str}) for container {}", container.name)).stack(),
+                        tracing::warn!(
+                            "Output directory for container {} already exists.",
+                            container.name
+                        );
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Problems creating output_dir ({output_dir_str}) for container {}",
+                            container.name
+                        ))
+                        .stack()
+                    }
                 }
             }
 
-            let outdir_rel = output_dir.strip_prefix(current_dir().stack()?).stack()?.to_str().stack()?;
-            if !tokio::process::Command::new("chmod")
-                .args(["777", outdir_rel])
-                .output()
-                .await
-                .stack()?
-                .status
-                .success() {
-                return Err(format!("Failed to run chmod")).stack();
-            }
-
-            container.volumes.push((output_dir_str.to_string(), "/super_out".to_string()));
-            container.env_vars.push(format!("{SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_out"));
+            container
+                .volumes
+                .push((output_dir_str.to_string(), "/super_out".to_string()));
+            container.env_vars.push(format!(
+                "{SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_out"
+            ));
 
             Some(output_dir)
         } else {
@@ -220,7 +228,7 @@ impl SuperNetwork {
     /// This will mark the container with flag should_be_started to true. If
     /// this flag is set for the container the docker commands won't be
     /// executed.
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
             container.name = %container_name,
@@ -231,13 +239,21 @@ impl SuperNetwork {
             return Err(format!("Container with name {container_name} not found")).stack();
         };
 
-        start_container(live_container, self.opts.name.clone(), self.opts.log_by_default, self.opts.output_dir_config.as_ref().map_or(false, |config| config.save_logs))
-            .await
-            .stack()
+        start_container(
+            live_container,
+            self.opts.name.clone(),
+            self.opts.log_by_default,
+            self.opts
+                .output_dir_config
+                .as_ref()
+                .is_some_and(|config| config.save_logs),
+        )
+        .await
+        .stack()
     }
 
     /// Calls [SuperNetwork::start_container] for all registered containers.
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
         )
@@ -248,7 +264,17 @@ impl SuperNetwork {
         let mut futs = self
             .containers
             .values_mut()
-            .map(|live_container| Box::pin(start_container(live_container, network_name.clone(), self.opts.log_by_default, self.opts.output_dir_config.as_ref().map_or(false, |config| config.save_logs))))
+            .map(|live_container| {
+                Box::pin(start_container(
+                    live_container,
+                    network_name.clone(),
+                    self.opts.log_by_default,
+                    self.opts
+                        .output_dir_config
+                        .as_ref()
+                        .is_some_and(|config| config.save_logs),
+                ))
+            })
             .collect::<Vec<_>>();
 
         while !futs.is_empty() {
@@ -260,7 +286,7 @@ impl SuperNetwork {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             container.name = %container_name,
         )
@@ -276,7 +302,7 @@ impl SuperNetwork {
     }
 
     /// Waits for all containers marked as important to shutdown
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
         )
@@ -303,7 +329,10 @@ impl SuperNetwork {
 
                         let status = Self::inspect_container(container_name).await.stack()?;
 
-                        if status.and_then(|status| status.running.map(|x| !x)).unwrap_or(true) {
+                        if status
+                            .and_then(|status| status.running.map(|x| !x))
+                            .unwrap_or(true)
+                        {
                             already_down
                                 .write()
                                 .await
@@ -325,7 +354,11 @@ impl SuperNetwork {
                 futs = rest;
             }
 
-            tracing::debug!("total importants shutdown: {}/{}", already_down.read().await.len(), importants.len());
+            tracing::debug!(
+                "total importants shutdown: {}/{}",
+                already_down.read().await.len(),
+                importants.len()
+            );
 
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
@@ -337,7 +370,7 @@ impl SuperNetwork {
     /// its stdin and outputs using [bollard::Docker::attach_container].
     ///
     /// This retrieves the stdin resulting from the attachment
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
             container.name = %container_name,
@@ -352,86 +385,101 @@ impl SuperNetwork {
     /// Try stopping all containers and delete network.
     ///
     /// It'll always try to complete the full teardown and aggregate the errors.
-    #[tracing::instrument(skip_all, 
+    #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
         )
     )]
     pub async fn teardown(self) -> Result<()> {
-        total_teardown(&self.opts.name, self.containers.into_keys()).await.stack()
+        total_teardown(&self.opts.name, self.containers.into_keys())
+            .await
+            .stack()
     }
 }
 
-#[tracing::instrument(skip_all, 
+#[tracing::instrument(skip_all,
     fields(
         network.name = %network_name,
     )
 )]
 async fn total_teardown(
-    network_name: &String, 
+    network_name: &String,
     known_container_names: impl IntoIterator<Item = String>,
 ) -> Result<()> {
-        let docker = get_or_init_default_docker_instance().await.stack()?;
+    let docker = get_or_init_default_docker_instance().await.stack()?;
 
-        let live_containers = docker.inspect_network::<String>(&network_name, None).await.stack()?.containers.map_or_else(Vec::new, |containers| containers.into_keys().collect());
+    let live_containers = docker
+        .inspect_network::<String>(network_name, None)
+        .await
+        .stack()?
+        .containers
+        .map_or_else(Vec::new, |containers| containers.into_keys().collect());
 
-        let mut futs = live_containers
-            .into_iter()
-            .chain(known_container_names)
-            .map(|container_name| {
-                let docker = docker.clone();
+    let mut futs = live_containers
+        .into_iter()
+        .chain(known_container_names)
+        .map(|container_name| {
+            let docker = docker.clone();
 
-                Box::pin(async move {
-                    if let Ok(Some(container)) = SuperNetwork::inspect_container(&container_name).await.stack() {
-                        if container.running.map_or(false, |x| x) {
-                            docker
-                                .stop_container(
-                                    &container_name,
-                                    Some(bollard::container::StopContainerOptions { t: 5 }),
-                                )
-                                .await
-                                .inspect_err(|err| {
-                                    tracing::debug!("failed to shutdown container Err: {err}")
-                                })
-                                .stack()?;
-                        }
+            Box::pin(async move {
+                if let Ok(Some(container)) = SuperNetwork::inspect_container(&container_name)
+                    .await
+                    .stack()
+                {
+                    if container.running.is_some_and(|x| x) {
+                        docker
+                            .stop_container(
+                                &container_name,
+                                Some(bollard::container::StopContainerOptions { t: 5 }),
+                            )
+                            .await
+                            .inspect_err(|err| {
+                                tracing::debug!("failed to shutdown container Err: {err}")
+                            })
+                            .stack()?;
                     }
+                }
 
-                    Ok(()) as Result<_>
-                })
+                Ok(()) as Result<_>
             })
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
-        let mut errs = vec![];
+    let mut errs = vec![];
 
-        while !futs.is_empty() {
-            let (res, _, rest) = futures::future::select_all(futs).await;
-            if let Err(err) = res {
-                errs.push(err)
-            };
-            futs = rest;
-        }
-
-        if let Err(err) = docker.remove_network(&network_name).await.stack() {
+    while !futs.is_empty() {
+        let (res, _, rest) = futures::future::select_all(futs).await;
+        if let Err(err) = res {
             errs.push(err)
         };
+        futs = rest;
+    }
 
-        if let Some(last_err) = errs.pop() {
-            Err(errs
-                .into_iter()
-                .fold(last_err, |last_err, err| last_err.chain_errors(err)))
-        } else {
-            Ok(())
-        }
+    if let Err(err) = docker.remove_network(network_name).await.stack() {
+        errs.push(err)
+    };
+
+    if let Some(last_err) = errs.pop() {
+        Err(errs
+            .into_iter()
+            .fold(last_err, |last_err, err| last_err.chain_errors(err)))
+    } else {
+        Ok(())
+    }
 }
 
-#[tracing::instrument(skip_all, 
+#[tracing::instrument(skip_all,
     fields(
         network.name = %network_name,
         container.name = %live_container.container_opts.name,
     )
 )]
-async fn start_container(live_container: &mut LiveContainer, network_name: String, log_by_default: bool, write_logs: bool) -> Result<()> {
+async fn start_container(
+    live_container: &mut LiveContainer,
+    network_name: String,
+    log_by_default: bool,
+    write_logs: bool,
+) -> Result<()> {
     // start_container already called for this container
     if live_container.should_be_started {
         return Ok(())
@@ -442,22 +490,24 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
     let (exposed_ports, port_bindings) =
         port_bindings_to_bollard_args(&live_container.container_opts.port_bindings);
 
+    #[rustfmt::skip] /* because of comment size */
+    // [docker reference](https://docs.docker.com/reference/api/engine/version/v1.48/#tag/Container/operation/ContainerCreate)
     // https://github.com/moby/moby/issues/2949
-    // https://docs.docker.com/reference/api/engine/version/v1.48/#tag/Container/operation/ContainerCreate
-    let (volumes, volume_binds) = Some(
-        (live_container
+    let (volumes, volume_binds) = Some((
+        live_container
             .container_opts
             .volumes
             .iter()
             .map(|(_, container)| (container.to_string(), Default::default()))
             .collect(),
-          live_container
+        live_container
             .container_opts
             .volumes
             .iter()
             .map(|(host, container)| format!("{host}:{container}"))
-            .collect())
-    ).unzip();
+            .collect(),
+    ))
+    .unzip();
 
     tracing::debug!("Creating container");
 
@@ -516,6 +566,8 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
         .await
         .stack()?;
 
+    tracing::debug!("Attaching to container");
+
     let response = docker
         .attach_container(
             &live_container.container_opts.name,
@@ -533,35 +585,52 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
 
     live_container.stdin = Some(response.input);
 
-    // log docker outputs
+    // log docker outputs variables
     let container_name = live_container.container_opts.name.clone();
     let mut output = response.output;
-    let log_output = live_container.container_opts.log_outs.unwrap_or(log_by_default);
-    let mut log_file = if let Some(mut log_file) = live_container.output_dir.as_ref().and_then(|output_dir| write_logs.then(|| output_dir.clone())) {
+    let log_output = live_container
+        .container_opts
+        .log_outs
+        .unwrap_or(log_by_default);
+    let mut log_file = if let Some(mut log_file) = live_container
+        .output_dir
+        .as_ref()
+        .and_then(|output_dir| write_logs.then(|| output_dir.clone()))
+    {
         log_file.push("super_log");
-        tokio::fs::File::options().write(true).create(true).truncate(true).read(true).open(log_file).await.inspect_err(|err| tracing::warn!("When opening log file: {err}")).ok()
+        tokio::fs::File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .open(log_file)
+            .await
+            .inspect_err(|err| tracing::warn!("When opening log file: {err}"))
+            .ok()
     } else {
         None
     };
 
+    // log docker outputs handler
     if log_output || log_file.is_some() {
         tokio::spawn(async move {
-            // bollard doesn't export this and we don't use futures_core
-            use futures::stream::StreamExt;
             use bollard::container::LogOutput;
+            use futures::stream::StreamExt;
 
             let (prefix_out, prefix_err) = if std::io::stderr().is_terminal() {
                 let terminal_color = next_terminal_color();
-                (owo_colors::OwoColorize::color(
-                    &format!("{container_name}   | "),
-                    terminal_color,
+                (
+                    owo_colors::OwoColorize::color(
+                        &format!("{container_name}   | "),
+                        terminal_color,
+                    )
+                    .to_string(),
+                    owo_colors::OwoColorize::color(
+                        &format!("{container_name}  E| "),
+                        terminal_color,
+                    )
+                    .to_string(),
                 )
-                .to_string(),
-                owo_colors::OwoColorize::color(
-                    &format!("{container_name}  E| "),
-                    terminal_color,
-                )
-                .to_string())
             } else {
                 Default::default()
             };
@@ -570,11 +639,14 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
                 match output.stack()? {
                     LogOutput::StdErr { message } => {
                         if log_output {
-                        eprintln!(
-                        "{prefix_err}{}", &String::from_utf8_lossy(&message)
-                            .split('\n')
-                            .collect::<Vec<_>>().join(&prefix_err)
-                        )}
+                            eprintln!(
+                                "{prefix_err}{}",
+                                &String::from_utf8_lossy(&message)
+                                    .split('\n')
+                                    .collect::<Vec<_>>()
+                                    .join(&prefix_err)
+                            )
+                        }
                         if let Some(ref mut log_file) = log_file {
                             log_file.write_all(&message).await.stack()?;
                         }
@@ -582,15 +654,18 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
                     // not sure why but all output comes from LogOutput::Console
                     LogOutput::StdOut { message } | LogOutput::Console { message } => {
                         if log_output {
-                        eprintln!(
-                        "{prefix_out}{}", &String::from_utf8_lossy(&message)
-                            .split('\n')
-                            .collect::<Vec<_>>().join(&prefix_err)
-                        )}
-                    if let Some(ref mut log_file) = log_file {
-                        log_file.write_all(&message).await.stack()?;
+                            eprintln!(
+                                "{prefix_out}{}",
+                                &String::from_utf8_lossy(&message)
+                                    .split('\n')
+                                    .collect::<Vec<_>>()
+                                    .join(&prefix_err)
+                            )
+                        }
+                        if let Some(ref mut log_file) = log_file {
+                            log_file.write_all(&message).await.stack()?;
+                        }
                     }
-                }
                     _ => {}
                 }
             }
@@ -602,6 +677,7 @@ async fn start_container(live_container: &mut LiveContainer, network_name: Strin
     Ok(())
 }
 
+#[allow(clippy::type_complexity)] /* internal only */
 fn port_bindings_to_bollard_args(
     pbs: &[PortBind],
 ) -> (
@@ -609,7 +685,7 @@ fn port_bindings_to_bollard_args(
     Option<HashMap<String, Option<Vec<bollard::secret::PortBinding>>>>,
 ) {
     Some(
-        pbs.into_iter()
+        pbs.iter()
             .map(|pb| {
                 (
                     (pb.container_port.to_string(), HashMap::new()),

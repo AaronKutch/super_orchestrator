@@ -9,7 +9,8 @@ use super_tar::SuperTarballWrapper;
 
 use crate::docker_container::Dockerfile;
 
-/// Use this to create a docker file representation equivalent. It's useful for creating images.
+/// Use this to create a docker file representation equivalent. It's useful for
+/// creating images.
 ///
 /// Use [SuperDockerFile] to define a "base" for it. This base can be an image
 /// label, the contents of a Dockerfile or the path of a Dockerfile, see
@@ -39,5 +40,5 @@ pub enum BootstrapOptions {
     Example,
     Bin,
     Test,
-    Bench
+    Bench,
 }

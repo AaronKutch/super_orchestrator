@@ -113,17 +113,14 @@ pub struct SuperCreateNetworkOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct OutputDirConfig {
-    /// Directory for dealing with outputs. Use a temporary directory or an
+    /// Directory for dealing with outputs.
+    ///
+    /// Set value as a temporary directory or an
     /// ignored directory in a repository. This won't mount the output dir,
-    /// it'll create other directories and mount them. The instruction for
-    /// outputs will be like this:
+    /// it'll create other directories and mount them (by binding).
     ///
-    /// `VOLUME <output_dir>/<container_name> /super_out`.
-    ///
-    /// This is necessary if using the test_entrypoint option in the test_opts
-    ///
-    /// This also adds env var SUPER_NETWORK_OUTPUT_DIR to the process. Query
-    /// using the env var to ensure compatibility.
+    /// This also adds env var SUPER_NETWORK_OUTPUT_DIR to the container. Add
+    /// outputs using the env var to ensure compatibility.
     pub output_dir: String,
     /// Write all captured output to a log file
     pub save_logs: bool,
