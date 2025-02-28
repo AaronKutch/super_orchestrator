@@ -54,6 +54,13 @@ impl SuperTarballWrapper {
         })
     }
 
+    pub fn append_file_bytes(&mut self, path: String, content: &[u8]) -> Result<()> {
+        let header = &mut tar::Header::new_gnu();
+        header.set_size(content.len() as _);
+        header.set_cksum();
+        self.tar.append_data(header, path, content).stack()
+    }
+
     pub fn append_file(&mut self, path: String, file: &mut std::fs::File) -> Result<()> {
         self.paths.insert(path.clone());
         self.tar.append_file(path, file).stack()

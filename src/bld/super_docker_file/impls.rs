@@ -102,7 +102,7 @@ impl SuperDockerFile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
-    pub async fn copying_from_paths<'a>(
+    pub async fn copying_from_paths(
         mut self,
         v: impl IntoIterator<Item = (impl Into<String>, Option<impl Into<String>>)>,
     ) -> Result<Self> {
@@ -141,6 +141,45 @@ impl SuperDockerFile {
         tracing::debug!("New tarball paths: {:?}", self.tarball);
 
         Ok(self)
+    }
+
+    pub async fn copying_from_contents(
+        mut self,
+        v: impl IntoIterator<Item = (impl Into<String>, Vec<u8>)>
+    ) -> Result<Self> {
+        tracing::debug!("Current tarball paths: {:?}", self.tarball);
+
+        let this = Arc::new(std::sync::Mutex::new(self));
+        let mut futs = v
+            .into_iter()
+            .map(|(to, content)| {
+                let this = this.clone();
+                let to: String = to.into();
+
+                tokio::task::spawn_blocking(move || {
+                    let mut this_ref = this.lock().unwrap();
+
+                    this_ref
+                        .appending_dockerfile_lines_mut([format!("COPY {to} {to}")]);
+                    this_ref.tarball.append_file_bytes(to, &content).stack()?;
+
+                    Ok(()) as Result<_>
+                })
+            })
+            .collect::<Vec<_>>();
+
+        while !futs.is_empty() {
+            let (res, _, rest) = futures::future::select_all(futs).await;
+            res.stack()??;
+            futs = rest;
+        }
+
+        self = Arc::try_unwrap(this).unwrap().into_inner().stack()?;
+
+        tracing::debug!("New tarball paths: {:?}", self.tarball);
+
+        Ok(self)
+
     }
 
     /// Add an `ENTRYPOINT` instruction and append its file to docker "build
