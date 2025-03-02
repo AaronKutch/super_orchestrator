@@ -143,16 +143,19 @@ impl SuperDockerFile {
         Ok(self)
     }
 
+    /// The Item for the iterator is of the form (path, mode, content)
+    ///
+    /// Where mode is the unix access modes octaves 0oXXX, defaults to 777
     pub async fn copying_from_contents(
         mut self,
-        v: impl IntoIterator<Item = (impl Into<String>, Vec<u8>)>
+        v: impl IntoIterator<Item = (impl Into<String>, Option<u32>, Vec<u8>)>
     ) -> Result<Self> {
         tracing::debug!("Current tarball paths: {:?}", self.tarball);
 
         let this = Arc::new(std::sync::Mutex::new(self));
         let mut futs = v
             .into_iter()
-            .map(|(to, content)| {
+            .map(|(to, mode, content)| {
                 let this = this.clone();
                 let to: String = to.into();
 
@@ -161,7 +164,7 @@ impl SuperDockerFile {
 
                     this_ref
                         .appending_dockerfile_lines_mut([format!("COPY {to} {to}")]);
-                    this_ref.tarball.append_file_bytes(to, &content).stack()?;
+                    this_ref.tarball.append_file_bytes(to, mode.unwrap_or(0o777), &content).stack()?;
 
                     Ok(()) as Result<_>
                 })
