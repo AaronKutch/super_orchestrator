@@ -485,6 +485,8 @@ async fn start_container(
     if live_container.should_be_started {
         return Ok(())
     }
+    live_container.should_be_started = true;
+
 
     let docker = get_or_init_default_docker_instance().await.stack()?;
 
