@@ -261,12 +261,15 @@ impl SuperDockerFile {
         other_build_flags: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self> {
         let target_selection_flag = bootstrap_option.to_flag();
-        let musl_target_path: &[&str] = &[
+        let musl_target_path = &mut vec![
             "target",
             "x86_64-unknown-linux-musl",
             "release",
-            target_selection_flag,
         ];
+
+        if let Some(path) = bootstrap_option.to_path_str() {
+            musl_target_path.push(path);
+        }
 
         let mut cur_binary_path = std::env::current_exe().stack()?;
         let cur_binary_name = cur_binary_path
@@ -308,8 +311,8 @@ impl SuperDockerFile {
             .await
             .stack()?;
             let entrypoint = &format!(
-                "./target/x86_64-unknown-linux-musl/release/{}/{cur_binary_name}",
-                bootstrap_option.to_path_str()
+                "./target/x86_64-unknown-linux-musl/release{}/{cur_binary_name}",
+                bootstrap_option.to_path_str().map_or_else(Default::default, |path| format!("/{path}")),
             );
 
             self.with_entrypoint((entrypoint, Some(bootstrap_path)), entrypoint_args)
@@ -508,12 +511,12 @@ impl BootstrapOptions {
         }
     }
 
-    pub fn to_path_str(self) -> &'static str {
+    pub fn to_path_str(self) -> Option<&'static str> {
         match self {
-            BootstrapOptions::Example => "examples",
-            BootstrapOptions::Bin => "bins",
-            BootstrapOptions::Test => "tests",
-            BootstrapOptions::Bench => "benches",
+            BootstrapOptions::Example => Some("examples"),
+            BootstrapOptions::Test => Some("tests"),
+            BootstrapOptions::Bench => Some("benches"),
+            BootstrapOptions::Bin => None,
         }
     }
 }
