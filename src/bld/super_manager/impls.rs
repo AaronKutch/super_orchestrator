@@ -636,16 +636,19 @@ async fn start_container(
                 Default::default()
             };
 
+            let prefix_err_newline = "\n".to_string() + &prefix_err;
+            let prefix_out_newline = "\n".to_string() + &prefix_out;
+
             while let Some(output) = output.next().await {
                 match output.stack()? {
                     LogOutput::StdErr { message } => {
                         if log_output {
                             eprintln!(
                                 "{prefix_err}{}",
-                                &String::from_utf8_lossy(&message)
-                                    .split('\n')
+                                    &String::from_utf8_lossy(&message)
+                                    .lines()
                                     .collect::<Vec<_>>()
-                                    .join(&prefix_err)
+                                    .join(&prefix_err_newline)
                             )
                         }
                         if let Some(ref mut log_file) = log_file {
@@ -658,9 +661,9 @@ async fn start_container(
                             eprintln!(
                                 "{prefix_out}{}",
                                 &String::from_utf8_lossy(&message)
-                                    .split('\n')
+                                    .lines()
                                     .collect::<Vec<_>>()
-                                    .join(&prefix_err)
+                                    .join(&prefix_out_newline)
                             )
                         }
                         if let Some(ref mut log_file) = log_file {
