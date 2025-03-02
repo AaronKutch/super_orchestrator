@@ -533,7 +533,7 @@ async fn start_container(
                     binds: volume_binds,
                     privileged: Some(live_container.container_opts.priviledged),
                     // don't flood user's containers
-                    //auto_remove: Some(true),
+                    auto_remove: Some(true),
                     ..Default::default()
                 }),
                 // allows testing features
