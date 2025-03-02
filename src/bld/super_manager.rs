@@ -6,7 +6,7 @@ pub use bollard::{
     container::{AttachContainerResults, LogOutput},
     errors::Error as BollardError,
     image::BuildImageOptions,
-    secret::ContainerState,
+    secret::{Ipam, IpamConfig, ContainerState},
 };
 
 use super::super_docker_file::{SuperDockerFile, SuperImage};
@@ -101,6 +101,7 @@ pub struct SuperCreateNetworkOptions {
     pub enable_ipv6: bool,
     pub options: HashMap<String, String>,
     pub labels: HashMap<String, String>,
+    pub ipam: Ipam,
     /// If set the network will shutdown and start a new network if there's a
     /// name collision.
     pub overwrite_existing: bool,

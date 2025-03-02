@@ -98,6 +98,7 @@ impl SuperNetwork {
                 enable_ipv6: opts.enable_ipv6,
                 options: opts.options.clone(),
                 labels: opts.labels.clone(),
+                ipam: opts.ipam.clone(),
                 ..Default::default()
             })
             .await
