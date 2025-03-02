@@ -6,7 +6,7 @@ pub use bollard::{
     container::{AttachContainerResults, LogOutput},
     errors::Error as BollardError,
     image::BuildImageOptions,
-    secret::{Ipam, IpamConfig, ContainerState},
+    secret::{Ipam, IpamConfig, ContainerState, DeviceMapping},
 };
 
 use super::super_docker_file::{SuperDockerFile, SuperImage};
@@ -34,6 +34,7 @@ pub struct SuperContainerOptions {
     pub sysctls: HashMap<String, String>,
     pub priviledged: bool,
     pub port_bindings: Vec<PortBind>,
+    pub devices: Vec<DeviceMapping>,
     /// Wether the network should wait for the container to shutdown during a
     /// [SuperNetwork::wait_important] call
     pub important: bool,

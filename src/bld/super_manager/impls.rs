@@ -533,6 +533,7 @@ async fn start_container(
                     port_bindings,
                     binds: volume_binds,
                     privileged: Some(live_container.container_opts.priviledged),
+                    devices: Some(live_container.container_opts.devices.clone()),
                     // don't flood user's containers
                     auto_remove: Some(true),
                     ..Default::default()
