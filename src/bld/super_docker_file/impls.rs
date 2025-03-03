@@ -219,7 +219,7 @@ impl SuperDockerFile {
 
     /// Make the current running binary the image's entrypoint, will call
     /// [SuperDockerFile::with_entrypoint]. If `to` is None, will create file as
-    /// /tmp/bootstrapped-{random[..6]}
+    /// /super-bootstrapped
     ///
     /// This is useful for defining a complete test using a single rust file by
     /// traversing through different branches of the code using the
@@ -232,7 +232,7 @@ impl SuperDockerFile {
         to: Option<String>,
         entrypoint_args: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self> {
-        let bootstrap_path = to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
+        let bootstrap_path = to.unwrap_or_else(|| "/super-bootstrapped".to_string());
 
         let binary_path = std::env::current_exe()
             .stack()?
@@ -295,7 +295,7 @@ impl SuperDockerFile {
             cur_binary_path.pop();
         }
 
-        let bootstrap_path = to.unwrap_or_else(|| crate::random_name("/bootstrapped-{}"));
+        let bootstrap_path = to.unwrap_or_else(|| "/super-bootstrapped".to_string());
 
         if !is_musl {
             tracing::debug!("Current binary is not linked with musl, building to accordingly");
