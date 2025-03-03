@@ -436,6 +436,67 @@ impl SuperNetwork {
             .await
             .stack()
     }
+
+    /// Wait for all listed containers to be health.
+    ///
+    /// If a container doesn't have a healthcheck it's automatically considered healthy.
+    #[tracing::instrument(skip_all,
+        fields(
+            network.name = %self.opts.name,
+        )
+    )]
+    pub async fn wait_healthy(&self, container_names: impl IntoIterator<Item = impl Into<String>>) -> Result<()> {
+        let futs = container_names.into_iter().map(|container_name| {
+            let container_name: String = container_name.into();
+
+            || Box::pin(async move {
+                Self::inspect_container(&container_name)
+                    .await
+                    .stack()
+                    .map(|res| res
+                    .is_some_and(|status| {
+                        if let Some(health) = status.health {
+                            health.status.is_some_and(|health_status| match health_status {
+                                bollard::secret::HealthStatusEnum::STARTING => {
+                                    tracing::debug!("{container_name} starting");
+                                    false
+                                },
+                                bollard::secret::HealthStatusEnum::HEALTHY => {
+                                    tracing::info!("{container_name} healthy!");
+                                    true
+                                },
+                                bollard::secret::HealthStatusEnum::UNHEALTHY => {
+                                    tracing::debug!("{container_name} unhealthy");
+                                    false
+                                }
+                                bollard::secret::HealthStatusEnum::EMPTY |
+                                bollard::secret::HealthStatusEnum::NONE => {
+                                    tracing::warn!("No healthcheck for container {container_name}");
+                                    true
+                                }
+                            })
+                        } else {
+                            tracing::warn!("No healthcheck for container {container_name}");
+                            true
+                        }
+                    }))
+            })
+        })
+        .collect::<Vec<_>>();
+
+        let mut finished = false;
+        while !finished {
+            let mut futs = futs.clone().into_iter().map(|x| x()).collect::<Vec<_>>();
+            finished = true;
+            while !futs.is_empty() {
+                let (res, _, rest) = futures::future::select_all(futs).await;
+                finished |= res.stack()?;
+                futs = rest;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[tracing::instrument(skip_all,
