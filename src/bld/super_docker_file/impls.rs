@@ -208,12 +208,17 @@ impl SuperDockerFile {
 
         let entrypoint_args = entrypoint_args
             .into_iter()
+            .collect::<Vec<_>>();
+        let entrypoint_args = (!entrypoint_args.is_empty())
+            .then(|| ", ".to_string() + &entrypoint_args
+                .into_iter()
             .map(|s| format!("\"{}\"", Into::into(s) as String))
             .collect::<Vec<String>>()
-            .join(", ");
+            .join(", "))
+            .unwrap_or_default();
 
         Ok(self.appending_dockerfile_instructions([format!(
-            r#"ENTRYPOINT ["{to}", {entrypoint_args}] "#,
+            r#"ENTRYPOINT ["{to}"{entrypoint_args}] "#,
         )]))
     }
 
