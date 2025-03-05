@@ -6,8 +6,9 @@ convenient tools for file management, command running, and Docker container mana
 
 First, see the documentation of `stacked_errors`
 (https://docs.rs/stacked_errors/latest/stacked_errors/) to understand the error strategy. Then, look
-over the documentation. Finally, check the examples in order of: paths, file_options,
-basic_commands, basic_containers, commands, dockerfile_entrypoint_pattern, postgres, and clean 
+over the documentation. Finally, check the examples (run the testcrate binaries from the root of the
+workspace via `cargo run --bin ...`) in order of: paths, file_options, basic_commands,
+basic_containers, commands, dockerfile_entrypoint_pattern, postgres, and clean 
 (note that some of these use UNIX specific commands that will not run successfully in some
 environments).
 

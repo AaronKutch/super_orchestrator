@@ -53,7 +53,8 @@ pub async fn wait_get_ip_addr(
 /// container id and runs `docker exec [exec_args..] [id] [container_args..`,
 /// forwarding stdin and stdout to whatever program is calling this. Using
 /// Ctrl-C causes this to force terminate the container and resume looping.
-/// Ctrl-C again terminates the whole program. See the testcrate examples for more.
+/// Ctrl-C again terminates the whole program. See the testcrate examples for
+/// more.
 pub async fn auto_exec<I0, I1, S0, S1, S2>(
     exec_args: I0,
     container_name: S2,

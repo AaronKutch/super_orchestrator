@@ -4,7 +4,7 @@ mod super_tar;
 
 use std::path::PathBuf;
 
-use bollard_wrappers::SuperBuildImageOptionsWrapper;
+pub use bollard_wrappers::SuperBuildImageOptionsWrapper;
 use super_tar::SuperTarballWrapper;
 
 use crate::docker_container::Dockerfile;
