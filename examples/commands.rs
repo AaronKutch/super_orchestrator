@@ -103,9 +103,9 @@ async fn main() -> Result<()> {
 
     // strange "filename or extension is too long" issue with Windows
     let many_bytes = if cfg!(windows) {
-        String::from_iter(iter::repeat('e').take(10 * 1024))
+        String::from_iter(iter::repeat_n('e', 10 * 1024))
     } else {
-        String::from_iter(iter::repeat('e').take(105 * 1024))
+        String::from_iter(iter::repeat_n('e', 105 * 1024))
     };
 
     // record and file size limiting, useful for some long running programs that may
@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
         .await
         .stack()?;
     comres.assert_success().stack()?;
-    let expected = String::from_iter(iter::repeat('e').take(10 * 1024));
+    let expected = String::from_iter(iter::repeat_n('e', 10 * 1024));
     ensure_eq!(comres.stdout, expected.as_bytes());
     ensure_eq!(comres.stderr, expected.as_bytes());
     let file = FileOptions::read_to_string("./logs/stdout.log")

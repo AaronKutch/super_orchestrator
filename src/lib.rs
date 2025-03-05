@@ -1,5 +1,7 @@
 //! See README.md for more
 
+#[cfg(feature = "bollard")]
+pub mod bld;
 mod command;
 mod command_runner;
 mod docker_container;
