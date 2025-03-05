@@ -6,7 +6,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, docker::ContainerNetwork, next_terminal_color, Command,
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
     CommandResult, CommandRunner, FileOptions,
 };
 

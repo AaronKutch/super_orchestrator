@@ -10,7 +10,7 @@ use clap::Parser;
 use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
-    docker::{Container, ContainerNetwork, Dockerfile},
+    cli_docker::{Container, ContainerNetwork, Dockerfile},
     sh, wait_for_ok, Command,
 };
 use tokio::{fs, time::sleep};

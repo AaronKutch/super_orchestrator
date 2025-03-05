@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
-    docker::{Container, ContainerNetwork, Dockerfile},
+    cli_docker::{Container, ContainerNetwork, Dockerfile},
     net_message::wait_for_ok_lookup_host,
 };
 use tracing::info;

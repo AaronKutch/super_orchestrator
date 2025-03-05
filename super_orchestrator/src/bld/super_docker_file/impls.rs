@@ -10,7 +10,7 @@ use futures::TryStreamExt;
 use stacked_errors::{Result, StackableErr};
 
 use super::*;
-use crate::{docker_container::Dockerfile, sh};
+use crate::{cli_docker::Dockerfile, sh};
 
 impl SuperDockerFile {
     #[tracing::instrument(skip_all, fields(

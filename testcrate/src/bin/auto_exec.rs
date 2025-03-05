@@ -1,6 +1,6 @@
 use clap::Parser;
 use stacked_errors::Result;
-use super_orchestrator::{ctrlc_init, docker_helpers::auto_exec};
+use super_orchestrator::{cli_docker::auto_exec, ctrlc_init};
 
 /// Runs `super_orchestrator::docker_helpers::auto_exec`, `-it` is passed by
 /// default

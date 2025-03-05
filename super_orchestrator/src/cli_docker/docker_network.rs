@@ -12,8 +12,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    docker::{Container, Dockerfile},
-    docker_helpers::wait_get_ip_addr,
+    cli_docker::{wait_get_ip_addr, Container, Dockerfile},
     Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 

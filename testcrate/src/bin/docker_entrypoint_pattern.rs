@@ -14,8 +14,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use stacked_errors::{bail, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
+    cli_docker::{Container, ContainerNetwork, Dockerfile},
     ctrlc_init,
-    docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
     sh, FileOptions,
 };

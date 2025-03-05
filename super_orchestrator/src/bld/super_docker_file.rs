@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub use bollard_wrappers::SuperBuildImageOptionsWrapper;
 use super_tar::SuperTarballWrapper;
 
-use crate::docker_container::Dockerfile;
+use crate::cli_docker::Dockerfile;
 
 /// Use this to create a docker file representation equivalent. It's useful for
 /// creating images.

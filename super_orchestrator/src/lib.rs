@@ -4,26 +4,21 @@
 pub mod bld;
 mod command;
 mod command_runner;
-mod docker_container;
-mod docker_network;
 mod file_options;
 mod misc;
 mod parsing;
+
+/// Docker container management, using the "docker" OS command as a backend.
+///
+/// See the `basic_containers`, `docker_entrypoint_pattern`, and `postgres`
+/// crate examples
+pub mod cli_docker;
 mod paths;
 pub use command::*;
 pub use command_runner::*;
-/// Miscellanious docker helpers
-pub mod docker_helpers;
 /// Communication with `NetMessenger`
 pub mod net_message;
 pub use file_options::*;
 pub use misc::*;
 pub use parsing::*;
 pub use paths::*;
-/// Docker container management
-///
-/// See the `basic_containers`, `docker_entrypoint_pattern`, and `postgres`
-/// crate examples
-pub mod docker {
-    pub use super::{docker_container::*, docker_network::*};
-}
