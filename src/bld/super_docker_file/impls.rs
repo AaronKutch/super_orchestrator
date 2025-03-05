@@ -148,7 +148,7 @@ impl SuperDockerFile {
     /// Where mode is the unix access modes octaves 0oXXX, defaults to 777
     pub async fn copying_from_contents(
         mut self,
-        v: impl IntoIterator<Item = (impl Into<String>, Option<u32>, Vec<u8>)>
+        v: impl IntoIterator<Item = (impl Into<String>, Option<u32>, Vec<u8>)>,
     ) -> Result<Self> {
         tracing::debug!("Current tarball paths: {:?}", self.tarball);
 
@@ -162,9 +162,11 @@ impl SuperDockerFile {
                 tokio::task::spawn_blocking(move || {
                     let mut this_ref = this.lock().unwrap();
 
+                    this_ref.appending_dockerfile_lines_mut([format!("COPY {to} {to}")]);
                     this_ref
-                        .appending_dockerfile_lines_mut([format!("COPY {to} {to}")]);
-                    this_ref.tarball.append_file_bytes(to, mode.unwrap_or(0o777), &content).stack()?;
+                        .tarball
+                        .append_file_bytes(to, mode.unwrap_or(0o777), &content)
+                        .stack()?;
 
                     Ok(()) as Result<_>
                 })
@@ -182,7 +184,6 @@ impl SuperDockerFile {
         tracing::debug!("New tarball paths: {:?}", self.tarball);
 
         Ok(self)
-
     }
 
     /// Add an `ENTRYPOINT` instruction and append its file to docker "build
@@ -206,15 +207,16 @@ impl SuperDockerFile {
             .stack()?;
         let (_, to) = resolve_from_to(entrypoint.0, entrypoint.1, self.build_path.clone());
 
-        let entrypoint_args = entrypoint_args
-            .into_iter()
-            .collect::<Vec<_>>();
+        let entrypoint_args = entrypoint_args.into_iter().collect::<Vec<_>>();
         let entrypoint_args = (!entrypoint_args.is_empty())
-            .then(|| ", ".to_string() + &entrypoint_args
-                .into_iter()
-            .map(|s| format!("\"{}\"", Into::into(s) as String))
-            .collect::<Vec<String>>()
-            .join(", "))
+            .then(|| {
+                ", ".to_string()
+                    + &entrypoint_args
+                        .into_iter()
+                        .map(|s| format!("\"{}\"", Into::into(s) as String))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+            })
             .unwrap_or_default();
 
         Ok(self.appending_dockerfile_instructions([format!(
@@ -269,11 +271,7 @@ impl SuperDockerFile {
         other_build_flags: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self> {
         let target_selection_flag = bootstrap_option.to_flag();
-        let musl_target_path = &mut vec![
-            "target",
-            "x86_64-unknown-linux-musl",
-            "release",
-        ];
+        let musl_target_path = &mut vec!["target", "x86_64-unknown-linux-musl", "release"];
 
         if let Some(path) = bootstrap_option.to_path_str() {
             musl_target_path.push(path);
@@ -320,7 +318,9 @@ impl SuperDockerFile {
             .stack()?;
             let entrypoint = &format!(
                 "./target/x86_64-unknown-linux-musl/release{}/{cur_binary_name}",
-                bootstrap_option.to_path_str().map_or_else(Default::default, |path| format!("/{path}")),
+                bootstrap_option
+                    .to_path_str()
+                    .map_or_else(Default::default, |path| format!("/{path}")),
             );
 
             self.with_entrypoint((entrypoint, Some(bootstrap_path)), entrypoint_args)

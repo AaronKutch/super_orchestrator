@@ -64,15 +64,17 @@ impl SuperNetwork {
             .map(|cn| {
                 let cn_name = cn.opts.name.clone();
 
-                |span: tracing::Span| Box::pin(async move {
-                    let _enter = span.enter();
+                |span: tracing::Span| {
+                    Box::pin(async move {
+                        let _enter = span.enter();
 
-                    let _ = total_teardown(&cn_name, [])
-                        .await
-                        .stack()
-                        .inspect_err(|err| tracing::error!("{err}"))
-                        .in_current_span();
-                })
+                        let _ = total_teardown(&cn_name, [])
+                            .await
+                            .stack()
+                            .inspect_err(|err| tracing::error!("{err}"))
+                            .in_current_span();
+                    })
+                }
             })
             .collect::<Vec<_>>();
         tokio::task::spawn(async move {
@@ -80,18 +82,18 @@ impl SuperNetwork {
             let _enter = span.enter();
 
             tracing::info!("ctrlc will teardown all networks");
-            if tokio::signal::ctrl_c().await.stack_err("Failed to wait for ctrlc").is_err() {
+            if tokio::signal::ctrl_c()
+                .await
+                .stack_err("Failed to wait for ctrlc")
+                .is_err()
+            {
                 std::process::exit(1);
             }
             tracing::info!("ctrlc detected, TEARING DOWN NETWORKS");
             // also log to stdout because it's immediate
             eprintln!("ctrlc detected, TEARING DOWN NETWORKS");
 
-            futures::future::join_all(
-                futs
-                    .into_iter()
-                    .map(|fut| fut(span.clone()))
-            ).await;
+            futures::future::join_all(futs.into_iter().map(|fut| fut(span.clone()))).await;
 
             std::process::exit(1);
         });
@@ -439,24 +441,33 @@ impl SuperNetwork {
 
     /// Wait for all listed containers to be health.
     ///
-    /// If a container doesn't have a healthcheck it's automatically considered healthy.
+    /// If a container doesn't have a healthcheck it's automatically considered
+    /// healthy.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
         )
     )]
-    pub async fn wait_healthy(&self, container_names: impl IntoIterator<Item = impl Into<String>>) -> Result<()> {
-        let futs = container_names.into_iter().map(|container_name| {
-            let container_name: String = container_name.into();
+    pub async fn wait_healthy(
+        &self,
+        container_names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<()> {
+        let futs =
+            container_names
+                .into_iter()
+                .map(|container_name| {
+                    let container_name: String = container_name.into();
 
-            || Box::pin(async move {
-                Self::inspect_container(&container_name)
-                    .await
-                    .stack()
-                    .map(|res| res
-                    .is_some_and(|status| {
-                        if let Some(health) = status.health {
-                            health.status.is_some_and(|health_status| match health_status {
+                    || {
+                        Box::pin(async move {
+                            Self::inspect_container(&container_name)
+                                .await
+                                .stack()
+                                .map(|res| {
+                                    res.is_some_and(|status| {
+                                        if let Some(health) = status.health {
+                                            health.status.is_some_and(|health_status| {
+                                                match health_status {
                                 bollard::secret::HealthStatusEnum::STARTING => {
                                     tracing::debug!("{container_name} starting");
                                     false
@@ -474,15 +485,20 @@ impl SuperNetwork {
                                     tracing::warn!("No healthcheck for container {container_name}");
                                     true
                                 }
-                            })
-                        } else {
-                            tracing::warn!("No healthcheck for container {container_name}");
-                            true
-                        }
-                    }))
-            })
-        })
-        .collect::<Vec<_>>();
+                            }
+                                            })
+                                        } else {
+                                            tracing::warn!(
+                                                "No healthcheck for container {container_name}"
+                                            );
+                                            true
+                                        }
+                                    })
+                                })
+                        })
+                    }
+                })
+                .collect::<Vec<_>>();
 
         let mut finished = false;
         while !finished {
@@ -587,7 +603,6 @@ async fn start_container(
         return Ok(())
     }
     live_container.should_be_started = true;
-
 
     let docker = get_or_init_default_docker_instance().await.stack()?;
 
@@ -749,7 +764,7 @@ async fn start_container(
                         if log_output {
                             eprintln!(
                                 "{prefix_err}{}",
-                                    &String::from_utf8_lossy(&message)
+                                &String::from_utf8_lossy(&message)
                                     .lines()
                                     .collect::<Vec<_>>()
                                     .join(&prefix_err_newline)

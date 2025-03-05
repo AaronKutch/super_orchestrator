@@ -6,7 +6,7 @@ pub use bollard::{
     container::{AttachContainerResults, LogOutput},
     errors::Error as BollardError,
     image::BuildImageOptions,
-    secret::{Ipam, IpamConfig, ContainerState, DeviceMapping},
+    secret::{ContainerState, DeviceMapping, Ipam, IpamConfig},
 };
 
 use super::super_docker_file::{SuperDockerFile, SuperImage};

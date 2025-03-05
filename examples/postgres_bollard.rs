@@ -212,6 +212,7 @@ async fn test_runner(postgres_name: String) -> Result<()> {
 
     tokio::fs::File::options()
         .write(true)
+        .truncate(true)
         .create(true)
         .open(ok_file)
         .await
