@@ -22,14 +22,15 @@ jobs:
         run: |
           cargo test --all-features
           cargo test --release --all-features
-          cargo r --example paths
-          cargo r --example file_options
-          cargo r --example basic_commands
-          cargo r --example commands
-          cargo r --example basic_containers
-          cargo r --example docker_entrypoint_pattern
-          cargo r --example postgres
-          cargo r --example clean
+          cargo r --bin paths
+          cargo r --bin file_options
+          cargo r --bin basic_commands
+          cargo r --bin commands
+          cargo r --bin basic_containers
+          cargo r --bin docker_entrypoint_pattern
+          cargo r --bin postgres
+          cargo r --bin postgres --features=bollard
+          cargo r --bin clean
 
   rustfmt:
     name: Rustfmt

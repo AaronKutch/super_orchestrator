@@ -258,7 +258,7 @@ impl SuperDockerFile {
     /// current binary. This is useful because musl is more portable and overall
     /// will just work when using as container entrypoint.
     ///
-    /// From cargo build --help, the relevant `target_selection_flag` s: --bin
+    /// From cargo build --help, the relevant `target_selection_flag`s: --bin
     /// --example --test --bench
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name

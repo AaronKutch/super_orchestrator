@@ -110,7 +110,7 @@ async fn container_runner(args: &Args) -> Result<()> {
                         "--postgres-name",
                         &postgres_name,
                     ],
-                    BootstrapOptions::Example,
+                    BootstrapOptions::Bin,
                     ["--features", "bollard"],
                 )
                 .await

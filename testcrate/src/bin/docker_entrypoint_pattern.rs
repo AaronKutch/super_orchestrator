@@ -1,7 +1,7 @@
-//! Note: change working directory to this crate's root in two separate
+//! Note: change working directory to this repo's root in two separate
 //! terminals. In one terminal, run
-//! `cargo r --example auto_exec -- --prefix container0`
-//! and in the other `cargo r --example docker_entrypoint_pattern`. The
+//! `cargo r --bin auto_exec -- --prefix container0`
+//! and in the other `cargo r --bin docker_entrypoint_pattern`. The
 //! `auto_exec` binary will automatically attach to the container with the
 //! matching prefix. Note that on windows you will need to use WSL 2 or else the
 //! cross compilation will fail at linking stage. The first terminal should
@@ -120,27 +120,15 @@ async fn container_runner(args: &Args) -> Result<()> {
     let container_target = TARGET;
 
     // build internal runner with `--release`
-    //sh([
-    //    "cargo build --release --bin",
-    //    bin_entrypoint,
-    //    "--target",
-    //    container_target,
-    //])
-    //.await
-    //.stack()?;
-    //let entrypoint =
-    // &format!("./target/{container_target}/release/{bin_entrypoint}");
-
-    // because this is an example we need a slightly different path
     sh([
-        "cargo build --release --example",
+        "cargo build --release --bin",
         bin_entrypoint,
         "--target",
         container_target,
     ])
     .await
     .stack()?;
-    let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
+    let entrypoint = &format!("./target/{container_target}/release/{bin_entrypoint}");
 
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
 

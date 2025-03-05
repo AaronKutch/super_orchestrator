@@ -18,8 +18,8 @@ use crate::{
 /// Ways of using a dockerfile for building a container
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Dockerfile {
-    /// Builds using an image in the format "name:tag" such as "fedora:40" or
-    /// "alpine:3.20" (running will call something such as `docker pull
+    /// Builds using an image in the format "name:tag" such as "fedora:41" or
+    /// "alpine:3.21" (running will call something such as `docker pull
     /// name:tag`)
     NameTag(String),
     /// Builds from a dockerfile on a path (e.x.
