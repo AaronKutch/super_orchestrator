@@ -19,7 +19,7 @@ use super_orchestrator::{
             SuperNetwork, SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
         },
     },
-    docker::Dockerfile,
+    cli_docker::Dockerfile,
     wait_for_ok, Command,
 };
 use tokio::{fs, io::AsyncWriteExt};
