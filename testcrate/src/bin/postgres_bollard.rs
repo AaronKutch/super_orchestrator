@@ -12,12 +12,10 @@ use clap::Parser;
 use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
-    bld::{
-        super_docker_file::{BootstrapOptions, SuperDockerFile},
-        super_manager::{
-            AddContainerOptions, OutputDirConfig, SuperContainerOptions, SuperCreateNetworkOptions,
-            SuperNetwork, SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
-        },
+    api_docker::{
+        AddContainerOptions, BootstrapOptions, OutputDirConfig, SuperContainerOptions,
+        SuperCreateNetworkOptions, SuperDockerFile, SuperNetwork,
+        SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
     wait_for_ok, Command,

@@ -1,60 +1,96 @@
-use std::{collections::HashSet, io::IsTerminal, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
 
+pub use bollard::{
+    container::{AttachContainerResults, LogOutput},
+    errors::Error as BollardError,
+    image::BuildImageOptions,
+    secret::{ContainerState, DeviceMapping, Ipam, IpamConfig},
+};
 use stacked_errors::{Result, StackableErr};
-use tokio::io::AsyncWriteExt;
 use tracing::{Instrument, Level};
 
-use super::*;
-use crate::{bld::docker_socket::get_or_init_default_docker_instance, next_terminal_color};
+use crate::api_docker::{
+    docker_socket::get_or_init_default_docker_instance, start_container, total_teardown,
+    DockerStdin, LiveContainer, SuperContainerOptions, SuperDockerFile, SuperImage,
+    SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
+};
 
-impl PortBind {
-    /// Results in option like <port>:<port>
-    pub fn new(port: u16) -> Self {
-        Self {
-            container_port: port,
-            host_port: Some(port),
-            host_ip: None,
-        }
-    }
+/// Constructs for managing containers in a controlled environment.
+/// Useful for creating integration tests and examples.
+///
+/// This module uses
+/// [SuperDockerFile](crate::bld::super_docker_file::SuperDockerFile) to create
+/// containers for testing and adds a simple way to declare docker networks,
+/// manage conatainers in the networks and check the outputs for effective
+/// testing.
 
-    /// Results in option like <host_port>:<container_port>
-    pub fn with_host_port(mut self, port: u16) -> Self {
-        self.host_port = Some(port);
-        self
-    }
-
-    /// Results in option like <ip>:<host_port>:<container_port>
-    pub fn with_host_ip(mut self, ip: IpAddr) -> Self {
-        self.host_ip = Some(ip);
-        self
-    }
+#[derive(Debug)]
+pub struct SuperNetwork {
+    // might be good for debug
+    #[allow(dead_code)]
+    network_id: String,
+    opts: SuperCreateNetworkOptions,
+    containers: HashMap<String, LiveContainer>,
 }
 
-impl From<u16> for PortBind {
-    fn from(port: u16) -> Self {
-        Self::new(port)
-    }
+#[derive(Debug)]
+pub enum AddContainerOptions {
+    /// Use an already specified image to create the container
+    Container {
+        image: SuperImage,
+    },
+    DockerFile {
+        docker_file: SuperDockerFile,
+    },
+    BollardArgs {
+        bollard_args: (BuildImageOptions<String>, Vec<u8>),
+    },
 }
 
-impl std::fmt::Debug for LiveContainer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            image,
-            container_opts,
-            network_opts,
-            should_be_started,
-            ..
-        } = self;
-        write!(
-            f,
-            r#"LiveContainer {{
-    image: {image:?},
-    container_opts: {container_opts:?},
-    network_opts: {network_opts:?}
-    should_be_started: {should_be_started:?},
-}}"#
-        )
-    }
+#[derive(Debug, Clone, Default)]
+pub struct SuperCreateNetworkOptions {
+    pub name: String,
+    pub driver: Option<String>,
+    pub enable_ipv6: bool,
+    pub options: HashMap<String, String>,
+    pub labels: HashMap<String, String>,
+    pub ipam: Ipam,
+    /// If set the network will shutdown and start a new network if there's a
+    /// name collision.
+    pub overwrite_existing: bool,
+    /// Configure an output directory for logging/assertions.
+    pub output_dir_config: Option<OutputDirConfig>,
+    /// If true, [SuperContainerOptions] with `log_outs: None` will use this
+    /// value as default
+    pub log_by_default: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OutputDirConfig {
+    /// Directory for dealing with outputs.
+    ///
+    /// Set value as a temporary directory or an
+    /// ignored directory in a repository. This won't mount the output dir,
+    /// it'll create other directories and mount them (by binding).
+    ///
+    /// This also adds env var SUPER_NETWORK_OUTPUT_DIR to the container. Add
+    /// outputs using the env var to ensure compatibility.
+    pub output_dir: String,
+    /// Write all captured output to a log file
+    pub save_logs: bool,
+}
+
+/// If any field is None, it'll be equivalent to passing no argument to `docker
+/// create` command.
+#[derive(Debug, Clone, Default)]
+pub struct SuperNetworkContainerOptions {
+    pub hostname: Option<String>,
+    pub mac_address: Option<String>,
 }
 
 impl SuperNetwork {
@@ -513,319 +549,4 @@ impl SuperNetwork {
 
         Ok(())
     }
-}
-
-#[tracing::instrument(skip_all,
-    fields(
-        network.name = %network_name,
-    )
-)]
-async fn total_teardown(
-    network_name: &String,
-    known_container_names: impl IntoIterator<Item = String>,
-) -> Result<()> {
-    let docker = get_or_init_default_docker_instance().await.stack()?;
-
-    let live_containers = docker
-        .inspect_network::<String>(network_name, None)
-        .await
-        .stack()?
-        .containers
-        .map_or_else(Vec::new, |containers| containers.into_keys().collect());
-
-    let mut futs = live_containers
-        .into_iter()
-        .chain(known_container_names)
-        .map(|container_name| {
-            let docker = docker.clone();
-
-            Box::pin(async move {
-                if let Ok(Some(container)) = SuperNetwork::inspect_container(&container_name)
-                    .await
-                    .stack()
-                {
-                    if container.running.is_some_and(|x| x) {
-                        docker
-                            .stop_container(
-                                &container_name,
-                                Some(bollard::container::StopContainerOptions { t: 5 }),
-                            )
-                            .await
-                            .inspect_err(|err| {
-                                tracing::debug!("failed to shutdown container Err: {err}")
-                            })
-                            .stack()?;
-                    }
-                }
-
-                Ok(()) as Result<_>
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let mut errs = vec![];
-
-    while !futs.is_empty() {
-        let (res, _, rest) = futures::future::select_all(futs).await;
-        if let Err(err) = res {
-            errs.push(err)
-        };
-        futs = rest;
-    }
-
-    if let Err(err) = docker.remove_network(network_name).await.stack() {
-        errs.push(err)
-    };
-
-    if let Some(last_err) = errs.pop() {
-        Err(errs
-            .into_iter()
-            .fold(last_err, |last_err, err| last_err.chain_errors(err)))
-    } else {
-        Ok(())
-    }
-}
-
-#[tracing::instrument(skip_all,
-    fields(
-        network.name = %network_name,
-        container.name = %live_container.container_opts.name,
-    )
-)]
-async fn start_container(
-    live_container: &mut LiveContainer,
-    network_name: String,
-    log_by_default: bool,
-    write_logs: bool,
-) -> Result<()> {
-    // start_container already called for this container
-    if live_container.should_be_started {
-        return Ok(())
-    }
-    live_container.should_be_started = true;
-
-    let docker = get_or_init_default_docker_instance().await.stack()?;
-
-    let (exposed_ports, port_bindings) =
-        port_bindings_to_bollard_args(&live_container.container_opts.port_bindings);
-
-    #[rustfmt::skip] /* because of comment size */
-    // [docker reference](https://docs.docker.com/reference/api/engine/version/v1.48/#tag/Container/operation/ContainerCreate)
-    // https://github.com/moby/moby/issues/2949
-    let (volumes, volume_binds) = Some((
-        live_container
-            .container_opts
-            .volumes
-            .iter()
-            .map(|(_, container)| (container.to_string(), Default::default()))
-            .collect(),
-        live_container
-            .container_opts
-            .volumes
-            .iter()
-            .map(|(host, container)| format!("{host}:{container}"))
-            .collect(),
-    ))
-    .unzip();
-
-    tracing::debug!("Creating container");
-
-    docker
-        .create_container(
-            Some(bollard::container::CreateContainerOptions {
-                name: live_container.container_opts.name.clone(),
-                ..Default::default()
-            }),
-            bollard::container::Config {
-                hostname: live_container.network_opts.hostname.clone(),
-                user: live_container.container_opts.user.clone(),
-                exposed_ports,
-                cmd: Some(live_container.container_opts.cmd.clone()),
-                image: Some(live_container.image.get_image_id().to_string()),
-                volumes,
-                env: Some(live_container.container_opts.env_vars.clone()),
-                mac_address: live_container.network_opts.mac_address.clone(),
-                host_config: Some(bollard::secret::HostConfig {
-                    cap_add: Some(live_container.container_opts.cap_adds.clone()),
-                    sysctls: Some(live_container.container_opts.sysctls.clone()),
-                    port_bindings,
-                    binds: volume_binds,
-                    privileged: Some(live_container.container_opts.priviledged),
-                    devices: Some(live_container.container_opts.devices.clone()),
-                    // don't flood user's containers
-                    auto_remove: Some(true),
-                    ..Default::default()
-                }),
-                // allows testing features
-                attach_stdin: Some(true),
-                attach_stdout: Some(true),
-                attach_stderr: Some(true),
-                tty: Some(true),
-                open_stdin: Some(true),
-                // setup network
-                networking_config: Some(bollard::container::NetworkingConfig {
-                    endpoints_config: [(
-                        network_name,
-                        // TODO: Could add some configuration for the network here
-                        Default::default(),
-                    )]
-                    .into_iter()
-                    .collect(),
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .inspect(|x| tracing::debug!(container.id = %x.id))
-        .stack()?;
-
-    tracing::debug!("Starting container");
-
-    docker
-        .start_container::<String>(&live_container.container_opts.name, None)
-        .await
-        .stack()?;
-
-    tracing::debug!("Attaching to container");
-
-    let response = docker
-        .attach_container(
-            &live_container.container_opts.name,
-            Some(bollard::container::AttachContainerOptions {
-                stdin: Some(true),
-                stdout: Some(true),
-                stderr: Some(true),
-                stream: Some(true),
-                logs: Some(true),
-                detach_keys: Some("ctrl-c"),
-            }),
-        )
-        .await
-        .stack()?;
-
-    live_container.stdin = Some(response.input);
-
-    // log docker outputs variables
-    let container_name = live_container.container_opts.name.clone();
-    let mut output = response.output;
-    let log_output = live_container
-        .container_opts
-        .log_outs
-        .unwrap_or(log_by_default);
-    let mut log_file = if let Some(mut log_file) = live_container
-        .output_dir
-        .as_ref()
-        .and_then(|output_dir| write_logs.then(|| output_dir.clone()))
-    {
-        log_file.push("super_log");
-        tokio::fs::File::options()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .read(true)
-            .open(log_file)
-            .await
-            .inspect_err(|err| tracing::warn!("When opening log file: {err}"))
-            .ok()
-    } else {
-        None
-    };
-
-    // log docker outputs handler
-    if log_output || log_file.is_some() {
-        tokio::spawn(async move {
-            use bollard::container::LogOutput;
-            use futures::stream::StreamExt;
-
-            let (prefix_out, prefix_err) = if std::io::stderr().is_terminal() {
-                let terminal_color = next_terminal_color();
-                (
-                    owo_colors::OwoColorize::color(
-                        &format!("{container_name}   | "),
-                        terminal_color,
-                    )
-                    .to_string(),
-                    owo_colors::OwoColorize::color(
-                        &format!("{container_name}  E| "),
-                        terminal_color,
-                    )
-                    .to_string(),
-                )
-            } else {
-                Default::default()
-            };
-
-            let prefix_err_newline = "\n".to_string() + &prefix_err;
-            let prefix_out_newline = "\n".to_string() + &prefix_out;
-
-            while let Some(output) = output.next().await {
-                match output.stack()? {
-                    LogOutput::StdErr { message } => {
-                        if log_output {
-                            eprintln!(
-                                "{prefix_err}{}",
-                                &String::from_utf8_lossy(&message)
-                                    .lines()
-                                    .collect::<Vec<_>>()
-                                    .join(&prefix_err_newline)
-                            )
-                        }
-                        if let Some(ref mut log_file) = log_file {
-                            log_file.write_all(&message).await.stack()?;
-                        }
-                    }
-                    // not sure why but all output comes from LogOutput::Console
-                    LogOutput::StdOut { message } | LogOutput::Console { message } => {
-                        if log_output {
-                            eprintln!(
-                                "{prefix_out}{}",
-                                &String::from_utf8_lossy(&message)
-                                    .lines()
-                                    .collect::<Vec<_>>()
-                                    .join(&prefix_out_newline)
-                            )
-                        }
-                        if let Some(ref mut log_file) = log_file {
-                            log_file.write_all(&message).await.stack()?;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            Ok(()) as Result<_>
-        });
-    }
-
-    Ok(())
-}
-
-#[allow(clippy::type_complexity)] /* internal only */
-fn port_bindings_to_bollard_args(
-    pbs: &[PortBind],
-) -> (
-    Option<HashMap<String, HashMap<(), ()>>>,
-    Option<HashMap<String, Option<Vec<bollard::secret::PortBinding>>>>,
-) {
-    Some(
-        pbs.iter()
-            .map(|pb| {
-                (
-                    (pb.container_port.to_string(), HashMap::new()),
-                    (
-                        pb.container_port.to_string(),
-                        Some(vec![bollard::secret::PortBinding {
-                            host_port: pb
-                                .host_port
-                                .or(Some(pb.container_port))
-                                .as_ref()
-                                .map(ToString::to_string),
-                            host_ip: pb.host_ip.as_ref().map(ToString::to_string),
-                        }]),
-                    ),
-                )
-            })
-            .unzip(),
-    )
-    .unzip()
 }

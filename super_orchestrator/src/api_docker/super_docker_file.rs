@@ -5,12 +5,86 @@ use std::{
 };
 
 use bollard::image::BuildImageOptions;
-use bollard_wrappers::SuperBuildImageOptionsWrapper;
 use futures::TryStreamExt;
 use stacked_errors::{Result, StackableErr};
 
-use super::*;
-use crate::{cli_docker::Dockerfile, sh};
+use crate::{
+    api_docker::{
+        docker_socket, resolve_from_to, BootstrapOptions, SuperBuildImageOptionsWrapper,
+        SuperImage, SuperTarballWrapper,
+    },
+    cli_docker::Dockerfile,
+    sh,
+};
+
+/// Describes all the details needed to create and run a reproducible container
+/// via the Docker API.
+///
+/// See the documentation for the [CLI version](crate::cli_docker::Container)
+/// first. Dockerfiles are a definition that is still variable at `docker build`
+/// time (by using different build args, having different files that a local
+/// "COPY" command uses, etc). Even the later CLI `docker create` is also
+/// variable due to voluming and some provider specific things. The API version
+/// of this instead includes these special external file arguments in a tarball,
+/// and its singular build step command has most of the things that `docker
+/// create` could do. This API version wrapper does not expose a `docker create`
+/// equivalent, since its remaining uses are provider-specific and hinder
+/// reproducibility. The `docker create` equivalent options can still be set in
+/// [SuperContainer](crate::bld::super_manager::SuperContainer) if desired.
+///
+/// Use [DockerFile] to define a "base" for it. All further function
+/// calls simply add options to the build command, prepare a tarball that will
+/// be used to seamlesly build the container, or push lines to the
+/// docker file.
+#[derive(Debug)]
+pub struct SuperDockerFile {
+    base: Dockerfile,
+    content_extend: Vec<u8>,
+    tarball: SuperTarballWrapper,
+    build_path: Option<PathBuf>,
+    image_name: Option<String>,
+
+    build_opts: SuperBuildImageOptionsWrapper,
+}
+
+async fn create_docker_file_returning_file_handle(sdf: &SuperDockerFile) -> Result<std::fs::File> {
+    let mut temp_file_name = std::env::temp_dir();
+    temp_file_name.push(uuid::Uuid::new_v4().to_string());
+
+    let file_contents = match &sdf.base {
+        Dockerfile::NameTag(nt) => Ok(format!("FROM {nt}").into_bytes()),
+        Dockerfile::Path(path) => std::fs::read(path).stack(),
+        Dockerfile::Contents(content) => Ok(content.clone().into_bytes()),
+    }
+    .map(|mut df| {
+        df.extend_from_slice(&sdf.content_extend);
+        df
+    })
+    .stack()?;
+
+    tracing::trace!(
+        "Creating container using docker file:\n{}",
+        String::from_utf8_lossy(&file_contents)
+    );
+
+    tokio::task::spawn_blocking(move || {
+        let mut temp_file = std::fs::File::options()
+            .truncate(true)
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(&temp_file_name)
+            .stack()?;
+
+        temp_file.write_all(&file_contents).stack()?;
+
+        temp_file.seek(std::io::SeekFrom::Start(0)).stack()?;
+
+        Ok(temp_file)
+    })
+    .await
+    .stack()?
+}
 
 impl SuperDockerFile {
     #[tracing::instrument(skip_all, fields(
@@ -398,7 +472,7 @@ impl SuperDockerFile {
         build_opts: BuildImageOptions<String>,
         tarball: Vec<u8>,
     ) -> Result<(SuperImage, Vec<u8>)> {
-        let docker_instance = crate::bld::docker_socket::get_or_init_default_docker_instance()
+        let docker_instance = docker_socket::get_or_init_default_docker_instance()
             .await
             .stack()?;
 
@@ -419,7 +493,7 @@ impl SuperDockerFile {
             .and_then(|x| x.id)
             .stack_err("image built without id")?;
 
-        Ok((SuperImage(image_id), tarball))
+        Ok((SuperImage::new(image_id), tarball))
     }
 
     /// Calls [SuperDockerFile::build_with_bollard_defaults] using the arguments
@@ -430,102 +504,5 @@ impl SuperDockerFile {
         Self::build_with_bollard_defaults(build_opts, tarball)
             .await
             .stack()
-    }
-}
-
-fn resolve_from_to(
-    from: impl ToString,
-    to: impl ToString,
-    build_path: Option<PathBuf>,
-) -> (String, String) {
-    let from: String = if let Some(ref build_path) = build_path {
-        build_path
-            .join(from.to_string())
-            .as_os_str()
-            .to_str()
-            .unwrap()
-            .to_string()
-    } else {
-        from.to_string()
-    };
-    let to = to.to_string();
-
-    (from, to)
-}
-
-async fn create_docker_file_returning_file_handle(sdf: &SuperDockerFile) -> Result<std::fs::File> {
-    let mut temp_file_name = std::env::temp_dir();
-    temp_file_name.push(uuid::Uuid::new_v4().to_string());
-
-    let file_contents = match &sdf.base {
-        Dockerfile::NameTag(nt) => Ok(format!("FROM {nt}").into_bytes()),
-        Dockerfile::Path(path) => std::fs::read(path).stack(),
-        Dockerfile::Contents(content) => Ok(content.clone().into_bytes()),
-    }
-    .map(|mut df| {
-        df.extend_from_slice(&sdf.content_extend);
-        df
-    })
-    .stack()?;
-
-    tracing::trace!(
-        "Creating container using docker file:\n{}",
-        String::from_utf8_lossy(&file_contents)
-    );
-
-    tokio::task::spawn_blocking(move || {
-        let mut temp_file = std::fs::File::options()
-            .truncate(true)
-            .create(true)
-            .write(true)
-            .read(true)
-            .open(&temp_file_name)
-            .stack()?;
-
-        temp_file.write_all(&file_contents).stack()?;
-
-        temp_file.seek(std::io::SeekFrom::Start(0)).stack()?;
-
-        Ok(temp_file)
-    })
-    .await
-    .stack()?
-}
-
-impl SuperImage {
-    pub fn new(image_id: String) -> Self {
-        Self(image_id)
-    }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-
-    pub fn get_image_id(&self) -> &str {
-        &self.0
-    }
-
-    pub fn to_docker_file(&self) -> SuperDockerFile {
-        SuperDockerFile::new(Dockerfile::name_tag(self.get_image_id()), None)
-    }
-}
-
-impl BootstrapOptions {
-    pub fn to_flag(self) -> &'static str {
-        match self {
-            BootstrapOptions::Example => "--example",
-            BootstrapOptions::Bin => "--bin",
-            BootstrapOptions::Test => "--test",
-            BootstrapOptions::Bench => "--bench",
-        }
-    }
-
-    pub fn to_path_str(self) -> Option<&'static str> {
-        match self {
-            BootstrapOptions::Example => Some("examples"),
-            BootstrapOptions::Test => Some("tests"),
-            BootstrapOptions::Bench => Some("benches"),
-            BootstrapOptions::Bin => None,
-        }
     }
 }

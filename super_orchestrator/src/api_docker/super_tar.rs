@@ -16,6 +16,7 @@ impl Default for SuperTarballWrapper {
     }
 }
 
+// avoid the `tar::Builder`s
 impl std::fmt::Debug for SuperTarballWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
