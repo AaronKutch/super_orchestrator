@@ -27,19 +27,26 @@ impl SuperImage {
     }
 }
 
+/// When using the docker entrypoint strategy, this specifies what domain the
+/// binaries are under (which affects where the binary ends up in the target
+/// folder).
 #[derive(Debug, Clone, Copy)]
 pub enum BootstrapOptions {
-    Example,
+    /// If this is a normal binary
     Bin,
+    /// If this is under the `example/` folder
+    Example,
+    /// If this is a test
     Test,
+    /// If this is a benchmark
     Bench,
 }
 
 impl BootstrapOptions {
     pub fn to_flag(self) -> &'static str {
         match self {
-            BootstrapOptions::Example => "--example",
             BootstrapOptions::Bin => "--bin",
+            BootstrapOptions::Example => "--example",
             BootstrapOptions::Test => "--test",
             BootstrapOptions::Bench => "--bench",
         }
@@ -47,17 +54,21 @@ impl BootstrapOptions {
 
     pub fn to_path_str(self) -> Option<&'static str> {
         match self {
+            BootstrapOptions::Bin => None,
             BootstrapOptions::Example => Some("examples"),
             BootstrapOptions::Test => Some("tests"),
             BootstrapOptions::Bench => Some("benches"),
-            BootstrapOptions::Bin => None,
         }
     }
 }
 
-/// Define port mapping like -p <host_ip>:<host_port>:<container_port>. Usually
-/// this shouldn't be used for integration testing because all container should
-/// already be accessible.
+/// Define port mapping like for the argument `-p
+/// <host_ip>:<host_port>:<container_port>`.
+///
+/// Usually, this shouldn't be used for integration testing because all
+/// containers in the same network should already be accessible (and container
+/// names are usually their hostname which can be used directly in URLs, see the
+/// examples).
 #[derive(Debug, Clone)]
 pub struct PortBind {
     container_port: u16,
@@ -66,7 +77,7 @@ pub struct PortBind {
 }
 
 impl PortBind {
-    /// Results in option like <port>:<port>
+    /// Results in the port mapping `<port>:<port>`
     pub fn new(port: u16) -> Self {
         Self {
             container_port: port,
@@ -75,27 +86,28 @@ impl PortBind {
         }
     }
 
-    /// Results in option like <host_port>:<container_port>
-    pub fn with_host_port(mut self, port: u16) -> Self {
-        self.host_port = Some(port);
+    /// Sets a different `host_port` in `<host_port>:<container_port>`
+    pub fn with_host_port(mut self, host_port: u16) -> Self {
+        self.host_port = Some(host_port);
         self
     }
 
-    /// Results in option like <ip>:<host_port>:<container_port>
-    pub fn with_host_ip(mut self, ip: IpAddr) -> Self {
-        self.host_ip = Some(ip);
+    /// Sets a different host IP in `<host_ip>:<host_port>:<container_port>`
+    pub fn with_host_ip(mut self, host_ip: IpAddr) -> Self {
+        self.host_ip = Some(host_ip);
         self
     }
 }
 
 impl From<u16> for PortBind {
+    /// Calls `Self::new(port)`
     fn from(port: u16) -> Self {
         Self::new(port)
     }
 }
 
-#[allow(clippy::type_complexity)] /* internal only */
-pub fn port_bindings_to_bollard_args(
+#[allow(clippy::type_complexity)] // internal only
+pub(crate) fn port_bindings_to_bollard_args(
     pbs: &[PortBind],
 ) -> (
     Option<HashMap<String, HashMap<(), ()>>>,
