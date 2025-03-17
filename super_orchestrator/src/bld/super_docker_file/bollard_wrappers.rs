@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub use bollard::image::BuilderVersion;
 
-/// Mostly a copy paste from
+/// Mostly copy pasted from
 /// [BuildImageOptions](bollard::image::BuildImageOptions), removing some fields
 /// that are handled by [SuperDockerFile](super::SuperDockerFile) and fields
 /// that are not handled by this implementation.
@@ -28,13 +28,13 @@ pub struct SuperBuildImageOptionsWrapper {
     pub forcerm: bool,
     /// Set memory limit for build.
     pub memory: Option<u64>,
-    /// Stringotal memory (memory + swap). Set as `-1` to disable swap.
+    /// Total memory (memory + swap). Set as `-1` to disable swap.
     pub memswap: Option<i64>,
     /// CPU shares (relative weight).
     pub cpushares: Option<u64>,
     /// CPUs in which to allow execution (e.g., `0-3`, `0,1`).
     pub cpusetcpus: String,
-    /// Stringhe length of a CPU period in microseconds.
+    /// The length of a CPU period in microseconds.
     pub cpuperiod: Option<u64>,
     /// Microseconds of CPU time that the container can get in a CPU period.
     pub cpuquota: Option<u64>,
@@ -43,7 +43,7 @@ pub struct SuperBuildImageOptionsWrapper {
     /// context for commands run via the `Dockerfile` RUN instruction, or
     /// for variable expansion in other `Dockerfile` instructions.
     pub buildargs: HashMap<String, String>,
-    /// Size of `/dev/shm` in bytes. Stringhe size must be greater than 0. If
+    /// Size of `/dev/shm` in bytes. The size must be greater than 0. If
     /// omitted the system uses 64MB.
     pub shmsize: Option<u64>,
     /// Squash the resulting images layers into a single layer.
@@ -58,7 +58,7 @@ pub struct SuperBuildImageOptionsWrapper {
     pub networkmode: String,
     /// Platform in the format `os[/arch[/variant]]`
     pub platform: String,
-    /// Stringarget build stage
+    /// Target build stage
     pub target: String,
     /// Builder version to use
     pub version: BuilderVersion,

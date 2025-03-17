@@ -35,7 +35,7 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
-default = []
+default = ["bollard"]
 # needed for Unix signals on `Command`s
 nix_support = ["nix"]
 # enable bollard backed features

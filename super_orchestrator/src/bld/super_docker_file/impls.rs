@@ -49,7 +49,7 @@ impl SuperDockerFile {
     ///
     /// `docker build [OPTS] <build_path>`
     ///
-    /// If you're copying relative files, they will be copied relative to
+    /// If you are copying relative files, they will be copied relative to
     /// the current build_path which resolves to cwd if not specified
     /// (absolute paths don't apply). So specify this before copying or defining
     /// entrypoint to have paths resolved according to build path.
@@ -86,25 +86,23 @@ impl SuperDockerFile {
     ))]
     pub fn appending_dockerfile_lines_mut(&mut self, v: impl IntoIterator<Item = impl AsRef<str>>) {
         for s in v {
-            // Extra \n is ok! :)
             self.content_extend.push(b'\n');
 
             self.content_extend.extend(s.as_ref().as_bytes());
         }
     }
 
-    /// Add a `COPY` instruction to docker file, when called this will copy the
-    /// file into memory so as long as it returns Ok(_), TOCTOU won't be a
-    /// problem.
+    /// Adds a `COPY` instruction to the dockerfile, copying a file at a file
+    /// path into memory. The argument receives an iterator with items as
+    /// `(host_source_path, image_destination_path)`.
     ///
-    /// The argument receives an iterator with items as (from, to). If to is
-    /// None, it'll be equivalent to (from, from).
+    /// As long as it returns `Ok(_)`, there cannot be TOCTOU problems.
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
     pub async fn copying_from_paths(
         mut self,
-        v: impl IntoIterator<Item = (impl Into<String>, Option<impl Into<String>>)>,
+        v: impl IntoIterator<Item = (impl ToString, impl ToString)>,
     ) -> Result<Self> {
         let build_path = self.build_path.clone();
 
@@ -132,7 +130,7 @@ impl SuperDockerFile {
 
         while !futs.is_empty() {
             let (res, _, rest) = futures::future::select_all(futs).await;
-            res.stack()??;
+            res.stack()?.stack()?;
             futs = rest;
         }
 
@@ -143,12 +141,14 @@ impl SuperDockerFile {
         Ok(self)
     }
 
-    /// The Item for the iterator is of the form (path, mode, content)
+    /// Adds a `COPY` instruction to the dockerfile, copying the contents of the
+    /// arguments to memory. The items are of the form `(destination_path, mode,
+    /// content)`
     ///
     /// Where mode is the unix access modes octaves 0oXXX, defaults to 777
     pub async fn copying_from_contents(
         mut self,
-        v: impl IntoIterator<Item = (impl Into<String>, Option<u32>, Vec<u8>)>,
+        v: impl IntoIterator<Item = (impl ToString, Option<u32>, Vec<u8>)>,
     ) -> Result<Self> {
         tracing::debug!("Current tarball paths: {:?}", self.tarball);
 
@@ -157,7 +157,7 @@ impl SuperDockerFile {
             .into_iter()
             .map(|(to, mode, content)| {
                 let this = this.clone();
-                let to: String = to.into();
+                let to = to.to_string();
 
                 tokio::task::spawn_blocking(move || {
                     let mut this_ref = this.lock().unwrap();
@@ -198,9 +198,10 @@ impl SuperDockerFile {
     ))]
     pub async fn with_entrypoint(
         mut self,
-        entrypoint: (impl Into<String> + Clone, Option<impl Into<String> + Clone>),
-        entrypoint_args: impl IntoIterator<Item = impl Into<String>>,
+        entrypoint: (impl ToString, impl ToString),
+        entrypoint_args: impl IntoIterator<Item = impl ToString>,
     ) -> Result<Self> {
+        let entrypoint = (entrypoint.0.to_string(), entrypoint.1.to_string());
         self = self
             .copying_from_paths([entrypoint.clone()])
             .await
@@ -213,7 +214,7 @@ impl SuperDockerFile {
                 ", ".to_string()
                     + &entrypoint_args
                         .into_iter()
-                        .map(|s| format!("\"{}\"", Into::into(s) as String))
+                        .map(|s| format!("\"{}\"", s.to_string()))
                         .collect::<Vec<String>>()
                         .join(", ")
             })
@@ -236,10 +237,10 @@ impl SuperDockerFile {
     ))]
     pub async fn bootstrap(
         self,
-        to: Option<String>,
-        entrypoint_args: impl IntoIterator<Item = impl Into<String>>,
+        to: impl ToString,
+        entrypoint_args: impl IntoIterator<Item = impl ToString>,
     ) -> Result<Self> {
-        let bootstrap_path = to.unwrap_or_else(|| "/super-bootstrapped".to_string());
+        let bootstrap_path = to;
 
         let binary_path = std::env::current_exe()
             .stack()?
@@ -249,7 +250,7 @@ impl SuperDockerFile {
 
         tracing::info!("Using path as entrypoint: {binary_path}");
 
-        self.with_entrypoint((binary_path, Some(bootstrap_path)), entrypoint_args)
+        self.with_entrypoint((binary_path, bootstrap_path), entrypoint_args)
             .await
     }
 
@@ -265,10 +266,10 @@ impl SuperDockerFile {
     ))]
     pub async fn bootstrap_musl(
         self,
-        to: Option<String>,
-        entrypoint_args: impl IntoIterator<Item = impl Into<String>>,
+        to: impl ToString,
+        entrypoint_args: impl IntoIterator<Item = impl ToString>,
         bootstrap_option: BootstrapOptions,
-        other_build_flags: impl IntoIterator<Item = impl Into<String>>,
+        other_build_flags: impl IntoIterator<Item = impl ToString>,
     ) -> Result<Self> {
         let target_selection_flag = bootstrap_option.to_flag();
         let musl_target_path = &mut vec!["target", "x86_64-unknown-linux-musl", "release"];
@@ -298,14 +299,14 @@ impl SuperDockerFile {
             cur_binary_path.pop();
         }
 
-        let bootstrap_path = to.unwrap_or_else(|| "/super-bootstrapped".to_string());
+        let bootstrap_path = to;
 
         if !is_musl {
             tracing::debug!("Current binary is not linked with musl, building to accordingly");
 
             let build_flags = other_build_flags
                 .into_iter()
-                .map(Into::into)
+                .map(|s| s.to_string())
                 .collect::<Vec<String>>();
             sh([
                 "cargo build -r --target x86_64-unknown-linux-musl",
@@ -323,12 +324,12 @@ impl SuperDockerFile {
                     .map_or_else(Default::default, |path| format!("/{path}")),
             );
 
-            self.with_entrypoint((entrypoint, Some(bootstrap_path)), entrypoint_args)
+            self.with_entrypoint((entrypoint, bootstrap_path), entrypoint_args)
                 .await
                 .stack()
         } else {
             tracing::debug!("Current binary is linked with musl, using it!");
-            self.bootstrap(Some(bootstrap_path), entrypoint_args)
+            self.bootstrap(bootstrap_path, entrypoint_args)
                 .await
                 .stack()
         }
@@ -433,21 +434,21 @@ impl SuperDockerFile {
 }
 
 fn resolve_from_to(
-    from: impl Into<String>,
-    to: Option<impl Into<String>>,
+    from: impl ToString,
+    to: impl ToString,
     build_path: Option<PathBuf>,
 ) -> (String, String) {
     let from: String = if let Some(ref build_path) = build_path {
         build_path
-            .join(from.into() as String)
+            .join(from.to_string())
             .as_os_str()
             .to_str()
             .unwrap()
             .to_string()
     } else {
-        from.into()
+        from.to_string()
     };
-    let to = to.map(|to| to.into()).unwrap_or_else(|| from.clone());
+    let to = to.to_string();
 
     (from, to)
 }

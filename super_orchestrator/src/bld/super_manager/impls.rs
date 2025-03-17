@@ -450,13 +450,13 @@ impl SuperNetwork {
     )]
     pub async fn wait_healthy(
         &self,
-        container_names: impl IntoIterator<Item = impl Into<String>>,
+        container_names: impl IntoIterator<Item = impl ToString>,
     ) -> Result<()> {
         let futs =
             container_names
                 .into_iter()
                 .map(|container_name| {
-                    let container_name: String = container_name.into();
+                    let container_name = container_name.to_string();
 
                     || {
                         Box::pin(async move {
