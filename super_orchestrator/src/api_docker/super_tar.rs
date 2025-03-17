@@ -2,12 +2,13 @@ use std::collections::HashSet;
 
 use stacked_errors::{Result, StackableErr};
 
-pub struct SuperTarballWrapper {
+/// A tarball for directly placing files in a container at definition time
+pub struct Tarball {
     tar: tar::Builder<Vec<u8>>,
     paths: HashSet<String>,
 }
 
-impl Default for SuperTarballWrapper {
+impl Default for Tarball {
     fn default() -> Self {
         Self {
             tar: tar::Builder::new(Vec::new()),
@@ -17,7 +18,7 @@ impl Default for SuperTarballWrapper {
 }
 
 // avoid the `tar::Builder`s
-impl std::fmt::Debug for SuperTarballWrapper {
+impl std::fmt::Debug for Tarball {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -31,7 +32,7 @@ impl std::fmt::Debug for SuperTarballWrapper {
     }
 }
 
-impl SuperTarballWrapper {
+impl Tarball {
     pub fn new(tarball: Vec<u8>) -> Result<Self> {
         // rebuild paths (useful for debugging)
         let mut archive = tar::Archive::new(std::io::Cursor::new(&tarball));

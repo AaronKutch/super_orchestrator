@@ -10,8 +10,8 @@ use stacked_errors::{Result, StackableErr};
 
 use crate::{
     api_docker::{
-        docker_socket, resolve_from_to, BootstrapOptions, SuperBuildImageOptionsWrapper,
-        SuperImage, SuperTarballWrapper,
+        docker_socket, resolve_from_to, BootstrapOptions, SuperImage, SuperImageBuildOptions,
+        Tarball,
     },
     cli_docker::Dockerfile,
     sh,
@@ -37,17 +37,17 @@ use crate::{
 /// be used to seamlesly build the container, or push lines to the
 /// docker file.
 #[derive(Debug)]
-pub struct SuperDockerFile {
+pub struct SuperDockerfile {
     base: Dockerfile,
     content_extend: Vec<u8>,
-    tarball: SuperTarballWrapper,
+    tarball: Tarball,
     build_path: Option<PathBuf>,
     image_name: Option<String>,
 
-    build_opts: SuperBuildImageOptionsWrapper,
+    build_opts: SuperImageBuildOptions,
 }
 
-async fn create_docker_file_returning_file_handle(sdf: &SuperDockerFile) -> Result<std::fs::File> {
+async fn create_docker_file_returning_file_handle(sdf: &SuperDockerfile) -> Result<std::fs::File> {
     let mut temp_file_name = std::env::temp_dir();
     temp_file_name.push(uuid::Uuid::new_v4().to_string());
 
@@ -86,7 +86,7 @@ async fn create_docker_file_returning_file_handle(sdf: &SuperDockerFile) -> Resu
     .stack()?
 }
 
-impl SuperDockerFile {
+impl SuperDockerfile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?image_name
     ))]
@@ -94,7 +94,7 @@ impl SuperDockerFile {
         Self {
             base,
             content_extend: Vec::new(),
-            build_opts: SuperBuildImageOptionsWrapper::default(),
+            build_opts: SuperImageBuildOptions::default(),
             tarball: Default::default(),
             image_name,
             build_path: None,
@@ -113,8 +113,8 @@ impl SuperDockerFile {
             base,
             image_name,
             content_extend: Vec::new(),
-            build_opts: SuperBuildImageOptionsWrapper::default(),
-            tarball: SuperTarballWrapper::new(tarball).stack()?,
+            build_opts: SuperImageBuildOptions::default(),
+            tarball: Tarball::new(tarball).stack()?,
             build_path: None,
         })
     }
@@ -138,7 +138,7 @@ impl SuperDockerFile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
-    pub fn with_build_opts(mut self, build_opts: SuperBuildImageOptionsWrapper) -> Self {
+    pub fn with_build_opts(mut self, build_opts: SuperImageBuildOptions) -> Self {
         self.build_opts = build_opts;
         self
     }

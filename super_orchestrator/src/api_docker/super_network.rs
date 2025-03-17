@@ -16,7 +16,7 @@ use tracing::{Instrument, Level};
 
 use crate::api_docker::{
     docker_socket::get_or_init_default_docker_instance, start_container, total_teardown,
-    DockerStdin, LiveContainer, SuperContainerOptions, SuperDockerFile, SuperImage,
+    DockerStdin, LiveContainer, SuperContainerOptions, SuperDockerfile, SuperImage,
     SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
@@ -45,7 +45,7 @@ pub enum AddContainerOptions {
         image: SuperImage,
     },
     DockerFile {
-        docker_file: SuperDockerFile,
+        docker_file: SuperDockerfile,
     },
     BollardArgs {
         bollard_args: (BuildImageOptions<String>, Vec<u8>),
@@ -225,7 +225,7 @@ impl SuperNetwork {
                     AddContainerOptions::Container { image } => image.to_docker_file(),
                     AddContainerOptions::DockerFile { docker_file } => docker_file,
                     AddContainerOptions::BollardArgs { bollard_args } => {
-                        SuperDockerFile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
+                        SuperDockerfile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
                             .await
                             .stack()?
                             .0
@@ -283,7 +283,7 @@ impl SuperNetwork {
                 docker_file.build_image().await.stack()?.0
             }
             AddContainerOptions::BollardArgs { bollard_args } => {
-                SuperDockerFile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
+                SuperDockerfile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
                     .await
                     .stack()?
                     .0

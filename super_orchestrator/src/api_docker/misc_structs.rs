@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::IpAddr};
 
-use crate::{api_docker::SuperDockerFile, cli_docker::Dockerfile};
+use crate::{api_docker::SuperDockerfile, cli_docker::Dockerfile};
 
 // TODO do we need this?
 /// Wrapper struct for the image, call [SuperImage::get_image_id] to get the id
@@ -22,8 +22,8 @@ impl SuperImage {
         &self.0
     }
 
-    pub fn to_docker_file(&self) -> SuperDockerFile {
-        SuperDockerFile::new(Dockerfile::name_tag(self.get_image_id()), None)
+    pub fn to_docker_file(&self) -> SuperDockerfile {
+        SuperDockerfile::new(Dockerfile::name_tag(self.get_image_id()), None)
     }
 }
 

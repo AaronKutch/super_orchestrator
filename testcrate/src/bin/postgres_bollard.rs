@@ -14,7 +14,7 @@ use super_orchestrator::{
     acquire_dir_path,
     api_docker::{
         AddContainerOptions, BootstrapOptions, OutputDirConfig, SuperContainerOptions,
-        SuperCreateNetworkOptions, SuperDockerFile, SuperNetwork,
+        SuperCreateNetworkOptions, SuperDockerfile, SuperNetwork,
         SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
@@ -99,7 +99,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.add_container(
         AddContainerOptions::Container {
-            image: SuperDockerFile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
+            image: SuperDockerfile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
                 .bootstrap_musl(
                     None,
                     [
@@ -126,7 +126,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.add_container(
         AddContainerOptions::DockerFile {
-            docker_file: SuperDockerFile::new(Dockerfile::name_tag("postgres:16"), None)
+            docker_file: SuperDockerfile::new(Dockerfile::name_tag("postgres:16"), None)
                 .appending_dockerfile_instructions([
                     "ENV POSTGRES_PASSWORD=root",
                     "ENV POSTGRES_USER=postgres",
