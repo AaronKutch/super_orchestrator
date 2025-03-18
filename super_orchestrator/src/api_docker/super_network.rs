@@ -13,7 +13,7 @@ use tracing::{Instrument, Level};
 use crate::api_docker::{
     docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerCreateOptions,
     ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
-    SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
+    CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
 /// Manages a set of containers in a controlled environment.
@@ -262,7 +262,7 @@ impl ContainerNetwork {
                 .volumes
                 .push((output_dir_str.to_string(), "/super_out".to_string()));
             container.env_vars.push(format!(
-                "{SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_out"
+                "{CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_out"
             ));
 
             Some(output_dir)

@@ -15,7 +15,7 @@ use super_orchestrator::{
     api_docker::{
         AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
         NetworkCreateOptions, OutputDirConfig, SuperDockerfile,
-        SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
+        CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
     wait_for_ok, Command,
@@ -204,7 +204,7 @@ async fn test_runner(postgres_name: String) -> Result<()> {
     info!("postgres is ready");
 
     let mut ok_file =
-        PathBuf::from_str(&std::env::var(SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).unwrap())
+        PathBuf::from_str(&std::env::var(CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).unwrap())
             .stack()?;
     ok_file.push("ok");
 
