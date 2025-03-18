@@ -88,27 +88,16 @@ pub struct ExtraAddContainerOptions {
     pub mac_address: Option<String>,
 }
 
+// TODO make the rest of `super_orchestrator` use tokio::signal::ctrl_c instead,
+// but check if multiple `ctrl_c` can be used in parallel
+
+// TODO make `cli_docker::ContainerNetwork` use more of the style used here
+
 impl ContainerNetwork {
-    /// Configures total teardown on ctrl-c.
-    pub fn teardown_on_ctrlc<'a>(cns: impl IntoIterator<Item = &'a ContainerNetwork>) {
-        let futs = cns
-            .into_iter()
-            .map(|cn| {
-                let cn_name = cn.opts.name.clone();
-
-                |span: tracing::Span| {
-                    Box::pin(async move {
-                        let _enter = span.enter();
-
-                        let _ = total_teardown(&cn_name, [])
-                            .await
-                            .stack()
-                            .inspect_err(|err| tracing::error!("{err}"))
-                            .in_current_span();
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
+    /// Configures total teardown on ctrl-c. This also calls
+    /// `std::process::exit(1);`
+    pub fn teardown_on_ctrlc(&self) {
+        let cn_name = self.opts.name.clone();
         tokio::task::spawn(async move {
             let span = tracing::span!(Level::INFO, "ctrlc handler");
             let _enter = span.enter();
@@ -125,7 +114,11 @@ impl ContainerNetwork {
             // also log to stdout because it's immediate
             eprintln!("ctrlc detected, TEARING DOWN NETWORKS");
 
-            futures::future::join_all(futs.into_iter().map(|fut| fut(span.clone()))).await;
+            let _ = total_teardown(&cn_name, [])
+                .await
+                .stack()
+                .inspect_err(|err| tracing::error!("{err}"))
+                .in_current_span();
 
             std::process::exit(1);
         });

@@ -19,7 +19,6 @@ use super_orchestrator::{
         AddContainerOptions, ContainerCreateOptions, ContainerNetwork, Dockerfile,
         NetworkCreateOptions, OutputDirConfig, SuperDockerfile, Tarball,
     },
-    ctrlc_init,
     net_message::NetMessenger,
     FileOptions,
 };
@@ -222,15 +221,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     .await
     .stack()?;
 
-    // Whenever using the docker entrypoint pattern or similar setup where there is
-    // a dedicated container runner function that is just calling
-    // `wait_important` before `terminate_all` and exiting, `ctrlc_init`
-    // should be used just before the `start_all`. This will then allow
-    // `wait_with_timeout` the time to stop all containers before returning an
-    // error, if a Ctrl+C or sigterm signal is issued. This may take a few moments.
-    // Ctrl-C will work like intended in other cases and times.
-
-    ctrlc_init().unwrap();
+    cn.teardown_on_ctrlc();
 
     cn.start_all().await.stack()?;
 
