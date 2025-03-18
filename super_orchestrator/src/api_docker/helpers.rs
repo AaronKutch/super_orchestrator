@@ -12,13 +12,17 @@ pub fn get_network_output_dir() -> Option<String> {
     std::env::var(SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).ok()
 }
 
+/// The trait object for writing to a container's stdin
 pub type DockerStdin = Pin<Box<dyn tokio::io::AsyncWrite + Send>>;
 
+/// The trait object for receiving a container's stdout
 pub type DockerOutput =
     Pin<Box<dyn futures::stream::Stream<Item = Result<LogOutput, BollardError>> + Send>>;
 
+/// A callback style function for getting the container's stdout
 pub type OutputHook = Box<dyn Fn(&Result<LogOutput, BollardError>) -> stacked_errors::Result<()>>;
 
+/// Thinks regarding the docker API socket
 pub mod docker_socket {
     use std::sync::{LazyLock, OnceLock};
 

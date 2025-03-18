@@ -9,6 +9,7 @@ pub struct Tarball {
 }
 
 impl Default for Tarball {
+    /// An empty tarball
     fn default() -> Self {
         Self {
             tar: tar::Builder::new(Vec::new()),
@@ -33,6 +34,8 @@ impl std::fmt::Debug for Tarball {
 }
 
 impl Tarball {
+    /// Uses the bytes of an existing tarball, also parsing and checking that
+    /// the paths are valid UTF-8
     pub fn new(tarball: Vec<u8>) -> Result<Self> {
         // rebuild paths (useful for debugging)
         let mut archive = tar::Archive::new(std::io::Cursor::new(&tarball));
@@ -56,6 +59,8 @@ impl Tarball {
         })
     }
 
+    /// Append a file that will go to the given `path`, with `mode` and the
+    /// bytes of the `content` of the file
     pub fn append_file_bytes(&mut self, path: String, mode: u32, content: &[u8]) -> Result<()> {
         let header = &mut tar::Header::new_gnu();
         header.set_size(content.len() as _);
@@ -64,11 +69,13 @@ impl Tarball {
         self.tar.append_data(header, path, content).stack()
     }
 
+    /// Uses a `std::fs::File` and its metadata
     pub fn append_file(&mut self, path: String, file: &mut std::fs::File) -> Result<()> {
         self.paths.insert(path.clone());
         self.tar.append_file(path, file).stack()
     }
 
+    /// Get the bytes of a tarball
     pub fn into_tarball(self) -> Result<Vec<u8>> {
         self.tar.into_inner().stack()
     }

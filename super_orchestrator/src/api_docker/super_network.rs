@@ -11,12 +11,12 @@ use stacked_errors::{Result, StackableErr};
 use tracing::{Instrument, Level};
 
 use crate::api_docker::{
-    docker_socket::get_or_init_default_docker_instance, start_container, total_teardown,
-    DockerStdin, LiveContainer, SuperContainerOptions, SuperDockerfile, SuperImage,
+    docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerRunner,
+    DockerStdin, SuperContainerCreateOptions, SuperDockerfile, SuperImage,
     SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
-/// Manages as set containers in a controlled environment.
+/// Manages a set of containers in a controlled environment.
 /// Useful for creating integration tests and examples.
 ///
 /// This module uses [SuperDockerfile]s to create containers for testing and
@@ -27,26 +27,25 @@ pub struct SuperNetwork {
     // might be good for debug
     #[allow(dead_code)]
     network_id: String,
-    opts: SuperCreateNetworkOptions,
-    containers: HashMap<String, LiveContainer>,
+    opts: SuperNetworkCreateOptions,
+    containers: HashMap<String, ContainerRunner>,
 }
 
 #[derive(Debug)]
 pub enum AddContainerOptions {
     /// Use an already specified image to create the container
-    Container {
-        image: SuperImage,
-    },
-    DockerFile {
-        docker_file: SuperDockerfile,
-    },
+    Container { image: SuperImage },
+    /// Use our [SuperDockerfile] construct
+    DockerFile { docker_file: SuperDockerfile },
+    /// Use Bollard arguments with a tarball
     BollardArgs {
         bollard_args: (bollard::image::BuildImageOptions<String>, Vec<u8>),
     },
 }
 
+/// Options for the API equivalent of `docker network create`
 #[derive(Debug, Clone, Default)]
-pub struct SuperCreateNetworkOptions {
+pub struct SuperNetworkCreateOptions {
     pub name: String,
     pub driver: Option<String>,
     pub enable_ipv6: bool,
@@ -58,8 +57,8 @@ pub struct SuperCreateNetworkOptions {
     pub overwrite_existing: bool,
     /// Configure an output directory for logging/assertions.
     pub output_dir_config: Option<OutputDirConfig>,
-    /// If true, [SuperContainerOptions] with `log_outs: None` will use this
-    /// value as default
+    /// If true, [SuperContainerCreateOptions] with `log_outs: None` will use
+    /// this value as default
     pub log_by_default: bool,
 }
 
@@ -78,8 +77,8 @@ pub struct OutputDirConfig {
     pub save_logs: bool,
 }
 
-/// If any field is None, it'll be equivalent to passing no argument to `docker
-/// create` command.
+/// If any field is `None`, it will be equivalent to passing no argument to
+/// `docker create` command.
 #[derive(Debug, Clone, Default)]
 pub struct SuperNetworkContainerOptions {
     pub hostname: Option<String>,
@@ -140,7 +139,7 @@ impl SuperNetwork {
             network.name = %opts.name,
         )
     )]
-    pub async fn create(opts: SuperCreateNetworkOptions) -> Result<Self> {
+    pub async fn create(opts: SuperNetworkCreateOptions) -> Result<Self> {
         let docker = get_or_init_default_docker_instance().await.stack()?;
 
         if let Some(network_name) = docker
@@ -202,7 +201,7 @@ impl SuperNetwork {
         &mut self,
         mut add_opts: AddContainerOptions,
         network_opts: SuperNetworkContainerOptions,
-        mut container: SuperContainerOptions,
+        mut container: SuperContainerCreateOptions,
     ) -> Result<()> {
         if self.containers.contains_key(&container.name) {
             return Err("Name is already registered").stack();
@@ -284,7 +283,7 @@ impl SuperNetwork {
         };
 
         self.containers
-            .insert(container.name.clone(), LiveContainer {
+            .insert(container.name.clone(), ContainerRunner {
                 should_be_started: false,
                 image,
                 container_opts: container,
@@ -307,21 +306,21 @@ impl SuperNetwork {
         )
     )]
     pub async fn start_container(&mut self, container_name: &str) -> Result<()> {
-        let Some(live_container) = self.containers.get_mut(container_name) else {
+        let Some(container_runner) = self.containers.get_mut(container_name) else {
             return Err(format!("Container with name {container_name} not found")).stack();
         };
 
-        start_container(
-            live_container,
-            self.opts.name.clone(),
-            self.opts.log_by_default,
-            self.opts
-                .output_dir_config
-                .as_ref()
-                .is_some_and(|config| config.save_logs),
-        )
-        .await
-        .stack()
+        container_runner
+            .start_container(
+                self.opts.name.clone(),
+                self.opts.log_by_default,
+                self.opts
+                    .output_dir_config
+                    .as_ref()
+                    .is_some_and(|config| config.save_logs),
+            )
+            .await
+            .stack()
     }
 
     /// Calls [SuperNetwork::start_container] for all registered containers.
@@ -336,16 +335,17 @@ impl SuperNetwork {
         let mut futs = self
             .containers
             .values_mut()
-            .map(|live_container| {
-                Box::pin(start_container(
-                    live_container,
-                    network_name.clone(),
-                    self.opts.log_by_default,
-                    self.opts
-                        .output_dir_config
-                        .as_ref()
-                        .is_some_and(|config| config.save_logs),
-                ))
+            .map(|container_runner| {
+                Box::pin(
+                    container_runner.start_container(
+                        network_name.clone(),
+                        self.opts.log_by_default,
+                        self.opts
+                            .output_dir_config
+                            .as_ref()
+                            .is_some_and(|config| config.save_logs),
+                    ),
+                )
             })
             .collect::<Vec<_>>();
 
