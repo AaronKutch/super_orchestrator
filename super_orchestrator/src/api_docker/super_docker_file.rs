@@ -9,8 +9,7 @@ use stacked_errors::{Result, StackableErr};
 
 use crate::{
     api_docker::{
-        docker_socket, resolve_from_to, BootstrapOptions, SuperImage, SuperImageBuildOptions,
-        Tarball,
+        docker_socket, resolve_from_to, BootstrapOptions, ImageBuildOptions, SuperImage, Tarball,
     },
     cli_docker::Dockerfile,
     sh,
@@ -43,7 +42,7 @@ pub struct SuperDockerfile {
     build_path: Option<PathBuf>,
     image_name: Option<String>,
 
-    build_opts: SuperImageBuildOptions,
+    build_opts: ImageBuildOptions,
 }
 
 /// Creates a dockerfile using the [SuperDockerfile], returnig a [std::fs::File]
@@ -95,7 +94,7 @@ impl SuperDockerfile {
         Self {
             base,
             content_extend: Vec::new(),
-            build_opts: SuperImageBuildOptions::default(),
+            build_opts: ImageBuildOptions::default(),
             tarball: Default::default(),
             image_name,
             build_path: None,
@@ -114,7 +113,7 @@ impl SuperDockerfile {
             base,
             image_name,
             content_extend: Vec::new(),
-            build_opts: SuperImageBuildOptions::default(),
+            build_opts: ImageBuildOptions::default(),
             tarball: Tarball::new(tarball).stack()?,
             build_path: None,
         })
@@ -140,7 +139,7 @@ impl SuperDockerfile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
-    pub fn with_build_opts(mut self, build_opts: SuperImageBuildOptions) -> Self {
+    pub fn with_build_opts(mut self, build_opts: ImageBuildOptions) -> Self {
         self.build_opts = build_opts;
         self
     }

@@ -22,7 +22,7 @@ pub type DockerOutput =
 /// A callback style function for getting the container's stdout
 pub type OutputHook = Box<dyn Fn(&Result<LogOutput, BollardError>) -> stacked_errors::Result<()>>;
 
-/// Thinks regarding the docker API socket
+/// Things regarding the docker API socket
 pub mod docker_socket {
     use std::sync::{LazyLock, OnceLock};
 

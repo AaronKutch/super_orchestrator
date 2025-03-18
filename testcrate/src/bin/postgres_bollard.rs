@@ -13,8 +13,8 @@ use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
     api_docker::{
-        AddContainerOptions, BootstrapOptions, OutputDirConfig, SuperContainerCreateOptions,
-        SuperDockerfile, SuperNetwork, SuperNetworkCreateOptions,
+        AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
+        NetworkCreateOptions, OutputDirConfig, SuperDockerfile,
         SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
@@ -70,7 +70,7 @@ async fn container_runner(args: &Args) -> Result<()> {
         fs::create_dir_all(&pg_data_path).await.stack()?;
     }
 
-    let mut cn = SuperNetwork::create(SuperNetworkCreateOptions {
+    let mut cn = ContainerNetwork::create(NetworkCreateOptions {
         name: "test_postgres_bollard".to_string(),
         overwrite_existing: true,
         log_by_default: true,
@@ -91,7 +91,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     let test_runner_name = super_orchestrator::random_name("test_runner".to_string());
     let postgres_name = super_orchestrator::random_name("postgres".to_string());
 
-    let container_opts = SuperContainerCreateOptions {
+    let container_opts = ContainerCreateOptions {
         name: test_runner_name.clone(),
         important: true,
         ..Default::default()
@@ -127,7 +127,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_container(
         AddContainerOptions::DockerFile(
             SuperDockerfile::new(Dockerfile::name_tag("postgres:16"), None)
-                .appending_dockerfile_instructions([
+                .append_dockerfile_instructions([
                     "ENV POSTGRES_PASSWORD=root",
                     "ENV POSTGRES_USER=postgres",
                     // this conveniently causes postgres to create a
@@ -137,7 +137,7 @@ async fn container_runner(args: &Args) -> Result<()> {
                 ]),
         ),
         Default::default(),
-        SuperContainerCreateOptions {
+        ContainerCreateOptions {
             name: postgres_name,
             volumes: [(
                 pg_data_path.to_str().stack()?.to_string(),

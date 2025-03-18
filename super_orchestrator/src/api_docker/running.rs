@@ -8,14 +8,14 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     api_docker::{
         docker_socket::get_or_init_default_docker_instance, port_bindings_to_bollard_args,
-        DockerStdin, PortBind, SuperImage, SuperNetwork, SuperNetworkContainerOptions,
+        ContainerNetwork, ContainerNetworkContainerOptions, DockerStdin, PortBind, SuperImage,
     },
     next_terminal_color,
 };
 
 /// The arguments to the API's equivalent of `docker create`.
 #[derive(Debug, Clone, Default)]
-pub struct SuperContainerCreateOptions {
+pub struct ContainerCreateOptions {
     pub name: String,
     pub user: Option<String>,
     pub cmd: Vec<String>,
@@ -27,9 +27,9 @@ pub struct SuperContainerCreateOptions {
     pub port_bindings: Vec<PortBind>,
     pub devices: Vec<DeviceMapping>,
     /// Wether the network should wait for the container to shutdown during a
-    /// [SuperNetwork::wait_important] call
+    /// [ContainerNetwork::wait_important] call
     pub important: bool,
-    /// When defined, overwrites the default set in [SuperNetwork].
+    /// When defined, overwrites the default set in [ContainerNetwork].
     ///
     /// When log_outs is activated the network will use `docker attach` to read
     /// stdout and stderr from container and log to stderr
@@ -39,8 +39,8 @@ pub struct SuperContainerCreateOptions {
 /// A struct for the metadata regarding a running container
 pub struct ContainerRunner {
     pub image: SuperImage,
-    pub container_opts: SuperContainerCreateOptions,
-    pub network_opts: SuperNetworkContainerOptions,
+    pub container_opts: ContainerCreateOptions,
+    pub network_opts: ContainerNetworkContainerOptions,
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
     pub output_dir: Option<PathBuf>,
@@ -308,7 +308,7 @@ pub async fn total_teardown(
             let docker = docker.clone();
 
             Box::pin(async move {
-                if let Ok(Some(container)) = SuperNetwork::inspect_container(&container_name)
+                if let Ok(Some(container)) = ContainerNetwork::inspect_container(&container_name)
                     .await
                     .stack()
                 {

@@ -11,8 +11,8 @@ use stacked_errors::{Result, StackableErr};
 use tracing::{Instrument, Level};
 
 use crate::api_docker::{
-    docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerRunner,
-    DockerStdin, SuperContainerCreateOptions, SuperDockerfile, SuperImage,
+    docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerCreateOptions,
+    ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
     SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
@@ -23,11 +23,11 @@ use crate::api_docker::{
 /// adds a simple way to declare docker networks, manage conatainers in the
 /// networks and can compile the outputs for effective testing.
 #[derive(Debug)]
-pub struct SuperNetwork {
+pub struct ContainerNetwork {
     // might be good for debug
     #[allow(dead_code)]
     network_id: String,
-    opts: SuperNetworkCreateOptions,
+    opts: NetworkCreateOptions,
     containers: HashMap<String, ContainerRunner>,
 }
 
@@ -47,7 +47,7 @@ pub enum AddContainerOptions {
 
 /// Options for the API equivalent of `docker network create`
 #[derive(Debug, Clone, Default)]
-pub struct SuperNetworkCreateOptions {
+pub struct NetworkCreateOptions {
     pub name: String,
     pub driver: Option<String>,
     pub enable_ipv6: bool,
@@ -59,7 +59,7 @@ pub struct SuperNetworkCreateOptions {
     pub overwrite_existing: bool,
     /// Configure an output directory for logging/assertions.
     pub output_dir_config: Option<OutputDirConfig>,
-    /// If true, [SuperContainerCreateOptions] with `log_outs: None` will use
+    /// If true, [ContainerCreateOptions] with `log_outs: None` will use
     /// this value as default
     pub log_by_default: bool,
 }
@@ -82,14 +82,14 @@ pub struct OutputDirConfig {
 /// If any field is `None`, it will be equivalent to passing no argument to
 /// `docker create` command.
 #[derive(Debug, Clone, Default)]
-pub struct SuperNetworkContainerOptions {
+pub struct ContainerNetworkContainerOptions {
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
 }
 
-impl SuperNetwork {
+impl ContainerNetwork {
     /// Configures total teardown on ctrl-c.
-    pub fn teardown_on_ctrlc<'a>(cns: impl IntoIterator<Item = &'a SuperNetwork>) {
+    pub fn teardown_on_ctrlc<'a>(cns: impl IntoIterator<Item = &'a ContainerNetwork>) {
         let futs = cns
             .into_iter()
             .map(|cn| {
@@ -139,7 +139,7 @@ impl SuperNetwork {
             network.name = %opts.name,
         )
     )]
-    pub async fn create(opts: SuperNetworkCreateOptions) -> Result<Self> {
+    pub async fn create(opts: NetworkCreateOptions) -> Result<Self> {
         let docker = get_or_init_default_docker_instance().await.stack()?;
 
         if let Some(network_name) = docker
@@ -200,8 +200,8 @@ impl SuperNetwork {
     pub async fn add_container(
         &mut self,
         mut add_opts: AddContainerOptions,
-        network_opts: SuperNetworkContainerOptions,
-        mut container: SuperContainerCreateOptions,
+        network_opts: ContainerNetworkContainerOptions,
+        mut container: ContainerCreateOptions,
     ) -> Result<()> {
         if self.containers.contains_key(&container.name) {
             return Err("Name is already registered").stack();
@@ -329,7 +329,7 @@ impl SuperNetwork {
             .stack()
     }
 
-    /// Calls [SuperNetwork::start_container] for all registered containers.
+    /// Calls [ContainerNetwork::start_container] for all registered containers.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,

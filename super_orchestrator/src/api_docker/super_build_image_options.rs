@@ -10,7 +10,7 @@ pub use bollard::image::BuilderVersion;
 /// that are handled by [SuperDockerfile](super::SuperDockerfile) and fields
 /// that are not handled by this implementation.
 #[derive(Debug, Clone, Default)]
-pub struct SuperImageBuildOptions {
+pub struct ImageBuildOptions {
     /// A name and optional tag to apply to the image in the `name:tag` format.
     /// If you omit the tag the default `latest` value is assumed. You can
     /// provide several `t` parameters.
@@ -67,7 +67,7 @@ pub struct SuperImageBuildOptions {
     pub version: BuilderVersion,
 }
 
-impl SuperImageBuildOptions {
+impl ImageBuildOptions {
     /// Uses `Self::default()`
     pub fn new() -> Self {
         Self::default()

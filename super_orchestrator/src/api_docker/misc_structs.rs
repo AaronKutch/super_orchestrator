@@ -29,8 +29,8 @@ impl SuperImage {
 }
 
 /// When using the docker entrypoint strategy, this specifies what domain the
-/// binaries are under (which affects where the binary ends up in the target
-/// folder).
+/// binaries are under (which affects how the binary can be built and where it
+/// ends up in the target folder).
 #[derive(Debug, Clone, Copy)]
 pub enum BootstrapOptions {
     /// If this is a normal binary

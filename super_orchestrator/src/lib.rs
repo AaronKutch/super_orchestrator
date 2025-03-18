@@ -7,7 +7,7 @@ mod misc;
 mod parsing;
 
 /// Docker container management, using the docker API provided by [bollard] as a
-/// backend.
+/// backend. This is still experimental and subject to major changes.
 #[cfg(feature = "bollard")]
 pub mod api_docker;
 /// Docker container management, using the "docker" OS command as a backend.
