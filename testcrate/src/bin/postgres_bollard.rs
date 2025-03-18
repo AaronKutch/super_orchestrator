@@ -95,8 +95,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     .await
     .stack()?;
 
-    let test_runner_name = super_orchestrator::random_name("test_runner".to_string());
-    let postgres_name = super_orchestrator::random_name("postgres".to_string());
+    let test_runner_name = super_orchestrator::random_name("test_runner");
+    let postgres_name = super_orchestrator::random_name("postgres");
 
     let container_opts = ContainerCreateOptions {
         name: test_runner_name.clone(),

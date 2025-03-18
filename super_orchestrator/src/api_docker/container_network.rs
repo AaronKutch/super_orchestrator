@@ -57,23 +57,25 @@ pub struct NetworkCreateOptions {
     /// If set the network will shutdown and start a new network if there is a
     /// name collision.
     pub overwrite_existing: bool,
-    /// Configure an output directory for logging/assertions.
+    /// Configure an output directory for logging.
     pub output_dir_config: Option<OutputDirConfig>,
     /// If true, [ContainerCreateOptions] with `log_outs: None` will use
     /// this value as default
     pub log_by_default: bool,
 }
 
+/// Configuration for things like the logging directory
+///
+/// Set the value as a temporary directory or an
+/// gitignored directory in a repository. This will not mount the output
+/// directory, it will create other directories and mount them.
+///
+/// This also adds environment variable
+/// [CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME] to the container. Add
+/// outputs using the env var to ensure compatibility.
 #[derive(Debug, Clone, Default)]
 pub struct OutputDirConfig {
     /// Directory for dealing with outputs.
-    ///
-    /// Set value as a temporary directory or an
-    /// ignored directory in a repository. This won't mount the output dir,
-    /// it'll create other directories and mount them (by binding).
-    ///
-    /// This also adds env var SUPER_NETWORK_OUTPUT_DIR to the container. Add
-    /// outputs using the env var to ensure compatibility.
     pub output_dir: String,
     /// Write all captured output to a log file
     pub save_logs: bool,
@@ -273,7 +275,11 @@ impl ContainerNetwork {
         let image = match add_opts {
             AddContainerOptions::Container(image) => image,
             AddContainerOptions::DockerFile(docker_file) => {
-                docker_file.build_image().await.stack()?.0
+                docker_file
+                    .build_image()
+                    .await
+                    .stack_err("ContainerNetwork::add_container")?
+                    .0
             }
             AddContainerOptions::BollardArgs {
                 image_options,
@@ -281,7 +287,7 @@ impl ContainerNetwork {
             } => {
                 SuperDockerfile::build_with_bollard_defaults(image_options, tarball)
                     .await
-                    .stack()?
+                    .stack_err("ContainerNetwork::add_container")?
                     .0
             }
         };

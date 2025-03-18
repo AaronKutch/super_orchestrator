@@ -36,6 +36,7 @@ use crate::{
 /// docker file.
 #[derive(Debug)]
 pub struct SuperDockerfile {
+    /// The base definition for the dockerfile
     base: Dockerfile,
     content_extend: Vec<u8>,
     tarball: Tarball,
@@ -493,7 +494,9 @@ impl SuperDockerfile {
             .try_filter_map(|x| futures::future::ready(Ok(x.aux)))
             .try_collect::<Vec<_>>()
             .await
-            .stack_err("try to build img")?
+            // because the display impl only shows the error enum
+            .map_err(|e| format!("{e:?}"))
+            .stack_err("when trying to build image")?
             .into_iter()
             .next()
             .and_then(|x| x.id)
@@ -509,6 +512,6 @@ impl SuperDockerfile {
 
         Self::build_with_bollard_defaults(build_opts, tarball)
             .await
-            .stack()
+            .stack_err("SuperDockerfile::build_image")
     }
 }

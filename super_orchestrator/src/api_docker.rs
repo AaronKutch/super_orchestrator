@@ -13,3 +13,6 @@ pub use misc_structs::*;
 pub use super_build_image_options::*;
 pub use super_docker_file::*;
 pub use tarball::*;
+
+// we reuse this here
+pub use crate::cli_docker::Dockerfile;
