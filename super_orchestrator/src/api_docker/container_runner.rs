@@ -326,7 +326,7 @@ pub async fn total_teardown(
                         docker
                             .stop_container(
                                 &container_name,
-                                Some(bollard::container::StopContainerOptions { t: 5 }),
+                                Some(bollard::container::StopContainerOptions { t: 0 }),
                             )
                             .await
                             .inspect_err(|err| {
@@ -342,7 +342,6 @@ pub async fn total_teardown(
         .collect::<Vec<_>>();
 
     let mut errs = vec![];
-
     while !futs.is_empty() {
         let (res, _, rest) = futures::future::select_all(futs).await;
         if let Err(err) = res {
