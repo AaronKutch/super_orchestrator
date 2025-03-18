@@ -13,8 +13,8 @@ use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
     api_docker::{
-        AddContainerOptions, BootstrapOptions, OutputDirConfig, SuperContainerOptions,
-        SuperCreateNetworkOptions, SuperDockerfile, SuperNetwork,
+        AddContainerOptions, BootstrapOptions, OutputDirConfig, SuperContainerCreateOptions,
+        SuperDockerfile, SuperNetwork, SuperNetworkCreateOptions,
         SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
@@ -70,7 +70,7 @@ async fn container_runner(args: &Args) -> Result<()> {
         fs::create_dir_all(&pg_data_path).await.stack()?;
     }
 
-    let mut cn = SuperNetwork::create(SuperCreateNetworkOptions {
+    let mut cn = SuperNetwork::create(SuperNetworkCreateOptions {
         name: "test_postgres_bollard".to_string(),
         overwrite_existing: true,
         log_by_default: true,
@@ -91,17 +91,17 @@ async fn container_runner(args: &Args) -> Result<()> {
     let test_runner_name = super_orchestrator::random_name("test_runner".to_string());
     let postgres_name = super_orchestrator::random_name("postgres".to_string());
 
-    let container_opts = SuperContainerOptions {
+    let container_opts = SuperContainerCreateOptions {
         name: test_runner_name.clone(),
         important: true,
         ..Default::default()
     };
 
     cn.add_container(
-        AddContainerOptions::Container {
-            image: SuperDockerfile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
+        AddContainerOptions::Container(
+            SuperDockerfile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
                 .bootstrap_musl(
-                    None,
+                    "/entrypoint",
                     [
                         "--entry-name",
                         "test_runner",
@@ -117,7 +117,7 @@ async fn container_runner(args: &Args) -> Result<()> {
                 .await
                 .stack()?
                 .0,
-        },
+        ),
         Default::default(),
         container_opts,
     )
@@ -125,8 +125,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     .stack()?;
 
     cn.add_container(
-        AddContainerOptions::DockerFile {
-            docker_file: SuperDockerfile::new(Dockerfile::name_tag("postgres:16"), None)
+        AddContainerOptions::DockerFile(
+            SuperDockerfile::new(Dockerfile::name_tag("postgres:16"), None)
                 .appending_dockerfile_instructions([
                     "ENV POSTGRES_PASSWORD=root",
                     "ENV POSTGRES_USER=postgres",
@@ -135,9 +135,9 @@ async fn container_runner(args: &Args) -> Result<()> {
                     // exis"ting in the data directory
                     "ENV POSTGRES_DB=my_database",
                 ]),
-        },
+        ),
         Default::default(),
-        SuperContainerOptions {
+        SuperContainerCreateOptions {
             name: postgres_name,
             volumes: [(
                 pg_data_path.to_str().stack()?.to_string(),

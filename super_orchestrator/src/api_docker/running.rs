@@ -282,6 +282,7 @@ impl ContainerRunner {
     }
 }
 
+/// Tears down a docker network and all of its containers
 #[tracing::instrument(skip_all,
     fields(
         network.name = %network_name,

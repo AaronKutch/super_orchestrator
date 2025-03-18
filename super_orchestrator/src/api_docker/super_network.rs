@@ -31,15 +31,17 @@ pub struct SuperNetwork {
     containers: HashMap<String, ContainerRunner>,
 }
 
+/// Options for adding a container
 #[derive(Debug)]
 pub enum AddContainerOptions {
     /// Use an already specified image to create the container
-    Container { image: SuperImage },
+    Container(SuperImage),
     /// Use our [SuperDockerfile] construct
-    DockerFile { docker_file: SuperDockerfile },
+    DockerFile(SuperDockerfile),
     /// Use Bollard arguments with a tarball
     BollardArgs {
-        bollard_args: (bollard::image::BuildImageOptions<String>, Vec<u8>),
+        image_options: bollard::image::BuildImageOptions<String>,
+        tarball: Vec<u8>,
     },
 }
 
@@ -212,20 +214,21 @@ impl SuperNetwork {
         }
 
         let output_dir = if let Some(ref output_config) = self.opts.output_dir_config {
-            add_opts = AddContainerOptions::DockerFile {
-                docker_file: match add_opts {
-                    AddContainerOptions::Container { image } => image.to_docker_file(),
-                    AddContainerOptions::DockerFile { docker_file } => docker_file,
-                    AddContainerOptions::BollardArgs { bollard_args } => {
-                        SuperDockerfile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
-                            .await
-                            .stack()?
-                            .0
-                            .to_docker_file()
-                    }
+            add_opts = AddContainerOptions::DockerFile(
+                match add_opts {
+                    AddContainerOptions::Container(image) => image.to_docker_file(),
+                    AddContainerOptions::DockerFile(docker_file) => docker_file,
+                    AddContainerOptions::BollardArgs {
+                        image_options,
+                        tarball,
+                    } => SuperDockerfile::build_with_bollard_defaults(image_options, tarball)
+                        .await
+                        .stack()?
+                        .0
+                        .to_docker_file(),
                 }
                 .appending_dockerfile_instructions(["RUN mkdir /super_out"]),
-            };
+            );
 
             let mut output_dir = PathBuf::from_str(&output_config.output_dir).stack()?;
             output_dir.push(&container.name);
@@ -270,12 +273,15 @@ impl SuperNetwork {
         };
 
         let image = match add_opts {
-            AddContainerOptions::Container { image } => image,
-            AddContainerOptions::DockerFile { docker_file } => {
+            AddContainerOptions::Container(image) => image,
+            AddContainerOptions::DockerFile(docker_file) => {
                 docker_file.build_image().await.stack()?.0
             }
-            AddContainerOptions::BollardArgs { bollard_args } => {
-                SuperDockerfile::build_with_bollard_defaults(bollard_args.0, bollard_args.1)
+            AddContainerOptions::BollardArgs {
+                image_options,
+                tarball,
+            } => {
+                SuperDockerfile::build_with_bollard_defaults(image_options, tarball)
                     .await
                     .stack()?
                     .0
