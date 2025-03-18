@@ -86,7 +86,7 @@ pub struct Container {
     pub container_name: String,
     /// Hostname of the URL that could access the container (the container can
     /// alternatively be accessed by an ip address via
-    /// [wait_get_ip_addr](crate::docker_helpers::wait_get_ip_addr)). Usually,
+    /// [wait_get_ip_addr](crate::cli_docker::wait_get_ip_addr)). Usually,
     /// this should be the same as `name`.
     pub host_name: String,
     /// The dockerfile

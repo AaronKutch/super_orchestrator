@@ -29,10 +29,10 @@ use crate::{
 /// and its singular build step command has most of the things that `docker
 /// create` could do. This API version wrapper does not expose a `docker create`
 /// equivalent, since its remaining uses are provider-specific and hinder
-/// reproducibility. The `docker create` equivalent options can still be set in
-/// [SuperContainer](crate::bld::super_manager::SuperContainer) if desired.
+/// reproducibility. Some `docker create` equivalent options can still be set in
+/// [SuperDockerfile::with_build_opts] if desired.
 ///
-/// Use [DockerFile] to define a "base" for it. All further function
+/// Use [Dockerfile] to define a "base" for it. All further function
 /// calls simply add options to the build command, prepare a tarball that will
 /// be used to seamlesly build the container, or push lines to the
 /// docker file.
@@ -266,7 +266,7 @@ impl SuperDockerfile {
     /// The entrypoint parameter is of the format (from, to).
     ///
     /// If you already have an entrypoint and need to just change args, use
-    /// [SuperDockerFile::appending_dockerfile_instructions].
+    /// [SuperDockerfile::appending_dockerfile_instructions].
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -300,7 +300,7 @@ impl SuperDockerfile {
     }
 
     /// Make the current running binary the image's entrypoint, will call
-    /// [SuperDockerFile::with_entrypoint]. If `to` is None, will create file as
+    /// [SuperDockerfile::with_entrypoint]. If `to` is None, will create file as
     /// /super-bootstrapped
     ///
     /// This is useful for defining a complete test using a single rust file by
@@ -466,7 +466,7 @@ impl SuperDockerfile {
     }
 
     /// Calls [bollard::Docker::build_image] using return of
-    /// [SuperDockerFile::into_bollard_args] and the default docker instance
+    /// [SuperDockerfile::into_bollard_args] and the default docker instance
     /// from [bollard::Docker::connect_with_defaults].
     pub async fn build_with_bollard_defaults(
         build_opts: BuildImageOptions<String>,
@@ -496,8 +496,8 @@ impl SuperDockerfile {
         Ok((SuperImage::new(image_id), tarball))
     }
 
-    /// Calls [SuperDockerFile::build_with_bollard_defaults] using the arguments
-    /// returned from [SuperDockerFile::into_bollard_args].
+    /// Calls [SuperDockerfile::build_with_bollard_defaults] using the arguments
+    /// returned from [SuperDockerfile::into_bollard_args].
     pub async fn build_image(self) -> Result<(SuperImage, Vec<u8>)> {
         let (build_opts, tarball) = self.into_bollard_args().await.stack()?;
 

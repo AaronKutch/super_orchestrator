@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 pub use bollard::image::BuilderVersion;
 
+/// Extended image build options.
+///
 /// Mostly copy pasted from
 /// [BuildImageOptions](bollard::image::BuildImageOptions), removing some fields
-/// that are handled by [SuperDockerFile](super::SuperDockerFile) and fields
+/// that are handled by [SuperDockerfile](super::SuperDockerfile) and fields
 /// that are not handled by this implementation.
 #[derive(Debug, Clone, Default)]
 pub struct SuperImageBuildOptions {
