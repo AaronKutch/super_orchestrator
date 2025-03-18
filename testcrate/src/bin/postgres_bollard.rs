@@ -22,6 +22,7 @@ use super_orchestrator::{
 };
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 const POSTGRES: &str = "postgres:16";
 const BASE_CONTAINER: &str = "fedora:41";
@@ -51,8 +52,11 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().init();
     let args = Args::parse();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_str("trace,bollard=warn,hyper_util=info").unwrap())
+        .init();
 
     if let Some(ref s) = args.entry_name {
         match s.as_str() {
@@ -155,7 +159,7 @@ async fn container_runner(args: &Args) -> Result<()> {
                 "/var/lib/postgresql/data".to_string(),
             )]
             .into(),
-            priviledged: true,
+            priviledged: false,
             // override to not log to stderr
             log_outs: Some(false),
             ..Default::default()
@@ -163,6 +167,8 @@ async fn container_runner(args: &Args) -> Result<()> {
     )
     .await
     .stack()?;
+
+    cn.teardown_on_ctrlc();
 
     cn.start_all().await.stack()?;
 

@@ -63,11 +63,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut args = Args::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_str("trace,bollard=warn,hyper_util=info").unwrap())
         .init();
 
-    let mut args = Args::parse();
     if let Some(s) = &args.json_args {
         let arg_from_env = args.arg_from_env;
         args = serde_json::from_str(s).stack()?;
