@@ -8,7 +8,7 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     api_docker::{
         docker_socket::get_or_init_default_docker_instance, port_bindings_to_bollard_args,
-        ContainerNetwork, ContainerNetworkContainerOptions, DockerStdin, PortBind, SuperImage,
+        ContainerNetwork, DockerStdin, ExtraAddContainerOptions, PortBind, SuperImage,
     },
     next_terminal_color,
 };
@@ -40,7 +40,7 @@ pub struct ContainerCreateOptions {
 pub struct ContainerRunner {
     pub image: SuperImage,
     pub container_opts: ContainerCreateOptions,
-    pub network_opts: ContainerNetworkContainerOptions,
+    pub network_opts: ExtraAddContainerOptions,
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
     pub output_dir: Option<PathBuf>,

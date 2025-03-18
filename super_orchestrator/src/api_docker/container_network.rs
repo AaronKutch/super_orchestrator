@@ -79,10 +79,9 @@ pub struct OutputDirConfig {
     pub save_logs: bool,
 }
 
-/// If any field is `None`, it will be equivalent to passing no argument to
-/// `docker create` command.
+/// Extra options related to `docker create`
 #[derive(Debug, Clone, Default)]
-pub struct ContainerNetworkContainerOptions {
+pub struct ExtraAddContainerOptions {
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
 }
@@ -200,7 +199,7 @@ impl ContainerNetwork {
     pub async fn add_container(
         &mut self,
         mut add_opts: AddContainerOptions,
-        network_opts: ContainerNetworkContainerOptions,
+        network_opts: ExtraAddContainerOptions,
         mut container: ContainerCreateOptions,
     ) -> Result<()> {
         if self.containers.contains_key(&container.name) {
