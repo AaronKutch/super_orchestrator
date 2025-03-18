@@ -16,8 +16,8 @@ use stacked_errors::{bail, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
     api_docker::{
-        AddContainerOptions, ContainerCreateOptions, ContainerNetwork, Dockerfile,
-        NetworkCreateOptions, OutputDirConfig, SuperDockerfile, Tarball,
+        AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
+        Dockerfile, NetworkCreateOptions, OutputDirConfig, SuperDockerfile, Tarball,
     },
     net_message::NetMessenger,
     FileOptions,
@@ -27,8 +27,6 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 const BASE_CONTAINER: &str = "alpine:3.21";
-// need this for Alpine
-//const TARGET: &str = "x86_64-unknown-linux-musl";
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 const STD_TRIES: u64 = 300;
@@ -152,10 +150,17 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     // a container with a plain name:tag image
     cn.add_container(
-        AddContainerOptions::DockerFile(SuperDockerfile::new(
-            Dockerfile::name_tag(BASE_CONTAINER),
-            None,
-        )),
+        AddContainerOptions::DockerFile(
+            SuperDockerfile::new(Dockerfile::name_tag(BASE_CONTAINER), None)
+                .bootstrap_musl(
+                    "/entrypoint",
+                    ["--entry-name", "container0"],
+                    BootstrapOptions::Bin,
+                    ["--features", "bollard"],
+                )
+                .await
+                .stack()?,
+        ),
         Default::default(),
         ContainerCreateOptions {
             name: super_orchestrator::random_name("container0"),
@@ -168,10 +173,20 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     // uses the example dockerfile
     cn.add_container(
-        AddContainerOptions::DockerFile(SuperDockerfile::new(
-            Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
-            None,
-        )),
+        AddContainerOptions::DockerFile(
+            SuperDockerfile::new(
+                Dockerfile::path(format!("{dockerfiles_dir}/example.dockerfile")),
+                None,
+            )
+            .bootstrap_musl(
+                "/entrypoint",
+                ["--entry-name", "container1"],
+                BootstrapOptions::Bin,
+                ["--features", "bollard"],
+            )
+            .await
+            .stack()?,
+        ),
         Default::default(),
         ContainerCreateOptions {
             name: super_orchestrator::random_name("container1"),
@@ -206,11 +221,21 @@ async fn container_runner(args: &Args) -> Result<()> {
     // uses `container2_dockerfile`, allowing for self-contained complicated systems
     // in a single file
     cn.add_container(
-        AddContainerOptions::DockerFile(SuperDockerfile::new_with_tar(
-            Dockerfile::contents(container2_dockerfile()),
-            None,
-            tarball,
-        )),
+        AddContainerOptions::DockerFile(
+            SuperDockerfile::new_with_tar(
+                Dockerfile::contents(container2_dockerfile()),
+                None,
+                tarball,
+            )
+            .bootstrap_musl(
+                "/entrypoint",
+                ["--entry-name", "container2"],
+                BootstrapOptions::Bin,
+                ["--features", "bollard"],
+            )
+            .await
+            .stack()?,
+        ),
         Default::default(),
         ContainerCreateOptions {
             name: super_orchestrator::random_name("container2"),

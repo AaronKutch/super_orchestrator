@@ -109,7 +109,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     };
 
     cn.add_container(
-        AddContainerOptions::Container(
+        AddContainerOptions::DockerFile(
             SuperDockerfile::new(Dockerfile::contents(test_dockerfile()), None)
                 /*.with_build_opts(super_orchestrator::api_docker::ImageBuildOptions {
                     networkmode: "host".to_string(),
@@ -127,11 +127,7 @@ async fn container_runner(args: &Args) -> Result<()> {
                     ["--features", "bollard"],
                 )
                 .await
-                .stack()?
-                .build_image()
-                .await
-                .stack()?
-                .0,
+                .stack()?,
         ),
         Default::default(),
         container_opts,
