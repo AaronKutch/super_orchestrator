@@ -232,12 +232,12 @@ impl ContainerRunner {
                     let terminal_color = next_terminal_color();
                     (
                         owo_colors::OwoColorize::color(
-                            &format!("{container_name}   | "),
+                            &format!("{container_name}  | "),
                             terminal_color,
                         )
                         .to_string(),
                         owo_colors::OwoColorize::color(
-                            &format!("{container_name}  E| "),
+                            &format!("{container_name} E| "),
                             terminal_color,
                         )
                         .to_string(),

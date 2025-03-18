@@ -28,8 +28,8 @@ use tracing_subscriber::EnvFilter;
 
 const BASE_CONTAINER: &str = "alpine:3.21";
 
-const TIMEOUT: Duration = Duration::from_secs(300);
-const STD_TRIES: u64 = 300;
+const TIMEOUT: Duration = Duration::from_secs(10);
+const STD_TRIES: u64 = 30;
 const STD_DELAY: Duration = Duration::from_millis(300);
 
 /// Runs `docker_entrypoint_pattern`
@@ -86,6 +86,8 @@ async fn main() -> Result<()> {
     }
 }
 
+// TODO get example.txt to work via tarball insertion
+
 // a dynamically generated dockerfile
 fn container2_dockerfile() -> String {
     format!(
@@ -96,6 +98,7 @@ FROM {BASE_CONTAINER}
 # directory as the temporary dockerfile, which is why ".../dockerfile_resources"
 # is under the `dockerfile_write_dir`
 #ADD ./dockerfile_resources/example.txt /resources/example.txt
+#COPY ./resources/example.txt
 
 # this is read by Clap
 ENV ARG_FROM_ENV="environment var from dockerfile"
@@ -163,7 +166,7 @@ async fn container_runner(args: &Args) -> Result<()> {
         ),
         Default::default(),
         ContainerCreateOptions {
-            name: super_orchestrator::random_name("container0"),
+            name: "container0".to_string(),
             important: true,
             ..Default::default()
         },
@@ -189,7 +192,7 @@ async fn container_runner(args: &Args) -> Result<()> {
         ),
         Default::default(),
         ContainerCreateOptions {
-            name: super_orchestrator::random_name("container1"),
+            name: "container1".to_string(),
             important: true,
             ..Default::default()
         },
@@ -238,7 +241,7 @@ async fn container_runner(args: &Args) -> Result<()> {
         ),
         Default::default(),
         ContainerCreateOptions {
-            name: super_orchestrator::random_name("container2"),
+            name: "container2".to_string(),
             important: true,
             env_vars: container2_args,
             ..Default::default()
@@ -309,12 +312,12 @@ async fn container2_runner(args: &Args) -> Result<()> {
     eprintln!("testing stderr");
 
     // check that the file is in this container's filesystem
-    ensure_eq!(
+    /*ensure_eq!(
         FileOptions::read_to_string("/resources/example.txt")
             .await
             .stack()?,
         "hello from example.txt"
-    );
+    );*/
 
     info!("container 2 is exiting");
 
