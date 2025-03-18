@@ -20,15 +20,12 @@ use crate::api_docker::{
     SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
-/// Constructs for managing containers in a controlled environment.
+/// Manages as set containers in a controlled environment.
 /// Useful for creating integration tests and examples.
 ///
-/// This module uses
-/// [SuperDockerFile](crate::bld::super_docker_file::SuperDockerFile) to create
-/// containers for testing and adds a simple way to declare docker networks,
-/// manage conatainers in the networks and check the outputs for effective
-/// testing.
-
+/// This module uses [SuperDockerfile]s to create containers for testing and
+/// adds a simple way to declare docker networks, manage conatainers in the
+/// networks and can compile the outputs for effective testing.
 #[derive(Debug)]
 pub struct SuperNetwork {
     // might be good for debug

@@ -12,8 +12,7 @@ use crate::{
     next_terminal_color,
 };
 
-/// Define `docker create` arguments with integration testing in mind. You can
-/// construct a container using the [SuperNetwork] struct.
+/// The arguments to the API's equivalent of `docker create`.
 #[derive(Debug, Clone, Default)]
 pub struct SuperContainerOptions {
     pub name: String,

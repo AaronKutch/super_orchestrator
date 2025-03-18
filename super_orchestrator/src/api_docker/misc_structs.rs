@@ -2,14 +2,12 @@ use std::{collections::HashMap, net::IpAddr};
 
 use crate::{api_docker::SuperDockerfile, cli_docker::Dockerfile};
 
-// TODO do we need this?
-/// Wrapper struct for the image, call [SuperImage::get_image_id] to get the id
-/// of the image as a &str or [SuperImage::into_inner] to get the underlying
-/// [String].
+/// Wrapper struct for a simple image
 #[derive(Debug, Clone)]
 pub struct SuperImage(String);
 
 impl SuperImage {
+    /// Should use a prebuilt image
     pub fn new(image_id: String) -> Self {
         Self(image_id)
     }
@@ -18,10 +16,13 @@ impl SuperImage {
         self.0
     }
 
+    /// Get the ID of the image as a `&str`
     pub fn get_image_id(&self) -> &str {
         &self.0
     }
 
+    /// Uses `SuperDockerfile::new(Dockerfile::name_tag(self.get_image_id()),
+    /// None)`
     pub fn to_docker_file(&self) -> SuperDockerfile {
         SuperDockerfile::new(Dockerfile::name_tag(self.get_image_id()), None)
     }

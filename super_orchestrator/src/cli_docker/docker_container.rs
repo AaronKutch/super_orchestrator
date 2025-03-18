@@ -20,7 +20,9 @@ use crate::{
 pub enum Dockerfile {
     /// Builds using an image in the format "name:tag" such as "fedora:41" or
     /// "alpine:3.21" (running will call something such as `docker pull
-    /// name:tag`)
+    /// name:tag`). Docker will first try to fetch from the local registry, in
+    /// which case there might not be a tag, and just the name of some image
+    /// should be used.
     NameTag(String),
     /// Builds from a dockerfile on a path (e.x.
     /// "./tests/dockerfiles/example.dockerfile")
