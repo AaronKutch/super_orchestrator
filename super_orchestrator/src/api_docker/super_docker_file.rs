@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use bollard::image::BuildImageOptions;
 use futures::TryStreamExt;
 use stacked_errors::{Result, StackableErr};
 
@@ -414,7 +413,9 @@ impl SuperDockerfile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name,
     ))]
-    pub async fn into_bollard_args(mut self) -> Result<(BuildImageOptions<String>, Vec<u8>)> {
+    pub async fn into_bollard_args(
+        mut self,
+    ) -> Result<(bollard::image::BuildImageOptions<String>, Vec<u8>)> {
         const DOCKER_FILE_NAME: &str = "./super.dockerfile";
 
         let docker_file = &mut create_docker_file_returning_file_handle(&self)
@@ -433,7 +434,7 @@ impl SuperDockerfile {
             self.build_opts.labels.insert(key, val);
         }
 
-        let opts = BuildImageOptions {
+        let opts = bollard::image::BuildImageOptions {
             labels: self.build_opts.labels,
             dockerfile: DOCKER_FILE_NAME.to_string(),
             t: self.build_opts.t,
@@ -469,7 +470,7 @@ impl SuperDockerfile {
     /// [SuperDockerfile::into_bollard_args] and the default docker instance
     /// from [bollard::Docker::connect_with_defaults].
     pub async fn build_with_bollard_defaults(
-        build_opts: BuildImageOptions<String>,
+        build_opts: bollard::image::BuildImageOptions<String>,
         tarball: Vec<u8>,
     ) -> Result<(SuperImage, Vec<u8>)> {
         let docker_instance = docker_socket::get_or_init_default_docker_instance()

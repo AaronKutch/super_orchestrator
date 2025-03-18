@@ -5,12 +5,8 @@ use std::{
     sync::Arc,
 };
 
-pub use bollard::{
-    container::{AttachContainerResults, LogOutput},
-    errors::Error as BollardError,
-    image::BuildImageOptions,
-    secret::{ContainerState, DeviceMapping, Ipam, IpamConfig},
-};
+// reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
+pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
 use stacked_errors::{Result, StackableErr};
 use tracing::{Instrument, Level};
 
@@ -45,7 +41,7 @@ pub enum AddContainerOptions {
         docker_file: SuperDockerfile,
     },
     BollardArgs {
-        bollard_args: (BuildImageOptions<String>, Vec<u8>),
+        bollard_args: (bollard::image::BuildImageOptions<String>, Vec<u8>),
     },
 }
 

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::IsTerminal, path::PathBuf};
 
-use bollard::secret::DeviceMapping;
+// reexport from bollard
+pub use bollard::secret::DeviceMapping;
 use stacked_errors::{Result, StackableErr};
 use tokio::io::AsyncWriteExt;
 

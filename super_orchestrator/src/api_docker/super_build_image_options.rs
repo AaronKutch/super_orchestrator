@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+// reexport from bollard
 pub use bollard::image::BuilderVersion;
 
 /// Extended image build options.
@@ -64,4 +65,11 @@ pub struct SuperImageBuildOptions {
     pub target: String,
     /// Builder version to use
     pub version: BuilderVersion,
+}
+
+impl SuperImageBuildOptions {
+    /// Uses `Self::default()`
+    pub fn new() -> Self {
+        Self::default()
+    }
 }

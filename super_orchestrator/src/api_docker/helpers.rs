@@ -1,9 +1,13 @@
 use std::{path::PathBuf, pin::Pin};
 
-use bollard::{container::LogOutput, errors::Error as BollardError};
+// reexport from bollard
+pub use bollard::{container::LogOutput, errors::Error as BollardError};
 
+/// Name of the environment variable used to determine the output directory to
+/// use
 pub const SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME: &str = "SUPER_NETWORK_OUTPUT_DIR";
 
+/// Load the environment variable [SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME]
 pub fn get_network_output_dir() -> Option<String> {
     std::env::var(SUPER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).ok()
 }
