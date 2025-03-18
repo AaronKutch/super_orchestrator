@@ -107,6 +107,10 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_container(
         AddContainerOptions::Container(
             SuperDockerfile::new(Dockerfile::contents(test_dockerfile()), None)
+                /*.with_build_opts(super_orchestrator::api_docker::ImageBuildOptions {
+                    networkmode: "host".to_string(),
+                    ..Default::default()
+                })*/
                 .bootstrap_musl(
                     "/entrypoint",
                     [

@@ -105,19 +105,15 @@ impl SuperDockerfile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?image_name
     ))]
-    pub fn new_with_tar(
-        base: Dockerfile,
-        image_name: Option<String>,
-        tarball: Vec<u8>,
-    ) -> Result<Self> {
-        Ok(Self {
+    pub fn new_with_tar(base: Dockerfile, image_name: Option<String>, tarball: Tarball) -> Self {
+        Self {
             base,
             image_name,
             content_extend: Vec::new(),
             build_opts: ImageBuildOptions::default(),
-            tarball: Tarball::new(tarball).stack()?,
+            tarball,
             build_path: None,
-        })
+        }
     }
 
     /// The build path is the last argument in a docker build command.
