@@ -4,6 +4,7 @@
 ### Changes
 - Moved all the examples under a `testcrate` as binaries
 - Moved all the previous docker structs and helpers under `cli_docker`
+- Created the new `api_docker` module and a "bollard" feature that enables it
 
 ## [0.15.2] - 2025-01-13
 ### Fixes

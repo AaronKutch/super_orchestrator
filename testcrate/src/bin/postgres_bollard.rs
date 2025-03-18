@@ -23,11 +23,18 @@ use super_orchestrator::{
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::info;
 
-const TEST_DOCKERFILE_CONTENT: &str = r#"FROM fedora:41
+const POSTGRES: &str = "postgres:16";
+const BASE_CONTAINER: &str = "fedora:41";
+
+fn test_dockerfile() -> String {
+    format!(
+        r#"FROM {BASE_CONTAINER}
 
 # dependencies for `psql`
 RUN dnf install -y postgresql libpq-devel
-"#;
+"#
+    )
+}
 
 #[derive(Parser, Debug)]
 #[command(about)]
@@ -99,7 +106,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.add_container(
         AddContainerOptions::Container(
-            SuperDockerfile::new(Dockerfile::contents(TEST_DOCKERFILE_CONTENT), None)
+            SuperDockerfile::new(Dockerfile::contents(test_dockerfile()), None)
                 .bootstrap_musl(
                     "/entrypoint",
                     [
@@ -126,13 +133,13 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.add_container(
         AddContainerOptions::DockerFile(
-            SuperDockerfile::new(Dockerfile::name_tag("postgres:16"), None)
+            SuperDockerfile::new(Dockerfile::name_tag(POSTGRES), None)
                 .append_dockerfile_instructions([
                     "ENV POSTGRES_PASSWORD=root",
                     "ENV POSTGRES_USER=postgres",
                     // this conveniently causes postgres to create a
                     // database of this name if it is not already
-                    // exis"ting in the data directory
+                    // existing in the data directory
                     "ENV POSTGRES_DB=my_database",
                 ]),
         ),
@@ -145,6 +152,7 @@ async fn container_runner(args: &Args) -> Result<()> {
             )]
             .into(),
             priviledged: true,
+            // override to not log to stderr
             log_outs: Some(false),
             ..Default::default()
         },
@@ -154,6 +162,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     cn.start_all().await.stack()?;
 
+    // wait for the containers with `important: true`
     cn.wait_important().await?;
 
     if let Err(err) = cn.teardown().await.stack() {
@@ -172,6 +181,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 }
 
 async fn test_runner(postgres_name: String) -> Result<()> {
+    // wait for being able to access the postgres container
     async fn postgres_health(postgres_name: &str) -> Result<()> {
         Command::new(format!(
             "psql --host={postgres_name} -U postgres --command=\\l"
@@ -204,7 +214,7 @@ async fn test_runner(postgres_name: String) -> Result<()> {
     info!("postgres is ready");
 
     let mut ok_file =
-        PathBuf::from_str(&std::env::var(CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).unwrap())
+        PathBuf::from_str(&std::env::var(CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).stack()?)
             .stack()?;
     ok_file.push("ok");
 

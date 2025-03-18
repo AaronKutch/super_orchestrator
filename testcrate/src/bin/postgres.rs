@@ -25,7 +25,6 @@ const BASE_CONTAINER: &str = "fedora:41";
 const TARGET: &str = "x86_64-unknown-linux-musl";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
-#[rustfmt::skip]
 fn test_dockerfile() -> String {
     let dynamic = "something";
     format!(

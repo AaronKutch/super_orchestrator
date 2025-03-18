@@ -257,11 +257,12 @@ impl ContainerNetwork {
                 }
             }
 
-            container
-                .volumes
-                .push((output_dir_str.to_string(), "/super_out".to_string()));
+            container.volumes.push((
+                output_dir_str.to_string(),
+                "/super_orchestrator_out".to_string(),
+            ));
             container.env_vars.push(format!(
-                "{CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_out"
+                "{CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_orchestrator_out"
             ));
 
             Some(output_dir)

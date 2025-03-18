@@ -29,10 +29,9 @@ pub struct ContainerCreateOptions {
     /// Wether the network should wait for the container to shutdown during a
     /// [ContainerNetwork::wait_important] call
     pub important: bool,
-    /// When defined, overwrites the default set in [ContainerNetwork].
-    ///
-    /// When log_outs is activated the network will use `docker attach` to read
-    /// stdout and stderr from container and log to stderr
+    /// Set to `Some`, this overwrites the default set in [ContainerNetwork].
+    /// When enabled, the stdout and stderr of the container is logged to
+    /// stderr.
     pub log_outs: Option<bool>,
 }
 
