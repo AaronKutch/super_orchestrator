@@ -8,7 +8,7 @@
 //! catch a running container, and you can run commands on it or ctrl-c to end
 //! the container early. The second will finish after building and 20 seconds.
 
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ use super_orchestrator::{
 };
 use tokio::time::sleep;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 const BASE_CONTAINER: &str = "alpine:3.21";
 // need this for Alpine
@@ -62,11 +63,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // note that you need the `DEBUG` level to see some of the debug output when it
-    // is enabled
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_env_filter(EnvFilter::from_str("trace,bollard=warn,hyper_util=info").unwrap())
         .init();
+
     let mut args = Args::parse();
     if let Some(s) = &args.json_args {
         let arg_from_env = args.arg_from_env;

@@ -62,6 +62,8 @@ pub struct NetworkCreateOptions {
     /// If true, [ContainerCreateOptions] with `log_outs: None` will use
     /// this value as default
     pub log_by_default: bool,
+    /// Turns on debug tracing
+    pub debug: bool,
 }
 
 /// Configuration for things like the logging directory
@@ -102,7 +104,6 @@ impl ContainerNetwork {
             let span = tracing::span!(Level::INFO, "ctrlc handler");
             let _enter = span.enter();
 
-            tracing::info!("ctrlc will teardown all networks");
             if tokio::signal::ctrl_c()
                 .await
                 .stack_err("Failed to wait for ctrlc")
@@ -110,9 +111,9 @@ impl ContainerNetwork {
             {
                 std::process::exit(1);
             }
-            tracing::info!("ctrlc detected, TEARING DOWN NETWORKS");
+            tracing::info!("ctrlc detected, tearing down networks");
             // also log to stdout because it's immediate
-            eprintln!("ctrlc detected, TEARING DOWN NETWORKS");
+            eprintln!("ctrlc detected, tearing down networks");
 
             let _ = total_teardown(&cn_name, [])
                 .await
@@ -146,7 +147,9 @@ impl ContainerNetwork {
             })
         {
             if opts.overwrite_existing {
-                tracing::debug!("Tearing down name match for {network_name} connection");
+                if opts.debug {
+                    tracing::debug!("Tearing down name match for {network_name} connection");
+                }
                 total_teardown(&network_name, std::iter::empty())
                     .await
                     .stack()?;
@@ -168,12 +171,14 @@ impl ContainerNetwork {
             .await
             .stack()?;
 
-        tracing::info!(
-            "network name: {}\n network id: {}\n message: {}",
-            opts.name,
-            response.id,
-            response.warning
-        );
+        if opts.debug {
+            tracing::info!(
+                "network name: {}\n network id: {}\n message: {}",
+                opts.name,
+                response.id,
+                response.warning
+            );
+        }
 
         Ok(Self {
             network_id: response.id,
@@ -293,6 +298,7 @@ impl ContainerNetwork {
                 network_opts,
                 stdin: None,
                 output_dir,
+                debug: self.opts.debug,
             });
 
         Ok(())
@@ -392,7 +398,9 @@ impl ContainerNetwork {
             .filter(|(_, container)| container.container_opts.important)
             .collect::<Vec<_>>();
 
-        tracing::debug!("total important: {}", importants.len());
+        if self.opts.debug {
+            tracing::debug!("total important: {}", importants.len());
+        }
 
         let build_futs = || {
             importants
@@ -431,11 +439,13 @@ impl ContainerNetwork {
                 futs = rest;
             }
 
-            tracing::debug!(
-                "total importants shutdown: {}/{}",
-                already_down.read().await.len(),
-                importants.len()
-            );
+            if self.opts.debug {
+                tracing::debug!(
+                    "total importants shutdown: {}/{}",
+                    already_down.read().await.len(),
+                    importants.len()
+                );
+            }
 
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }

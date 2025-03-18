@@ -44,6 +44,7 @@ pub struct SuperDockerfile {
     image_name: Option<String>,
 
     build_opts: ImageBuildOptions,
+    debug: bool,
 }
 
 /// Creates a dockerfile using the [SuperDockerfile], returnig a [std::fs::File]
@@ -63,10 +64,12 @@ async fn create_dockerfile_returning_file_handle(sdf: &SuperDockerfile) -> Resul
     })
     .stack()?;
 
-    tracing::trace!(
-        "Creating container using docker file:\n{}",
-        String::from_utf8_lossy(&file_contents)
-    );
+    if sdf.debug {
+        tracing::trace!(
+            "Creating container using docker file:\n{}",
+            String::from_utf8_lossy(&file_contents)
+        );
+    }
 
     tokio::task::spawn_blocking(move || {
         let mut temp_file = std::fs::File::options()
@@ -99,6 +102,7 @@ impl SuperDockerfile {
             tarball: Default::default(),
             image_name,
             build_path: None,
+            debug: false,
         }
     }
 
@@ -113,6 +117,7 @@ impl SuperDockerfile {
             build_opts: ImageBuildOptions::default(),
             tarball,
             build_path: None,
+            debug: false,
         }
     }
 
@@ -185,7 +190,9 @@ impl SuperDockerfile {
     ) -> Result<Self> {
         let build_path = self.build_path.clone();
 
-        tracing::debug!("Current tarball paths: {:?}", self.tarball);
+        if self.debug {
+            tracing::debug!("Current tarball paths: {:?}", self.tarball);
+        }
 
         let this = Arc::new(std::sync::Mutex::new(self));
         let mut futs = v
@@ -215,7 +222,9 @@ impl SuperDockerfile {
 
         self = Arc::try_unwrap(this).unwrap().into_inner().stack()?;
 
-        tracing::debug!("New tarball paths: {:?}", self.tarball);
+        if self.debug {
+            tracing::debug!("New tarball paths: {:?}", self.tarball);
+        }
 
         Ok(self)
     }
@@ -229,7 +238,9 @@ impl SuperDockerfile {
         mut self,
         v: impl IntoIterator<Item = (impl ToString, Option<u32>, Vec<u8>)>,
     ) -> Result<Self> {
-        tracing::debug!("Current tarball paths: {:?}", self.tarball);
+        if self.debug {
+            tracing::debug!("Current tarball paths: {:?}", self.tarball);
+        }
 
         let this = Arc::new(std::sync::Mutex::new(self));
         let mut futs = v
@@ -260,7 +271,9 @@ impl SuperDockerfile {
 
         self = Arc::try_unwrap(this).unwrap().into_inner().stack()?;
 
-        tracing::debug!("New tarball paths: {:?}", self.tarball);
+        if self.debug {
+            tracing::debug!("New tarball paths: {:?}", self.tarball);
+        }
 
         Ok(self)
     }
@@ -326,7 +339,9 @@ impl SuperDockerfile {
             .stack()?
             .to_string();
 
-        tracing::info!("Using path as entrypoint: {binary_path}");
+        if self.debug {
+            tracing::info!("Using path as entrypoint: {binary_path}");
+        }
 
         self.with_entrypoint((binary_path, bootstrap_path), entrypoint_args)
             .await
@@ -482,11 +497,11 @@ impl SuperDockerfile {
         let image_id = docker_instance
             // need the clone here because of incompatibility with tar::Builder and bytes::BytesMut
             .build_image(build_opts, None, Some(tarball.clone().into()))
-            .inspect_ok(|msg| {
+            /*.inspect_ok(|msg| {
                 msg.stream
                     .as_ref()
                     .inspect(|x| tracing::debug!("{}", x.trim()));
-            })
+            })*/
             .try_filter_map(|x| futures::future::ready(Ok(x.aux)))
             .try_collect::<Vec<_>>()
             .await

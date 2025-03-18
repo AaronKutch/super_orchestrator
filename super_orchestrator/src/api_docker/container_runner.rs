@@ -43,6 +43,7 @@ pub struct ContainerRunner {
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
     pub output_dir: Option<PathBuf>,
+    pub debug: bool,
 }
 
 // for omitting the `stdin`
@@ -111,7 +112,9 @@ impl ContainerRunner {
         ))
         .unzip();
 
-        tracing::debug!("Creating container");
+        if self.debug {
+            tracing::debug!("Creating container");
+        }
 
         docker
             .create_container(
@@ -159,17 +162,25 @@ impl ContainerRunner {
                 },
             )
             .await
-            .inspect(|x| tracing::debug!(container.id = %x.id))
+            .inspect(|x| {
+                if self.debug {
+                    tracing::debug!(container.id = %x.id)
+                }
+            })
             .stack()?;
 
-        tracing::debug!("Starting container");
+        if self.debug {
+            tracing::debug!("Starting container");
+        }
 
         docker
             .start_container::<String>(&self.container_opts.name, None)
             .await
             .stack()?;
 
-        tracing::debug!("Attaching to container");
+        if self.debug {
+            tracing::debug!("Attaching to container");
+        }
 
         let response = docker
             .attach_container(
