@@ -46,7 +46,9 @@ pub struct SuperDockerfile {
     build_opts: SuperImageBuildOptions,
 }
 
-async fn create_docker_file_returning_file_handle(sdf: &SuperDockerfile) -> Result<std::fs::File> {
+/// Creates a dockerfile using the [SuperDockerfile], returnig a [std::fs::File]
+/// handle to it
+async fn create_dockerfile_returning_file_handle(sdf: &SuperDockerfile) -> Result<std::fs::File> {
     let mut temp_file_name = std::env::temp_dir();
     temp_file_name.push(uuid::Uuid::new_v4().to_string());
 
@@ -123,9 +125,9 @@ impl SuperDockerfile {
     /// `docker build [OPTS] <build_path>`
     ///
     /// If you are copying relative files, they will be copied relative to
-    /// the current build_path which resolves to cwd if not specified
-    /// (absolute paths don't apply). So specify this before copying or defining
-    /// entrypoint to have paths resolved according to build path.
+    /// the current `build_path` which resolves to the current working directory
+    /// if not specified (absolute paths don't apply). Specify this to have
+    /// paths resolved according to build path.
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -134,6 +136,7 @@ impl SuperDockerfile {
         self
     }
 
+    /// Set the build options
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -142,22 +145,29 @@ impl SuperDockerfile {
         self
     }
 
-    /// Add instructions to the underlying docker file
+    // TODO: I think that we should have some automatic builder derivation that has
+    // `mut self ... -> Self` and `&mut self ... -> &mut Self` variations, the
+    // second one having the same name but with `*_mut`
+
+    /// Add instructions to the underlying docker file, this automatically
+    /// handles newlines.
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
-    pub fn appending_dockerfile_instructions(
+    pub fn append_dockerfile_instructions(
         mut self,
         v: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Self {
-        self.appending_dockerfile_lines_mut(v);
+        self.append_dockerfile_lines_mut(v);
         self
     }
 
+    /// Add instructions to the underlying docker file, this automatically
+    /// handles newlines.
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
-    pub fn appending_dockerfile_lines_mut(&mut self, v: impl IntoIterator<Item = impl AsRef<str>>) {
+    pub fn append_dockerfile_lines_mut(&mut self, v: impl IntoIterator<Item = impl AsRef<str>>) {
         for s in v {
             self.content_extend.push(b'\n');
 
@@ -193,7 +203,7 @@ impl SuperDockerfile {
 
                     let mut this_ref = this.lock().unwrap();
 
-                    this_ref.appending_dockerfile_lines_mut([format!("COPY {from} {to}")]);
+                    this_ref.append_dockerfile_lines_mut([format!("COPY {from} {to}")]);
                     this_ref.tarball.append_file(from, file).stack()?;
 
                     Ok(()) as Result<_>
@@ -235,7 +245,7 @@ impl SuperDockerfile {
                 tokio::task::spawn_blocking(move || {
                     let mut this_ref = this.lock().unwrap();
 
-                    this_ref.appending_dockerfile_lines_mut([format!("COPY {to} {to}")]);
+                    this_ref.append_dockerfile_lines_mut([format!("COPY {to} {to}")]);
                     this_ref
                         .tarball
                         .append_file_bytes(to, mode.unwrap_or(0o777), &content)
@@ -265,7 +275,7 @@ impl SuperDockerfile {
     /// The entrypoint parameter is of the format (from, to).
     ///
     /// If you already have an entrypoint and need to just change args, use
-    /// [SuperDockerfile::appending_dockerfile_instructions].
+    /// [SuperDockerfile::append_dockerfile_instructions].
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -293,9 +303,8 @@ impl SuperDockerfile {
             })
             .unwrap_or_default();
 
-        Ok(self.appending_dockerfile_instructions([format!(
-            r#"ENTRYPOINT ["{to}"{entrypoint_args}] "#,
-        )]))
+        Ok(self
+            .append_dockerfile_instructions([format!(r#"ENTRYPOINT ["{to}"{entrypoint_args}] "#,)]))
     }
 
     /// Make the current running binary the image's entrypoint, will call
@@ -327,13 +336,10 @@ impl SuperDockerfile {
             .await
     }
 
-    /// Similar to bootstrap but if the current target is not
+    /// Similar to bootstrap, but if the current target is not
     /// x86_64-unknown-linux-musl, build and use musl binary else use
-    /// current binary. This is useful because musl is more portable and overall
-    /// will just work when using as container entrypoint.
-    ///
-    /// From cargo build --help, the relevant `target_selection_flag`s: --bin
-    /// --example --test --bench
+    /// current binary. This is useful because musl is typically more portable.
+    /// Note that some containers support both GNU and MUSL.
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
@@ -408,8 +414,8 @@ impl SuperDockerfile {
         }
     }
 
-    /// Inserts the Dockerfile into the tarball and consumes Self returning the
-    /// necessary arguments for calling [bollard::Docker::build_image].
+    /// Inserts the Dockerfile into the tarball and consumes `self`, returning
+    /// the necessary arguments for calling [bollard::Docker::build_image].
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name,
     ))]
@@ -418,7 +424,7 @@ impl SuperDockerfile {
     ) -> Result<(bollard::image::BuildImageOptions<String>, Vec<u8>)> {
         const DOCKER_FILE_NAME: &str = "./super.dockerfile";
 
-        let docker_file = &mut create_docker_file_returning_file_handle(&self)
+        let docker_file = &mut create_dockerfile_returning_file_handle(&self)
             .await
             .stack()?;
 
@@ -466,7 +472,7 @@ impl SuperDockerfile {
         Ok((opts, tarball))
     }
 
-    /// Calls [bollard::Docker::build_image] using return of
+    /// Calls [bollard::Docker::build_image] using return value of
     /// [SuperDockerfile::into_bollard_args] and the default docker instance
     /// from [bollard::Docker::connect_with_defaults].
     pub async fn build_with_bollard_defaults(

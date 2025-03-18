@@ -54,7 +54,7 @@ pub struct SuperNetworkCreateOptions {
     pub options: HashMap<String, String>,
     pub labels: HashMap<String, String>,
     pub ipam: Ipam,
-    /// If set the network will shutdown and start a new network if there's a
+    /// If set the network will shutdown and start a new network if there is a
     /// name collision.
     pub overwrite_existing: bool,
     /// Configure an output directory for logging/assertions.
@@ -88,6 +88,7 @@ pub struct SuperNetworkContainerOptions {
 }
 
 impl SuperNetwork {
+    /// Configures total teardown on ctrl-c.
     pub fn teardown_on_ctrlc<'a>(cns: impl IntoIterator<Item = &'a SuperNetwork>) {
         let futs = cns
             .into_iter()
@@ -131,11 +132,8 @@ impl SuperNetwork {
 
     /// opts is a passthrough argument to [bollard::Docker::create_network]
     ///
-    /// overwrite_existing: In case network name collides, should I teardown the
-    /// network?
-    ///
-    /// Uses default docker instance from
-    /// [bollard::Docker::connect_with_defaults]
+    /// `opts.overwrite_existing` can be set to configure overwriting any
+    /// existing network with the same name.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %opts.name,
@@ -190,9 +188,9 @@ impl SuperNetwork {
         })
     }
 
-    /// This DOESN'T call `docker create` or `docker start`. It may call `docker
-    /// build` if necessary. This function will return error if the
-    /// container is already registered in the network.
+    /// Adds the container to the network, but does not run it yet. It may call
+    /// `docker build` if not already cached. This function will return
+    /// error if the container is already registered in the network.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
@@ -227,7 +225,7 @@ impl SuperNetwork {
                         .0
                         .to_docker_file(),
                 }
-                .appending_dockerfile_instructions(["RUN mkdir /super_out"]),
+                .append_dockerfile_instructions(["RUN mkdir /super_out"]),
             );
 
             let mut output_dir = PathBuf::from_str(&output_config.output_dir).stack()?;
@@ -301,10 +299,12 @@ impl SuperNetwork {
         Ok(())
     }
 
-    /// Call `docker create` and `docker start` on container using its options.
-    /// This will mark the container with flag should_be_started to true. If
-    /// this flag is set for the container the docker commands won't be
-    /// executed.
+    /// Calls the API equivalent of `docker create` and `docker start` on the
+    /// container using its options.
+    ///
+    /// This will also mark the container with flag `should_be_started` to true.
+    /// If this flag is set for the container, future docker commands won't
+    /// be executed.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
@@ -379,7 +379,7 @@ impl SuperNetwork {
             .and_then(|res| res.state))
     }
 
-    /// Waits for all containers marked as important to shutdown
+    /// Waits for all containers marked as "important" to shutdown
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
@@ -444,10 +444,8 @@ impl SuperNetwork {
         Ok(())
     }
 
-    /// When the container is started, [SuperNetwork] automatically attaches to
-    /// its stdin and outputs using [bollard::Docker::attach_container].
-    ///
-    /// This retrieves the stdin resulting from the attachment
+    /// Gets the stdin of the container, which should exist after the container
+    /// is started.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
@@ -460,9 +458,9 @@ impl SuperNetwork {
             .and_then(|container| container.stdin.as_mut())
     }
 
-    /// Try stopping all containers and delete network.
-    ///
-    /// It'll always try to complete the full teardown and aggregate the errors.
+    /// Stop all containers and delete the network. If an error is returned, it
+    /// still should have stopped all containers and deleted the network unless
+    /// there was some API call issue.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
@@ -474,10 +472,10 @@ impl SuperNetwork {
             .stack()
     }
 
-    /// Wait for all listed containers to be health.
+    /// Wait for all listed containers to be healthy.
     ///
-    /// If a container doesn't have a healthcheck it's automatically considered
-    /// healthy.
+    /// If a container does not have a healthcheck, it is automatically
+    /// considered healthy.
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
