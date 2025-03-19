@@ -6,8 +6,15 @@ mod file_options;
 mod misc;
 mod parsing;
 
+// TODO there is a bunch of rigor in `cli_docker` that has not yet been brought
+// to `api_docker`, for instance there are no limiters on container output
+// stored (actually, did we ever do that in `cli_docker`), there are not a lot
+// of _timeout capabilities and there are certainly bugs with restarting
+// containers and waiting on different sets of containers.
+
 /// Docker container management, using the docker API provided by [bollard] as a
-/// backend. This is still experimental and subject to major changes.
+/// backend. NOTE: This is still experimental and subject to major bugs and
+/// changes.
 #[cfg(feature = "bollard")]
 pub mod api_docker;
 /// Docker container management, using the "docker" OS command as a backend.
