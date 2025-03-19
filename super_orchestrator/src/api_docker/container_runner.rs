@@ -50,10 +50,9 @@ pub struct ContainerRunner {
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
     pub std_record: Option<Arc<Mutex<VecDeque<u8>>>>,
-    // TODO this is only hacked in to give the `error_compilation` information on what containers
-    // to include
-    pub had_error: bool,
     pub wait_container: Option<WaitContainer>,
+    // TODO hack to tell the error compilation if a container failed
+    pub had_error: bool,
     pub output_dir: Option<PathBuf>,
     pub debug: bool,
 }

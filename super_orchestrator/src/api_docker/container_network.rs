@@ -300,8 +300,8 @@ impl ContainerNetwork {
                 network_opts,
                 stdin: None,
                 std_record: None,
-                had_error: false,
                 wait_container: None,
+                had_error: false,
                 output_dir,
                 debug: self.opts.debug,
             });
@@ -392,6 +392,7 @@ impl ContainerNetwork {
     /// Looks through the results and includes the last "Error:" or
     /// " panicked at " parts. Checks stderr first and falls back to
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
+    #[allow(clippy::single_match)]
     async fn error_compilation(&mut self) -> Result<()> {
         fn contains<'a>(
             stderr: &'a str,
@@ -434,8 +435,36 @@ impl ContainerNetwork {
         let error_marker = "Error:";
         let panicked_at = " panicked at ";
         let mut res = Error::empty();
-        for (name, state) in self.containers.iter() {
-            if state.had_error {
+        for (name, state) in self.containers.iter_mut() {
+            // check if a caller had already gotten the final wait or check ourselves if
+            // there was a failure
+            let mut failed = state.had_error;
+            if !failed {
+                if let Some(wait_container) = state.wait_container.as_mut() {
+                    select! {
+                        item = wait_container.next() => {
+                            match item {
+                                Some(item) => {
+                                    match item {
+                                        Ok(response) => {
+                                            if response.status_code != 0 {
+                                                failed = true;
+                                            }
+                                        },
+                                        Err(_) => {
+                                            failed = true;
+                                        },
+                                    }
+                                },
+                                None => (),
+                            }
+                        }
+                        _ = sleep(Duration::from_millis(10)) => ()
+                    }
+                }
+            }
+
+            if failed {
                 if let Some(std_record) = state.std_record.as_ref() {
                     let std_record =
                         String::from_utf8_lossy(std_record.lock().await.make_contiguous())
@@ -525,37 +554,39 @@ impl ContainerNetwork {
                                     Ok(response) => {
                                         // nonzero status codes seem to always manifest as a
                                         // bollard error instead, but have this just in case
-                                        if response.status_code != 0 {
-                                            state.had_error = true;
-                                            if terminate_on_failure {
+                                        if (response.status_code != 0) && terminate_on_failure {
+                                                state.had_error = true;
                                                 // give some time for other containers to react,
                                                 // they will be sending
                                                 // ProbablyNotRootCause errors and other things
-                                                sleep(Duration::from_millis(300)).await;
-                                                self.teardown().await.stack()?;
-                                                return self.error_compilation().await
-                                                .stack_err_locationless(
+                                                sleep(Duration::from_millis(500)).await;
+                                                let err = self.error_compilation().await
+                                                    .stack_err_locationless(
                                                     "ContainerNetwork::wait_with_timeout error \
                                                     compilation (check logs for more):\n",
-                                                )
-                                            }
+                                                );
+                                                self.teardown().await.stack()?;
+                                                return err;
                                         }
                                         names.remove(i);
                                     },
-                                    // usua
-                                    Err(bollard_err) => {
-                                        let bollard_err = format!("{bollard_err:?}");
+                                    // the `_bollard_err` here always seems to be spurious and
+                                    // related to the container having been removed
+                                    Err(_bollard_err) => {
                                         state.had_error = true;
-                                        sleep(Duration::from_millis(300)).await;
+                                        // TODO there is some kind of inconsistency here, I have
+                                        // had to make this wait longer to make it consistent enough
+                                        sleep(Duration::from_millis(500)).await;
+                                        let err = self.error_compilation().await
+                                            .stack_err_locationless(
+                                                "ContainerNetwork::wait_with_timeout error \
+                                                compilation (check logs for more):\n",
+                                            );
+                                        // I am doing the error compilation then teardown in this
+                                        // order because the teardown removes all the information,
+                                        // TODO we should probably have it keep the stuff like in
+                                        // the CLI version
                                         self.teardown().await.stack()?;
-                                        let mut err = self.error_compilation().await
-                                        .stack_err_locationless(
-                                        "ContainerNetwork::wait_with_timeout error \
-                                        compilation (check logs for more):\n",
-                                    );
-                                    if !bollard_err.contains("No such container") {
-                                        err = err.stack_err(bollard_err);
-                                    } // else is spurious for our case
                                         return err;
                                     },
                                 }
