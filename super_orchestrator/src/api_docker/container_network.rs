@@ -392,7 +392,6 @@ impl ContainerNetwork {
     /// Looks through the results and includes the last "Error:" or
     /// " panicked at " parts. Checks stderr first and falls back to
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
-    #[allow(clippy::single_match)]
     async fn error_compilation(&mut self) -> Result<()> {
         fn contains<'a>(
             stderr: &'a str,
@@ -443,20 +442,17 @@ impl ContainerNetwork {
                 if let Some(wait_container) = state.wait_container.as_mut() {
                     select! {
                         item = wait_container.next() => {
-                            match item {
-                                Some(item) => {
-                                    match item {
-                                        Ok(response) => {
-                                            if response.status_code != 0 {
-                                                failed = true;
-                                            }
-                                        },
-                                        Err(_) => {
+                            if let Some(item) = item {
+                                match item {
+                                    Ok(response) => {
+                                        if response.status_code != 0 {
                                             failed = true;
-                                        },
-                                    }
-                                },
-                                None => (),
+                                        }
+                                    },
+                                    Err(_bollard_err) => {
+                                        failed = true;
+                                    },
+                                }
                             }
                         }
                         _ = sleep(Duration::from_millis(10)) => ()
@@ -550,6 +546,10 @@ impl ContainerNetwork {
                     item = wait_container.next() => {
                         match item {
                             Some(item) => {
+                                // The Docker API is stupid, I have only ever seen it return a
+                                // bollard error regardless of whether the container exited normally
+                                // or with an error, I have to inspect it and assume that if it
+                                // contains "No such container: " then it exited normally
                                 match item {
                                     Ok(response) => {
                                         // nonzero status codes seem to always manifest as a
@@ -559,7 +559,7 @@ impl ContainerNetwork {
                                                 // give some time for other containers to react,
                                                 // they will be sending
                                                 // ProbablyNotRootCause errors and other things
-                                                sleep(Duration::from_millis(500)).await;
+                                                sleep(Duration::from_millis(200)).await;
                                                 let err = self.error_compilation().await
                                                     .stack_err_locationless(
                                                     "ContainerNetwork::wait_with_timeout error \
@@ -570,24 +570,27 @@ impl ContainerNetwork {
                                         }
                                         names.remove(i);
                                     },
-                                    // the `_bollard_err` here always seems to be spurious and
-                                    // related to the container having been removed
-                                    Err(_bollard_err) => {
-                                        state.had_error = true;
-                                        // TODO there is some kind of inconsistency here, I have
-                                        // had to make this wait longer to make it consistent enough
-                                        sleep(Duration::from_millis(500)).await;
-                                        let err = self.error_compilation().await
-                                            .stack_err_locationless(
-                                                "ContainerNetwork::wait_with_timeout error \
-                                                compilation (check logs for more):\n",
-                                            );
-                                        // I am doing the error compilation then teardown in this
-                                        // order because the teardown removes all the information,
-                                        // TODO we should probably have it keep the stuff like in
-                                        // the CLI version
-                                        self.teardown().await.stack()?;
-                                        return err;
+                                    Err(bollard_err) => {
+                                        let bollard_err = format!("{bollard_err:?}");
+                                        if !bollard_err.contains("No such container: ") {
+                                            state.had_error = true;
+                                            if terminate_on_failure {
+                                                sleep(Duration::from_millis(200)).await;
+                                                let err = self.error_compilation().await
+                                                    .stack_err_locationless(
+                                                        "ContainerNetwork::wait_with_timeout error \
+                                                        compilation (check logs for more):\n",
+                                                    );
+                                                // I am doing the error compilation then teardown in
+                                                // this order because the teardown removes all the
+                                                // information,
+                                                // TODO we should probably have it keep the stuff
+                                                // like in the CLI version
+                                                self.teardown().await.stack()?;
+                                                return err;
+                                            }
+                                        }
+                                        names.remove(i);
                                     },
                                 }
                             },

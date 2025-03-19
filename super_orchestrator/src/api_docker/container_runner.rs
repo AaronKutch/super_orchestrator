@@ -5,7 +5,6 @@ use std::{
     sync::Arc,
 };
 
-use bollard::container::WaitContainerOptions;
 // reexport from bollard
 pub use bollard::secret::DeviceMapping;
 use stacked_errors::{Result, StackableErr};
@@ -191,12 +190,8 @@ impl ContainerRunner {
         // the container entirely, but we can call both before `start_container` is even
         // called.
 
-        let wait_container = docker.wait_container(
-            &self.container_opts.name,
-            Some(WaitContainerOptions {
-                condition: "next-exit".to_string(),
-            }),
-        );
+        // `WaitContainerOptions` seems to do nothing
+        let wait_container = docker.wait_container::<String>(&self.container_opts.name, None);
 
         let response = docker
             .attach_container(
