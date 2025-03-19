@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.16.0] - TODO
+## [0.16.0] - 2025-03-19
 ### Changes
 - Moved all the examples under a `testcrate` as binaries
 - Moved all the previous docker structs and helpers under `cli_docker`

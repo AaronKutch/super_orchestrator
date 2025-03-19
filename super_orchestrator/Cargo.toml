@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.15.2"
+version = "0.16.0"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -35,7 +35,7 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
-default = ["bollard"]
+default = []
 # needed for Unix signals on `Command`s
 nix_support = ["nix"]
 # enable bollard backed features

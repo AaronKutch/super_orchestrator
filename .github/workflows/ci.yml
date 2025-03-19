@@ -29,7 +29,8 @@ jobs:
           cargo r --bin basic_containers
           cargo r --bin docker_entrypoint_pattern
           cargo r --bin postgres
-          cargo r --bin postgres --features=bollard
+          cargo r --bin docker_entrypoint_pattern_bollard --features=bollard
+          cargo r --bin postgres_bollard --features=bollard
           cargo r --bin clean
 
   rustfmt:
