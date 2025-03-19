@@ -717,8 +717,8 @@ impl ContainerNetwork {
             .stack_err_locationless("ContainerNetwork::run_all")
     }
 
-    /// Looks through the results and includes the last "Error: Error { stack:
-    /// [" or " panicked at " parts. Checks stderr first and falls back to
+    /// Looks through the results and includes the last "Error:" or
+    /// " panicked at " parts. Checks stderr first and falls back to
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         fn contains<'a>(

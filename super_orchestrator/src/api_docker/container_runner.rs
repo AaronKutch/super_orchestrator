@@ -1,10 +1,15 @@
-use std::{collections::HashMap, io::IsTerminal, path::PathBuf};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::IsTerminal,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use bollard::container::WaitContainerOptions;
 // reexport from bollard
 pub use bollard::secret::DeviceMapping;
 use stacked_errors::{Result, StackableErr};
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, sync::Mutex};
 
 use crate::{
     api_docker::{
@@ -44,6 +49,10 @@ pub struct ContainerRunner {
     pub network_opts: ExtraAddContainerOptions,
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
+    pub std_record: Option<Arc<Mutex<VecDeque<u8>>>>,
+    // TODO this is only hacked in to give the `error_compilation` information on what containers
+    // to include
+    pub had_error: bool,
     pub wait_container: Option<WaitContainer>,
     pub output_dir: Option<PathBuf>,
     pub debug: bool,
@@ -212,6 +221,8 @@ impl ContainerRunner {
 
         self.stdin = Some(response.input);
         self.wait_container = Some(Box::pin(wait_container));
+        let std_record = Arc::new(Mutex::new(VecDeque::new()));
+        self.std_record = Some(std_record.clone());
 
         // log docker outputs variables
         let container_name = self.container_opts.name.clone();
@@ -278,6 +289,7 @@ impl ContainerRunner {
                             if let Some(ref mut log_file) = log_file {
                                 log_file.write_all(&message).await.stack()?;
                             }
+                            std_record.lock().await.extend(message.iter());
                         }
                         // not sure why but all output comes from LogOutput::Console
                         LogOutput::StdOut { message } | LogOutput::Console { message } => {
@@ -293,6 +305,7 @@ impl ContainerRunner {
                             if let Some(ref mut log_file) = log_file {
                                 log_file.write_all(&message).await.stack()?;
                             }
+                            std_record.lock().await.extend(message.iter());
                         }
                         LogOutput::StdIn { message: _ } => (),
                     }
