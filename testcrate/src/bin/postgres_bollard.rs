@@ -6,7 +6,7 @@
 //!
 //! This is the rewrite of the postgres example using bollard backend.
 
-use std::{path::PathBuf, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use stacked_errors::{bail, Result, StackableErr};
@@ -15,12 +15,11 @@ use super_orchestrator::{
     api_docker::{
         AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
         NetworkCreateOptions, OutputDirConfig, SuperDockerfile,
-        CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
     },
     cli_docker::Dockerfile,
     wait_for_ok, Command,
 };
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::fs;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -177,11 +176,12 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     eprintln!("test done");
 
-    let mut ok_file = PathBuf::from_str(logs_dir).stack()?;
+    // TODO we would configure our own volume for this example
+    /*let mut ok_file = PathBuf::from_str(logs_dir).stack()?;
     ok_file.push(test_runner_name);
     ok_file.push("ok");
 
-    assert_eq!(tokio::fs::read_to_string(ok_file).await.stack()?, "ok");
+    assert_eq!(tokio::fs::read_to_string(ok_file).await.stack()?, "ok");*/
 
     Ok(())
 }
@@ -219,8 +219,10 @@ async fn test_runner(postgres_name: String) -> Result<()> {
 
     info!("postgres is ready");
 
+    // TODO we would configure our own volume for this example
+    /*
     let mut ok_file =
-        PathBuf::from_str(&std::env::var(CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).stack()?)
+        PathBuf::from_str(&std::env::var(var).stack()?)
             .stack()?;
     ok_file.push("ok");
 
@@ -233,7 +235,7 @@ async fn test_runner(postgres_name: String) -> Result<()> {
         .stack()?
         .write_all(b"ok")
         .await
-        .stack()?;
+        .stack()?;*/
 
     Ok(())
 }

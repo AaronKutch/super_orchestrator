@@ -52,7 +52,7 @@ pub struct ContainerRunner {
     pub wait_container: Option<WaitContainer>,
     // TODO hack to tell the error compilation if a container failed
     pub had_error: bool,
-    pub output_dir: Option<PathBuf>,
+    pub std_log: Option<PathBuf>,
     pub debug: bool,
 }
 
@@ -64,7 +64,7 @@ impl std::fmt::Debug for ContainerRunner {
             container_opts,
             network_opts,
             should_be_started,
-            output_dir,
+            std_log,
             ..
         } = self;
         write!(
@@ -74,7 +74,7 @@ impl std::fmt::Debug for ContainerRunner {
     container_opts: {container_opts:?},
     network_opts: {network_opts:?},
     should_be_started: {should_be_started:?},
-    output_dir: {output_dir:?},
+    std_log: {std_log:?},
 }}"#
         )
     }
@@ -222,12 +222,11 @@ impl ContainerRunner {
         let container_name = self.container_opts.name.clone();
         let mut output = response.output;
         let log_output = self.container_opts.log_outs.unwrap_or(log_by_default);
-        let mut log_file = if let Some(mut log_file) = self
-            .output_dir
+        let mut std_log = if let Some(log_file) = self
+            .std_log
             .as_ref()
             .and_then(|output_dir| write_logs.then(|| output_dir.clone()))
         {
-            log_file.push("super_log");
             tokio::fs::File::options()
                 .write(true)
                 .create(true)
@@ -242,72 +241,73 @@ impl ContainerRunner {
         };
 
         // log docker outputs handler
-        if log_output || log_file.is_some() {
-            tokio::spawn(async move {
-                use bollard::container::LogOutput;
-                use futures::stream::StreamExt;
 
-                let (prefix_out, prefix_err) = if std::io::stderr().is_terminal() {
-                    let terminal_color = next_terminal_color();
-                    (
-                        owo_colors::OwoColorize::color(
-                            &format!("{container_name}  | "),
-                            terminal_color,
-                        )
-                        .to_string(),
-                        owo_colors::OwoColorize::color(
-                            &format!("{container_name} E| "),
-                            terminal_color,
-                        )
-                        .to_string(),
+        // TODO but we need the `std_record` for error compilation
+        //if log_output || std_log.is_some() || std_record.is_enabled {
+        tokio::spawn(async move {
+            use bollard::container::LogOutput;
+            use futures::stream::StreamExt;
+
+            let (prefix_out, prefix_err) = if std::io::stderr().is_terminal() {
+                let terminal_color = next_terminal_color();
+                (
+                    owo_colors::OwoColorize::color(
+                        &format!("{container_name}  | "),
+                        terminal_color,
                     )
-                } else {
-                    Default::default()
-                };
+                    .to_string(),
+                    owo_colors::OwoColorize::color(
+                        &format!("{container_name} E| "),
+                        terminal_color,
+                    )
+                    .to_string(),
+                )
+            } else {
+                Default::default()
+            };
 
-                let prefix_err_newline = "\n".to_string() + &prefix_err;
-                let prefix_out_newline = "\n".to_string() + &prefix_out;
+            let prefix_err_newline = "\n".to_string() + &prefix_err;
+            let prefix_out_newline = "\n".to_string() + &prefix_out;
 
-                while let Some(output) = output.next().await {
-                    match output.stack()? {
-                        LogOutput::StdErr { message } => {
-                            if log_output {
-                                eprintln!(
-                                    "{prefix_err}{}",
-                                    &String::from_utf8_lossy(&message)
-                                        .lines()
-                                        .collect::<Vec<_>>()
-                                        .join(&prefix_err_newline)
-                                )
-                            }
-                            if let Some(ref mut log_file) = log_file {
-                                log_file.write_all(&message).await.stack()?;
-                            }
-                            std_record.lock().await.extend(message.iter());
+            while let Some(output) = output.next().await {
+                match output.stack()? {
+                    LogOutput::StdErr { message } => {
+                        if log_output {
+                            eprintln!(
+                                "{prefix_err}{}",
+                                &String::from_utf8_lossy(&message)
+                                    .lines()
+                                    .collect::<Vec<_>>()
+                                    .join(&prefix_err_newline)
+                            )
                         }
-                        // not sure why but all output comes from LogOutput::Console
-                        LogOutput::StdOut { message } | LogOutput::Console { message } => {
-                            if log_output {
-                                eprintln!(
-                                    "{prefix_out}{}",
-                                    &String::from_utf8_lossy(&message)
-                                        .lines()
-                                        .collect::<Vec<_>>()
-                                        .join(&prefix_out_newline)
-                                )
-                            }
-                            if let Some(ref mut log_file) = log_file {
-                                log_file.write_all(&message).await.stack()?;
-                            }
-                            std_record.lock().await.extend(message.iter());
+                        if let Some(ref mut log_file) = std_log {
+                            log_file.write_all(&message).await.stack()?;
                         }
-                        LogOutput::StdIn { message: _ } => (),
+                        std_record.lock().await.extend(message.iter());
                     }
+                    // not sure why but all output comes from LogOutput::Console
+                    LogOutput::StdOut { message } | LogOutput::Console { message } => {
+                        if log_output {
+                            eprintln!(
+                                "{prefix_out}{}",
+                                &String::from_utf8_lossy(&message)
+                                    .lines()
+                                    .collect::<Vec<_>>()
+                                    .join(&prefix_out_newline)
+                            )
+                        }
+                        if let Some(ref mut log_file) = std_log {
+                            log_file.write_all(&message).await.stack()?;
+                        }
+                        std_record.lock().await.extend(message.iter());
+                    }
+                    LogOutput::StdIn { message: _ } => (),
                 }
+            }
 
-                Ok(()) as Result<_>
-            });
-        }
+            Ok(()) as Result<_>
+        });
 
         Ok(())
     }

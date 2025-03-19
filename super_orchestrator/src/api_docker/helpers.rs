@@ -5,15 +5,6 @@ pub use bollard::{
     container::LogOutput, errors::Error as BollardError, secret::ContainerWaitResponse,
 };
 
-/// Name of the environment variable used to determine the output directory to
-/// use
-pub const CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME: &str = "CONTAINER_NETWORK_OUTPUT_DIR";
-
-/// Load the environment variable [CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME]
-pub fn get_container_network_output_dir() -> Option<String> {
-    std::env::var(CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME).ok()
-}
-
 /// The trait object for writing to a container's stdin
 pub type DockerStdin = Pin<Box<dyn tokio::io::AsyncWrite + Send>>;
 

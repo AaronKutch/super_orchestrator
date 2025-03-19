@@ -15,7 +15,6 @@ use tracing::{Instrument, Level};
 use crate::api_docker::{
     docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerCreateOptions,
     ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
-    CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME,
 };
 
 /// Manages a set of containers in a controlled environment.
@@ -73,10 +72,6 @@ pub struct NetworkCreateOptions {
 /// Set the value as a temporary directory or an
 /// gitignored directory in a repository. This will not mount the output
 /// directory, it will create other directories and mount them.
-///
-/// This also adds environment variable
-/// [CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME] to the container. Add
-/// outputs using the env var to ensure compatibility.
 #[derive(Debug, Clone, Default)]
 pub struct OutputDirConfig {
     /// Directory for dealing with outputs.
@@ -202,7 +197,7 @@ impl ContainerNetwork {
         &mut self,
         mut add_opts: AddContainerOptions,
         network_opts: ExtraAddContainerOptions,
-        mut container: ContainerCreateOptions,
+        container: ContainerCreateOptions,
     ) -> Result<()> {
         if self.containers.contains_key(&container.name) {
             return Err("Name is already registered").stack();
@@ -212,62 +207,24 @@ impl ContainerNetwork {
             return Err("Name for container can't be empty").stack();
         }
 
-        let output_dir = if let Some(ref output_config) = self.opts.output_dir_config {
-            add_opts = AddContainerOptions::DockerFile(
-                match add_opts {
-                    AddContainerOptions::Container(image) => image.to_docker_file(),
-                    AddContainerOptions::DockerFile(docker_file) => docker_file,
-                    AddContainerOptions::BollardArgs {
-                        image_options,
-                        tarball,
-                    } => SuperDockerfile::build_with_bollard_defaults(image_options, tarball)
-                        .await
-                        .stack()?
-                        .0
-                        .to_docker_file(),
-                }
-                .append_dockerfile_instructions(["RUN mkdir /super_out"]),
-            );
+        let std_log = if let Some(ref output_config) = self.opts.output_dir_config {
+            add_opts = AddContainerOptions::DockerFile(match add_opts {
+                AddContainerOptions::Container(image) => image.to_docker_file(),
+                AddContainerOptions::DockerFile(docker_file) => docker_file,
+                AddContainerOptions::BollardArgs {
+                    image_options,
+                    tarball,
+                } => SuperDockerfile::build_with_bollard_defaults(image_options, tarball)
+                    .await
+                    .stack()?
+                    .0
+                    .to_docker_file(),
+            });
 
-            let mut output_dir = PathBuf::from_str(&output_config.output_dir).stack()?;
-            output_dir.push(&container.name);
-            let output_dir_str = output_dir.to_str().unwrap();
+            let mut output_path = PathBuf::from_str(&output_config.output_dir).stack()?;
+            output_path.push(format!("{}.log", container.name));
 
-            if let Err(err) = tokio::fs::create_dir(&output_dir).await {
-                match err.kind() {
-                    std::io::ErrorKind::AlreadyExists => {
-                        if output_dir_str == "/" {
-                            return Err(format!(
-                                "Trying to create output_dir at {output_dir_str} for {}",
-                                container.name
-                            ))
-                            .stack();
-                        }
-
-                        tracing::warn!(
-                            "Output directory for container {} already exists.",
-                            container.name
-                        );
-                    }
-                    _ => {
-                        return Err(format!(
-                            "Problems creating output_dir ({output_dir_str}) for container {}",
-                            container.name
-                        ))
-                        .stack()
-                    }
-                }
-            }
-
-            container.volumes.push((
-                output_dir_str.to_string(),
-                "/super_orchestrator_out".to_string(),
-            ));
-            container.env_vars.push(format!(
-                "{CONTAINER_NETWORK_OUTPUT_DIR_ENV_VAR_NAME}=/super_orchestrator_out"
-            ));
-
-            Some(output_dir)
+            Some(output_path)
         } else {
             None
         };
@@ -302,7 +259,7 @@ impl ContainerNetwork {
                 std_record: None,
                 wait_container: None,
                 had_error: false,
-                output_dir,
+                std_log,
                 debug: self.opts.debug,
             });
 
