@@ -1,13 +1,15 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     str::FromStr,
-    sync::Arc,
+    time::{Duration, Instant},
 };
 
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
-use stacked_errors::{Result, StackableErr};
+use futures::StreamExt;
+use stacked_errors::{Error, Result, StackableErr};
+use tokio::{select, time::sleep};
 use tracing::{Instrument, Level};
 
 use crate::api_docker::{
@@ -297,6 +299,7 @@ impl ContainerNetwork {
                 container_opts: container,
                 network_opts,
                 stdin: None,
+                wait_container: None,
                 output_dir,
                 debug: self.opts.debug,
             });
@@ -384,73 +387,122 @@ impl ContainerNetwork {
             .and_then(|res| res.state))
     }
 
+    async fn wait_with_timeout_internal(
+        &mut self,
+        mut names: Vec<String>,
+        terminate_on_failure: bool,
+        duration: Duration,
+    ) -> Result<()> {
+        let start = Instant::now();
+        let mut skip_fail = true;
+        // we will check in a loop so that if a container has failed in the meantime, we
+        // terminate all
+        let mut i = 0;
+        loop {
+            if names.is_empty() {
+                break
+            }
+            if i >= names.len() {
+                i = 0;
+                let current = Instant::now();
+                let elapsed = current.saturating_duration_since(start);
+                if elapsed > duration {
+                    if skip_fail {
+                        // give one extra round, this is strong enough for the `Duration::ZERO`
+                        // guarantee
+                        skip_fail = false;
+                    } else {
+                        if terminate_on_failure {
+                            // we put in some extra delay so that the log file writers have some
+                            // extra time to finish
+                            sleep(Duration::from_millis(200)).await;
+                            self.teardown().await.stack()?;
+                        }
+                        return Err(Error::timeout().add_err_locationless(format!(
+                            "ContainerNetwork::wait_with_timeout timeout waiting for container \
+                             names {names:?} to complete"
+                        )))
+                    }
+                } else {
+                    sleep(Duration::from_millis(200)).await;
+                }
+            }
+
+            let name = &names[i];
+            let state = self.containers.get_mut(name).unwrap();
+            if let Some(wait_container) = state.wait_container.as_mut() {
+                select! {
+                    item = wait_container.next() => {
+                        match item {
+                            Some(item) => {
+                                match item {
+                                    Ok(response) => {
+                                        // nonzero status codes seem to always manifest as a
+                                        // bollard error instead, but have this just in case
+                                        if response.status_code != 0 {
+                                            //TODO
+                                        }
+                                        dbg!(response.status_code);
+                                        dbg!(response.error);
+                                        names.remove(i);
+                                    },
+                                    Err(bollard_err) => {
+                                        //let _ = self.teardown().await;
+                                        //todo!();
+                                        dbg!(bollard_err);
+                                        names.remove(i);
+                                    },
+                                }
+                            },
+                            None => {
+                                // has already been accessed and terminated
+
+                                if self.opts.debug {
+                                    tracing::debug!("wait_with_timeout_internal: assuming already \
+                                        accessed and terminated");
+                                }
+                                names.remove(i);
+                            },
+                        }
+                    }
+                    _ = sleep(Duration::from_millis(100)) => {
+                        // continue
+                        i += 1;
+                    }
+                }
+            } else {
+                // not active
+
+                if self.opts.debug {
+                    tracing::debug!("wait_with_timeout_internal: assuming never active");
+                }
+                names.remove(i);
+            }
+        }
+        Ok(())
+    }
+
     /// Waits for all containers marked as "important" to shutdown
     #[tracing::instrument(skip_all,
         fields(
             network.name = %self.opts.name,
         )
     )]
-    pub async fn wait_important(&self) -> Result<()> {
-        let already_down = Arc::new(tokio::sync::RwLock::new(HashSet::new()));
+    pub async fn wait_important(&mut self) -> Result<()> {
         let importants = self
             .containers
             .iter()
             .filter(|(_, container)| container.container_opts.important)
+            .map(|(name, _)| name.clone())
             .collect::<Vec<_>>();
 
         if self.opts.debug {
             tracing::debug!("total important: {}", importants.len());
         }
 
-        let build_futs = || {
-            importants
-                .iter()
-                .map(|(container_name, _)| {
-                    let already_down = already_down.clone();
-                    Box::pin(async move {
-                        if already_down.read().await.contains(*container_name) {
-                            return Ok(()) as Result<_>;
-                        }
-
-                        let status = Self::inspect_container(container_name).await.stack()?;
-
-                        if status
-                            .and_then(|status| status.running.map(|x| !x))
-                            .unwrap_or(true)
-                        {
-                            already_down
-                                .write()
-                                .await
-                                .insert(container_name.to_string());
-                        }
-
-                        Ok(())
-                    })
-                })
-                .collect::<Vec<_>>()
-        };
-
-        while importants.len() != already_down.read().await.len() {
-            let mut futs = build_futs();
-
-            while !futs.is_empty() {
-                let (res, _, rest) = futures::future::select_all(futs).await;
-                res.stack()?;
-                futs = rest;
-            }
-
-            if self.opts.debug {
-                tracing::debug!(
-                    "total importants shutdown: {}/{}",
-                    already_down.read().await.len(),
-                    importants.len()
-                );
-            }
-
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-
-        Ok(())
+        self.wait_with_timeout_internal(importants, true, Duration::MAX)
+            .await
+            .stack()
     }
 
     /// Gets the stdin of the container, which should exist after the container
@@ -475,8 +527,8 @@ impl ContainerNetwork {
             network.name = %self.opts.name,
         )
     )]
-    pub async fn teardown(self) -> Result<()> {
-        total_teardown(&self.opts.name, self.containers.into_keys())
+    pub async fn teardown(&mut self) -> Result<()> {
+        total_teardown(&self.opts.name, self.containers.drain().map(|(key, _)| key))
             .await
             .stack()
     }

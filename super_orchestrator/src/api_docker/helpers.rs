@@ -1,7 +1,9 @@
 use std::{path::PathBuf, pin::Pin};
 
 // reexport from bollard
-pub use bollard::{container::LogOutput, errors::Error as BollardError};
+pub use bollard::{
+    container::LogOutput, errors::Error as BollardError, secret::ContainerWaitResponse,
+};
 
 /// Name of the environment variable used to determine the output directory to
 /// use
@@ -21,6 +23,11 @@ pub type DockerOutput =
 
 /// A callback style function for getting the container's stdout
 pub type OutputHook = Box<dyn Fn(&Result<LogOutput, BollardError>) -> stacked_errors::Result<()>>;
+
+/// The trait object for receiving a container's exit result
+pub type WaitContainer = Pin<
+    Box<dyn futures::stream::Stream<Item = Result<ContainerWaitResponse, BollardError>> + Send>,
+>;
 
 /// Things regarding the docker API socket
 pub mod docker_socket {

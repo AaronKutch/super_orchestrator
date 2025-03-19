@@ -1,5 +1,6 @@
 use std::{collections::HashMap, io::IsTerminal, path::PathBuf};
 
+use bollard::container::WaitContainerOptions;
 // reexport from bollard
 pub use bollard::secret::DeviceMapping;
 use stacked_errors::{Result, StackableErr};
@@ -9,6 +10,7 @@ use crate::{
     api_docker::{
         docker_socket::get_or_init_default_docker_instance, port_bindings_to_bollard_args,
         ContainerNetwork, DockerStdin, ExtraAddContainerOptions, PortBind, SuperImage,
+        WaitContainer,
     },
     next_terminal_color,
 };
@@ -42,6 +44,7 @@ pub struct ContainerRunner {
     pub network_opts: ExtraAddContainerOptions,
     pub should_be_started: bool,
     pub stdin: Option<DockerStdin>,
+    pub wait_container: Option<WaitContainer>,
     pub output_dir: Option<PathBuf>,
     pub debug: bool,
 }
@@ -173,14 +176,19 @@ impl ContainerRunner {
             tracing::debug!("Starting container");
         }
 
-        docker
-            .start_container::<String>(&self.container_opts.name, None)
-            .await
-            .stack()?;
+        // Note: it is extremely important that we call all the things we need to before
+        // `start_container` is called. For instance, if `attach_container` takes too
+        // long, it will miss part of the logs or even miss the duration of the
+        // container entirely resulting in an error. `wait_container` could also miss
+        // the container entirely, but we can call both before `start_container` is even
+        // called.
 
-        if self.debug {
-            tracing::debug!("Attaching to container");
-        }
+        let wait_container = docker.wait_container(
+            &self.container_opts.name,
+            Some(WaitContainerOptions {
+                condition: "next-exit".to_string(),
+            }),
+        );
 
         let response = docker
             .attach_container(
@@ -197,7 +205,13 @@ impl ContainerRunner {
             .await
             .stack()?;
 
+        docker
+            .start_container::<String>(&self.container_opts.name, None)
+            .await
+            .stack()?;
+
         self.stdin = Some(response.input);
+        self.wait_container = Some(Box::pin(wait_container));
 
         // log docker outputs variables
         let container_name = self.container_opts.name.clone();
