@@ -179,7 +179,7 @@ async fn main() -> Result<()> {
     dbg!(command);
 
     // check custom prefixes
-    let command = Command::new("cargo r --bin command -- --print --to-stdout hello")
+    let command = Command::new("cargo r --bin commands -- --print --to-stdout hello")
         .debug(true)
         .stdout_debug_line_prefix(Some("stdout |".to_owned()))
         .stderr_debug_line_prefix(Some("stderr |".to_owned()));
