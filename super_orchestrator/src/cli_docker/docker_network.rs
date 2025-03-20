@@ -12,8 +12,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    docker::{Container, Dockerfile},
-    docker_helpers::wait_get_ip_addr,
+    cli_docker::{wait_get_ip_addr, Container, Dockerfile},
     Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
 };
 
@@ -718,8 +717,8 @@ impl ContainerNetwork {
             .stack_err_locationless("ContainerNetwork::run_all")
     }
 
-    /// Looks through the results and includes the last "Error: Error { stack:
-    /// [" or " panicked at " parts. Checks stderr first and falls back to
+    /// Looks through the results and includes the last "Error:" or
+    /// " panicked at " parts. Checks stderr first and falls back to
     /// stdout. Omits stacks that have "ProbablyNotRootCauseError".
     fn error_compilation(&mut self) -> Result<()> {
         fn contains<'a>(

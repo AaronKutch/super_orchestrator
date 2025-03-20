@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
-    docker::{Container, ContainerNetwork, Dockerfile},
+    cli_docker::{Container, ContainerNetwork, Dockerfile},
     net_message::wait_for_ok_lookup_host,
 };
 use tracing::info;
 
-const BASE_CONTAINER: &str = "fedora:40";
+const BASE_CONTAINER: &str = "fedora:41";
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[tokio::main]

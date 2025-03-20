@@ -10,17 +10,21 @@ use clap::Parser;
 use stacked_errors::{bail, Result, StackableErr};
 use super_orchestrator::{
     acquire_dir_path,
-    docker::{Container, ContainerNetwork, Dockerfile},
+    cli_docker::{Container, ContainerNetwork, Dockerfile},
     sh, wait_for_ok, Command,
 };
 use tokio::{fs, time::sleep};
 use tracing::info;
 
+const POSTGRES: &str = "postgres:16";
 const BASE_CONTAINER: &str = "fedora:41";
-const TARGET: &str = "x86_64-unknown-linux-gnu";
+// musl builds are more portable because it's statically linked
+//
+// When testing with x86_64-unknown-linux-gnu, if container had older glibc
+// version, compared to host, the rust binary would not run.
+const TARGET: &str = "x86_64-unknown-linux-musl";
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
-#[rustfmt::skip]
 fn test_dockerfile() -> String {
     let dynamic = "something";
     format!(
@@ -70,25 +74,15 @@ async fn container_runner(args: &Args) -> Result<()> {
     let container_target = TARGET;
 
     // build internal runner with `--release`
-    //sh("cargo build --release --bin", &[
-    //    bin_entrypoint,
-    //    "--target",
-    //    container_target,
-    //])
-    //.await.stack()?;
-    //let entrypoint =
-    // &format!("./target/{container_target}/release/{bin_entrypoint}");
-
-    // for this example we need this command
     sh([
-        "cargo build --release --example",
+        "cargo build --release --bin",
         bin_entrypoint,
         "--target",
         container_target,
     ])
     .await
     .stack()?;
-    let entrypoint = &format!("./target/{container_target}/release/examples/{bin_entrypoint}");
+    let entrypoint = &format!("./target/{container_target}/release/{bin_entrypoint}");
 
     // we can't put the directory in source control with the .gitignore trick,
     // because postgres doesn't like the .gitignore
@@ -108,6 +102,7 @@ async fn container_runner(args: &Args) -> Result<()> {
             .external_entrypoint(entrypoint, ["--entry-name", "test_runner"])
             .await
             .stack()?
+            //.build_args(["--network=host"])
             // if exposing a port beyond the machine, use something like this on the
             // container
             //.create_args(["-p", "0.0.0.0:5432:5432"]),
@@ -122,7 +117,7 @@ async fn container_runner(args: &Args) -> Result<()> {
     cn.add_container(
         Container::new(
             "postgres",
-            Dockerfile::name_tag("postgres:16"),
+            Dockerfile::name_tag(POSTGRES),
         )
         .volume(
             pg_data_path.to_str().stack()?,

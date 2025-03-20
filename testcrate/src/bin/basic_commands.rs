@@ -69,13 +69,13 @@ async fn main() -> Result<()> {
 
     // add an argument to the command, this is the same as running `ls ./example` on
     // a command line
-    sh(["ls", "./examples"]).await.stack()?;
+    sh(["ls", "./testcrate/src/bin"]).await.stack()?;
 
     // `super_orchestrator::Command::new` and the first iterator element of
     // `super_orchestrator::sh` have the feature that they are split by whitespace,
     // using the first segment for the command, and prefixes the others as separate
     // arguments
-    sh(["ls ./examples"]).await.stack()?;
+    sh(["ls ./testcrate/src/bin"]).await.stack()?;
 
     // Note: when trying to access the file "filename with spaces.txt", you would
     // type on a shell `ls "filename with spaces"`. However, it would not
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
     //Command::new("ls").arg("filename with spaces.txt") ...
 
     // accounting for the right relative directory it is
-    sh(["ls", "examples/filename with spaces.txt"])
+    sh(["ls", "./testcrate/src/bin/filename with spaces.txt"])
         .await
         .stack()?;
 
@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
     // changing the current working directory of the command
     Command::new("ls")
         .debug(true)
-        .cwd("./examples")
+        .cwd("./testcrate/src/bin")
         .run_to_completion()
         .await
         .stack()?

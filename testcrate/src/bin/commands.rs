@@ -103,14 +103,14 @@ async fn main() -> Result<()> {
 
     // strange "filename or extension is too long" issue with Windows
     let many_bytes = if cfg!(windows) {
-        String::from_iter(iter::repeat('e').take(10 * 1024))
+        String::from_iter(iter::repeat_n('e', 10 * 1024))
     } else {
-        String::from_iter(iter::repeat('e').take(105 * 1024))
+        String::from_iter(iter::repeat_n('e', 105 * 1024))
     };
 
     // record and file size limiting, useful for some long running programs that may
     // end up with more output than there is memory.
-    let comres = Command::new("cargo r --example commands --quiet -- --print")
+    let comres = Command::new("cargo r --bin commands --quiet -- --print")
         .arg("--to-stdout")
         .arg(&many_bytes)
         .arg("--to-stderr")
@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
         .await
         .stack()?;
     comres.assert_success().stack()?;
-    let expected = String::from_iter(iter::repeat('e').take(10 * 1024));
+    let expected = String::from_iter(iter::repeat_n('e', 10 * 1024));
     ensure_eq!(comres.stdout, expected.as_bytes());
     ensure_eq!(comres.stderr, expected.as_bytes());
     let file = FileOptions::read_to_string("./logs/stdout.log")
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     ensure!(!file.chars().any(|c| c != 'e'));
 
     // disable recording entirely if we don't need it
-    let comres = Command::new("cargo r --example commands --quiet -- --print")
+    let comres = Command::new("cargo r --bin commands --quiet -- --print")
         .arg("--to-stdout")
         .arg(&many_bytes)
         .arg("--to-stderr")
@@ -151,7 +151,7 @@ async fn main() -> Result<()> {
     ensure!(comres.stderr.is_empty());
 
     // check special handling for non-utf8 in stdout forwarding
-    let comres = Command::new("cargo r --example commands --quiet -- --nonutf8")
+    let comres = Command::new("cargo r --bin commands --quiet -- --nonutf8")
         .debug(true)
         .stdout_log(Some(FileOptions::write("./logs/stdout.log")))
         .stderr_log(Some(FileOptions::write("./logs/stderr.log")))
@@ -179,7 +179,7 @@ async fn main() -> Result<()> {
     dbg!(command);
 
     // check custom prefixes
-    let command = Command::new("cargo r --example commands -- --print --to-stdout hello")
+    let command = Command::new("cargo r --bin commands -- --print --to-stdout hello")
         .debug(true)
         .stdout_debug_line_prefix(Some("stdout |".to_owned()))
         .stderr_debug_line_prefix(Some("stderr |".to_owned()));
@@ -215,7 +215,7 @@ async fn test_copying(stdout: Option<String>, stderr: Option<String>) -> Result<
     // use that as the program directly, we are going through cargo to account for
     // the many possible placements of the binary depending on things like
     // `--release`).
-    let comres = Command::new("cargo r --example commands --quiet -- --print")
+    let comres = Command::new("cargo r --bin commands --quiet -- --print")
         .args(args)
         .debug(true)
         .stdout_log(Some(FileOptions::write("./logs/stdout.log")))

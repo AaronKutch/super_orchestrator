@@ -6,7 +6,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, docker::ContainerNetwork, next_terminal_color, Command,
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
     CommandResult, CommandRunner, FileOptions,
 };
 
@@ -18,9 +18,11 @@ use crate::{
 /// Ways of using a dockerfile for building a container
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Dockerfile {
-    /// Builds using an image in the format "name:tag" such as "fedora:40" or
-    /// "alpine:3.20" (running will call something such as `docker pull
-    /// name:tag`)
+    /// Builds using an image in the format "name:tag" such as "fedora:41" or
+    /// "alpine:3.21" (running will call something such as `docker pull
+    /// name:tag`). Docker will first try to fetch from the local registry, in
+    /// which case there might not be a tag, and just the name of some image
+    /// should be used.
     NameTag(String),
     /// Builds from a dockerfile on a path (e.x.
     /// "./tests/dockerfiles/example.dockerfile")
@@ -84,7 +86,7 @@ pub struct Container {
     pub container_name: String,
     /// Hostname of the URL that could access the container (the container can
     /// alternatively be accessed by an ip address via
-    /// [wait_get_ip_addr](crate::docker_helpers::wait_get_ip_addr)). Usually,
+    /// [wait_get_ip_addr](crate::cli_docker::wait_get_ip_addr)). Usually,
     /// this should be the same as `name`.
     pub host_name: String,
     /// The dockerfile

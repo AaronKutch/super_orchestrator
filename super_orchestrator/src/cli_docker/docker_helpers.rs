@@ -46,14 +46,15 @@ pub async fn wait_get_ip_addr(
 }
 
 /// Intended to be called from the main() of a standalone binary, or run from
-/// this repo `cargo r --example auto_exec -- --container-name main`
+/// this repo `cargo r --bin auto_exec -- --container-name main`
 ///
 /// This actively looks for a running container with the given
 /// `container_name` prefix, and when such a container starts it gets the
 /// container id and runs `docker exec [exec_args..] [id] [container_args..`,
 /// forwarding stdin and stdout to whatever program is calling this. Using
 /// Ctrl-C causes this to force terminate the container and resume looping.
-/// Ctrl-C again terminates the whole program. See the crate examples for more.
+/// Ctrl-C again terminates the whole program. See the testcrate examples for
+/// more.
 pub async fn auto_exec<I0, I1, S0, S1, S2>(
     exec_args: I0,
     container_name: S2,
