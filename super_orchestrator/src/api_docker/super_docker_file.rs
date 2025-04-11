@@ -333,11 +333,13 @@ impl SuperDockerfile {
     ) -> Result<Self> {
         let bootstrap_path = to;
 
-        let binary_path = std::env::current_exe()
+        let mut binary_path = std::env::current_exe()
             .stack()?
             .to_str()
             .stack()?
             .to_string();
+
+        binary_path = normalize_windows_exe_path_for_cargo_binary(binary_path);
 
         if self.debug {
             tracing::info!("Using path as entrypoint: {binary_path}");
@@ -389,7 +391,7 @@ impl SuperDockerfile {
             cur_binary_path.pop();
         }
 
-        let bootstrap_path = to;
+        let bootstrap_path = normalize_windows_exe_path_for_cargo_binary(to.to_string());
 
         if !is_musl {
             tracing::debug!("Current binary is not linked with musl, building to accordingly");
@@ -524,5 +526,13 @@ impl SuperDockerfile {
         Self::build_with_bollard_defaults(build_opts, tarball)
             .await
             .stack_err("SuperDockerfile::build_image")
+    }
+}
+
+fn normalize_windows_exe_path_for_cargo_binary(path: String) -> String {
+    if cfg!(target_os = "windows") {
+        path.strip_suffix(".exe").map(str::to_string).unwrap_or(path)
+    } else {
+        path
     }
 }
