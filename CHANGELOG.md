@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1] - 2025-04-11
+### Fixes
+- Fixed in the API docker healthcheck that `try_join_all` should have been used instead of
+  `select_all` in a loop
+- Binary paths in Windows are normalized now for API docker
+- Fixed that an IP address couldn't be assigned manually for API docker
+
 ## [0.16.0] - 2025-03-19
 ### Changes
 - Moved all the examples under a `testcrate` as binaries
