@@ -163,10 +163,13 @@ impl ContainerRunner {
                     networking_config: Some(bollard::container::NetworkingConfig {
                         endpoints_config: [(
                             network_name,
-                            self.network_opts.ip_addr.map(|ip_addr| EndpointSettings {
-                                ip_address: Some(ip_addr.to_string()),
-                                ..Default::default()
-                            }).unwrap_or_default(),
+                            self.network_opts
+                                .ip_addr
+                                .map(|ip_addr| EndpointSettings {
+                                    ip_address: Some(ip_addr.to_string()),
+                                    ..Default::default()
+                                })
+                                .unwrap_or_default(),
                         )]
                         .into_iter()
                         .collect(),

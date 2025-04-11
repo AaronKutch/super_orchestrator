@@ -1,5 +1,9 @@
 use std::{
-    collections::HashMap, net::IpAddr, path::PathBuf, str::FromStr, time::{Duration, Instant}
+    collections::HashMap,
+    net::IpAddr,
+    path::PathBuf,
+    str::FromStr,
+    time::{Duration, Instant},
 };
 
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
@@ -83,8 +87,8 @@ pub struct ExtraAddContainerOptions {
     /// If not set, will use the container's name.
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
-    /// Caution, when setting ip addr manually, make sure your gateway can't assign other
-    /// containers to the same address.
+    /// Caution, when setting ip addr manually, make sure your gateway can't
+    /// assign other containers to the same address.
     pub ip_addr: Option<IpAddr>,
 }
 
