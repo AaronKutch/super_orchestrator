@@ -372,7 +372,7 @@ pub async fn total_teardown(
     let mut errs = join_all(futs)
         .await
         .into_iter()
-        .filter_map(|res| if let Err(err) = res { Some(err) } else { None })
+        .filter_map(Result::err)
         .collect::<Vec<_>>();
 
     if let Err(err) = docker.remove_network(network_name).await.stack() {
