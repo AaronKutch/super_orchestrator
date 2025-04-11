@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use futures::TryStreamExt;
+use futures::{future::try_join_all, TryStreamExt};
 use stacked_errors::{Result, StackableErr};
 
 use crate::{
@@ -195,7 +195,7 @@ impl SuperDockerfile {
         }
 
         let this = Arc::new(std::sync::Mutex::new(self));
-        let mut futs = v
+        let futs = v
             .into_iter()
             .map(|(from, to)| {
                 let this = this.clone();
@@ -214,11 +214,7 @@ impl SuperDockerfile {
             })
             .collect::<Vec<_>>();
 
-        while !futs.is_empty() {
-            let (res, _, rest) = futures::future::select_all(futs).await;
-            res.stack()?.stack()?;
-            futs = rest;
-        }
+        try_join_all(futs).await.stack()?;
 
         self = Arc::try_unwrap(this).unwrap().into_inner().stack()?;
 
@@ -243,7 +239,7 @@ impl SuperDockerfile {
         }
 
         let this = Arc::new(std::sync::Mutex::new(self));
-        let mut futs = v
+        let futs = v
             .into_iter()
             .map(|(to, mode, content)| {
                 let this = this.clone();
@@ -263,11 +259,7 @@ impl SuperDockerfile {
             })
             .collect::<Vec<_>>();
 
-        while !futs.is_empty() {
-            let (res, _, rest) = futures::future::select_all(futs).await;
-            res.stack()??;
-            futs = rest;
-        }
+        try_join_all(futs).await.stack()?;
 
         self = Arc::try_unwrap(this).unwrap().into_inner().stack()?;
 
@@ -371,12 +363,15 @@ impl SuperDockerfile {
         }
 
         let mut cur_binary_path = std::env::current_exe().stack()?;
-        let cur_binary_name = cur_binary_path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .stack()?
-            .to_string();
+
+        let cur_binary_name = normalize_windows_exe_path_for_cargo_binary(
+            cur_binary_path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .stack()?
+                .to_string(),
+        );
         cur_binary_path.pop();
 
         let mut is_musl = true;
@@ -391,7 +386,7 @@ impl SuperDockerfile {
             cur_binary_path.pop();
         }
 
-        let bootstrap_path = normalize_windows_exe_path_for_cargo_binary(to.to_string());
+        let bootstrap_path = to;
 
         if !is_musl {
             tracing::debug!("Current binary is not linked with musl, building to accordingly");
@@ -529,9 +524,14 @@ impl SuperDockerfile {
     }
 }
 
+/// When dealing with windows binaries, the file will have the .exe extension
+/// while the rust binary won't. If we don't remove the .exe, the command will
+/// be like `cargo build --bin ${bin_name}.exe
 fn normalize_windows_exe_path_for_cargo_binary(path: String) -> String {
     if cfg!(target_os = "windows") {
-        path.strip_suffix(".exe").map(str::to_string).unwrap_or(path)
+        path.strip_suffix(".exe")
+            .map(str::to_string)
+            .unwrap_or(path)
     } else {
         path
     }

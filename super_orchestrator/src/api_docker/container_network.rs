@@ -8,7 +8,7 @@ use std::{
 
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
-use futures::StreamExt;
+use futures::{future::try_join_all, StreamExt};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{select, time::sleep};
 use tracing::{Instrument, Level};
@@ -310,7 +310,7 @@ impl ContainerNetwork {
     pub async fn start_all(&mut self) -> Result<()> {
         let network_name = self.opts.name.clone();
 
-        let mut futs = self
+        let futs = self
             .containers
             .values_mut()
             .map(|container_runner| {
@@ -327,11 +327,7 @@ impl ContainerNetwork {
             })
             .collect::<Vec<_>>();
 
-        while !futs.is_empty() {
-            let (res, _, rest) = futures::future::select_all(futs).await;
-            res.stack()?;
-            futs = rest;
-        }
+        try_join_all(futs).await.stack()?;
 
         Ok(())
     }
@@ -696,16 +692,12 @@ impl ContainerNetwork {
                 })
                 .collect::<Vec<_>>();
 
-        let mut finished = false;
-        while !finished {
-            let mut futs = futs.clone().into_iter().map(|x| x()).collect::<Vec<_>>();
-            finished = true;
-            while !futs.is_empty() {
-                let (res, _, rest) = futures::future::select_all(futs).await;
-                finished |= res.stack()?;
-                futs = rest;
-            }
-        }
+        while try_join_all(futs.clone().into_iter().map(|x| x()))
+            .await
+            .stack()?
+            .into_iter()
+            .any(|healthy| !healthy)
+        {}
 
         Ok(())
     }

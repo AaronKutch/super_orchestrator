@@ -8,6 +8,7 @@ use std::{
 // reexport from bollard
 pub use bollard::secret::DeviceMapping;
 use bollard::secret::EndpointSettings;
+use futures::future::join_all;
 use stacked_errors::{Result, StackableErr};
 use tokio::{io::AsyncWriteExt, sync::Mutex};
 
@@ -338,7 +339,7 @@ pub async fn total_teardown(
         .containers
         .map_or_else(Vec::new, |containers| containers.into_keys().collect());
 
-    let mut futs = live_containers
+    let futs = live_containers
         .into_iter()
         .chain(known_container_names)
         .map(|container_name| {
@@ -368,14 +369,11 @@ pub async fn total_teardown(
         })
         .collect::<Vec<_>>();
 
-    let mut errs = vec![];
-    while !futs.is_empty() {
-        let (res, _, rest) = futures::future::select_all(futs).await;
-        if let Err(err) = res {
-            errs.push(err)
-        };
-        futs = rest;
-    }
+    let mut errs = join_all(futs)
+        .await
+        .into_iter()
+        .filter_map(|res| if let Err(err) = res { Some(err) } else { None })
+        .collect::<Vec<_>>();
 
     if let Err(err) = docker.remove_network(network_name).await.stack() {
         errs.push(err)
