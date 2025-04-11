@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    net::IpAddr,
     path::PathBuf,
     str::FromStr,
     time::{Duration, Instant},
@@ -7,7 +8,7 @@ use std::{
 
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
-use futures::StreamExt;
+use futures::{future::try_join_all, StreamExt};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{select, time::sleep};
 use tracing::{Instrument, Level};
@@ -83,8 +84,12 @@ pub struct OutputDirConfig {
 /// Extra options related to `docker create`
 #[derive(Debug, Clone, Default)]
 pub struct ExtraAddContainerOptions {
+    /// If not set, will use the container's name.
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
+    /// Caution, when setting ip addr manually, make sure your gateway can't
+    /// assign other containers to the same address.
+    pub ip_addr: Option<IpAddr>,
 }
 
 // TODO make the rest of `super_orchestrator` use tokio::signal::ctrl_c instead,
@@ -305,7 +310,7 @@ impl ContainerNetwork {
     pub async fn start_all(&mut self) -> Result<()> {
         let network_name = self.opts.name.clone();
 
-        let mut futs = self
+        let futs = self
             .containers
             .values_mut()
             .map(|container_runner| {
@@ -322,11 +327,7 @@ impl ContainerNetwork {
             })
             .collect::<Vec<_>>();
 
-        while !futs.is_empty() {
-            let (res, _, rest) = futures::future::select_all(futs).await;
-            res.stack()?;
-            futs = rest;
-        }
+        try_join_all(futs).await.stack()?;
 
         Ok(())
     }
@@ -691,16 +692,12 @@ impl ContainerNetwork {
                 })
                 .collect::<Vec<_>>();
 
-        let mut finished = false;
-        while !finished {
-            let mut futs = futs.clone().into_iter().map(|x| x()).collect::<Vec<_>>();
-            finished = true;
-            while !futs.is_empty() {
-                let (res, _, rest) = futures::future::select_all(futs).await;
-                finished |= res.stack()?;
-                futs = rest;
-            }
-        }
+        while try_join_all(futs.clone().into_iter().map(|x| x()))
+            .await
+            .stack()?
+            .into_iter()
+            .any(|healthy| !healthy)
+        {}
 
         Ok(())
     }
