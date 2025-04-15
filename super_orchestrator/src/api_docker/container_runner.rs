@@ -7,7 +7,7 @@ use std::{
 
 // reexport from bollard
 pub use bollard::secret::DeviceMapping;
-use bollard::secret::EndpointSettings;
+use bollard::secret::{EndpointIpamConfig, EndpointSettings};
 use futures::future::join_all;
 use stacked_errors::{Result, StackableErr};
 use tokio::{io::AsyncWriteExt, sync::Mutex};
@@ -162,16 +162,22 @@ impl ContainerRunner {
                     open_stdin: Some(true),
                     // setup network
                     networking_config: Some(bollard::container::NetworkingConfig {
-                        endpoints_config: [(
-                            network_name,
-                            self.network_opts
-                                .ip_addr
-                                .map(|ip_addr| EndpointSettings {
-                                    ip_address: Some(ip_addr.to_string()),
-                                    ..Default::default()
-                                })
-                                .unwrap_or_default(),
-                        )]
+                        endpoints_config: [(network_name, EndpointSettings {
+                            ipam_config: Some(EndpointIpamConfig {
+                                ipv4_address: self
+                                    .network_opts
+                                    .ipv4_addr
+                                    .as_ref()
+                                    .map(ToString::to_string),
+                                ipv6_address: self
+                                    .network_opts
+                                    .ipv6_addr
+                                    .as_ref()
+                                    .map(ToString::to_string),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })]
                         .into_iter()
                         .collect(),
                     }),

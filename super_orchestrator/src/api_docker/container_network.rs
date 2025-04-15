@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::IpAddr,
+    net::{Ipv4Addr, Ipv6Addr},
     path::PathBuf,
     str::FromStr,
     time::{Duration, Instant},
@@ -89,7 +89,10 @@ pub struct ExtraAddContainerOptions {
     pub mac_address: Option<String>,
     /// Caution, when setting ip addr manually, make sure your gateway can't
     /// assign other containers to the same address.
-    pub ip_addr: Option<IpAddr>,
+    pub ipv4_addr: Option<Ipv4Addr>,
+    /// Caution, when setting ip addr manually, make sure your gateway can't
+    /// assign other containers to the same address.
+    pub ipv6_addr: Option<Ipv6Addr>,
 }
 
 // TODO make the rest of `super_orchestrator` use tokio::signal::ctrl_c instead,
@@ -697,7 +700,10 @@ impl ContainerNetwork {
             .stack()?
             .into_iter()
             .any(|healthy| !healthy)
-        {}
+        {
+            tracing::debug!("Waiting for containers to be healthy...");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
 
         Ok(())
     }

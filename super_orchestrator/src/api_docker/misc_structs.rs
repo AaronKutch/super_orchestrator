@@ -64,7 +64,7 @@ impl BootstrapOptions {
 }
 
 /// Define port mapping like for the argument `-p
-/// <host_ip>:<host_port>:<container_port>`.
+/// <host_ip>:<host_port>:<container_port>/<protocol>`.
 ///
 /// Usually, this shouldn't be used for integration testing because all
 /// containers in the same network should already be accessible (and container
@@ -75,15 +75,39 @@ pub struct PortBind {
     container_port: u16,
     host_port: Option<u16>,
     host_ip: Option<IpAddr>,
+    protocol: PortBindProtocol,
+}
+
+/// Protocol of the container port binding
+#[derive(Debug, Clone, Copy)]
+pub enum PortBindProtocol {
+    Tcp,
+    Udp,
+}
+
+impl std::fmt::Display for PortBindProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            if matches!(self, Self::Tcp) {
+                "tcp"
+            } else {
+                "udp"
+            }
+        )
+    }
 }
 
 impl PortBind {
-    /// Results in the port mapping `<port>:<port>`
+    /// Results in the port mapping `<port>:<port>`, which is equivalent to
+    /// `0.0.0.0:<port>:<port>/tcp`
     pub fn new(port: u16) -> Self {
         Self {
             container_port: port,
             host_port: Some(port),
             host_ip: None,
+            protocol: PortBindProtocol::Tcp,
         }
     }
 
@@ -96,6 +120,12 @@ impl PortBind {
     /// Sets a different host IP in `<host_ip>:<host_port>:<container_port>`
     pub fn with_host_ip(mut self, host_ip: IpAddr) -> Self {
         self.host_ip = Some(host_ip);
+        self
+    }
+
+    /// Sets the protocol
+    pub fn with_protocol(mut self, protocol: PortBindProtocol) -> Self {
+        self.protocol = protocol;
         self
     }
 }
@@ -117,10 +147,11 @@ pub(crate) fn port_bindings_to_bollard_args(
     Some(
         pbs.iter()
             .map(|pb| {
+                let port_proto = format!("{}/{}", pb.container_port, pb.protocol);
                 (
-                    (pb.container_port.to_string(), HashMap::new()),
+                    (port_proto.clone(), HashMap::new()),
                     (
-                        pb.container_port.to_string(),
+                        port_proto.clone(),
                         Some(vec![bollard::secret::PortBinding {
                             host_port: pb
                                 .host_port
