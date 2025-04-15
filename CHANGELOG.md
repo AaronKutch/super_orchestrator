@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.16.2] - 2025-04-15
+### Fixes
+- Fixed some issues with port binding in API docker
+
 ## [0.16.1] - 2025-04-11
 ### Fixes
 - Fixed in the API docker healthcheck that `try_join_all` should have been used instead of
