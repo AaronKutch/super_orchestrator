@@ -1,6 +1,6 @@
 use clap::Parser;
 use stacked_errors::Result;
-use super_orchestrator::{cli_docker::auto_exec, ctrlc_init};
+use super_orchestrator::cli_docker::auto_exec;
 
 /// Runs `super_orchestrator::docker_helpers::auto_exec`, `-it` is passed by
 /// default
@@ -15,7 +15,6 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
-    ctrlc_init().unwrap();
     let args = Args::parse();
     auto_exec(["-it"], &args.prefix, ["sh"]).await?;
     Ok(())

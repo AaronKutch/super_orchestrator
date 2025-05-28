@@ -97,7 +97,7 @@ impl ContainerRunner {
     ) -> Result<()> {
         // start_container already called for this container
         if self.should_be_started {
-            return Ok(())
+            return Ok(());
         }
         self.should_be_started = true;
 

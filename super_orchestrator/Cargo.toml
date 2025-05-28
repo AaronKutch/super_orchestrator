@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.16.2"
+version = "0.17.0"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"
@@ -10,17 +10,20 @@ documentation = "https://docs.rs/super_orchestrator"
 keywords = ["container", "docker"]
 description = "programmable container orchestration tools"
 
-[dependencies]
-# bollard dependencies
-tar = { version = "0.4.42", optional = true }
-bollard = { version = "0.18.1", optional = true }
-futures = { version = "0.3.31", optional = true }
-bytes = { version = "1.10.0", optional = true }
+[features]
+default = []
+# needed for Unix signals on `Command`s
+nix_support = ["nix"]
+# enable bollard backed features
+bollard = ["dep:tar", "dep:bollard", "dep:futures", "dep:bytes"]
 
+[dependencies]
+bollard = { version = "0.18", optional = true }
 bstr = "1"
-ctrlc = { version = "3", default-features = false }
+bytes = { version = "1.10.0", optional = true }
 dunce = "1.0"
-nix = { version = "0.29", optional = true, default-features = false, features = ["signal"] }
+futures = { version = "0.3.31", optional = true }
+nix = { version = "0.30", optional = true, default-features = false, features = ["signal"] }
 owo-colors = { version = "4.1", default-features = false }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -29,14 +32,8 @@ sha3 = "0.10"
 #stacked_errors = { git = "https://github.com/AaronKutch/stacked_errors", rev = "f323882419ea4dca9e6985abf811a3bf1cb24dca" }
 #stacked_errors = { path = "../stacked_errors" }
 stacked_errors = "0.7"
+tar = { version = "0.4.42", optional = true }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-
-[features]
-default = []
-# needed for Unix signals on `Command`s
-nix_support = ["nix"]
-# enable bollard backed features
-bollard = ["dep:tar", "dep:bollard", "dep:futures", "dep:bytes"]

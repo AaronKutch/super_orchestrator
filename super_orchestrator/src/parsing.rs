@@ -36,7 +36,7 @@ pub fn get_separated_val(
         if let Some(x) = line.trim().strip_prefix(key) {
             if let Some(y) = x.trim().strip_prefix(inter_key_val) {
                 value = Some(y.trim().to_owned());
-                break
+                break;
             }
         }
     }

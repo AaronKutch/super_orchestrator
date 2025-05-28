@@ -69,7 +69,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             std_forward.flush().await.unwrap();
                         }
                     }
-                    break
+                    break;
                 }
                 let mut bytes = &buf[..bytes_read];
                 // copying to record
@@ -459,7 +459,7 @@ impl CommandRunner {
     pub fn pid(&self) -> Option<u32> {
         if let Some(child_process) = self.child_process.as_ref() {
             if let Some(pid) = child_process.id() {
-                return Some(pid)
+                return Some(pid);
             }
         }
         None
@@ -555,7 +555,7 @@ impl CommandRunner {
             {
                 Ok(o) => {
                     if o.is_some() {
-                        break
+                        break;
                     }
                 }
                 Err(e) => {
@@ -566,7 +566,7 @@ impl CommandRunner {
                 }
             }
             if elapsed > duration {
-                return Err(Error::timeout())
+                return Err(Error::timeout());
             }
             sleep(interval).await;
             elapsed = elapsed.checked_add(interval).unwrap();

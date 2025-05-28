@@ -131,14 +131,14 @@ impl NetMessenger {
                     // `self.capacity() + additional`
                     let double = current_cap.wrapping_shl(1);
                     self.buf.reserve(double);
-                    continue
+                    continue;
                 }
                 Err(e) => {
                     return Err(Error::from_err(e))
                         .stack_err_locationless("failed to serialize message")?
                 }
             }
-            break
+            break;
         }
         // TODO handle timeouts
         let id = type_hash::<T>();
@@ -149,7 +149,7 @@ impl NetMessenger {
                      other side was abruptly terminated",
                     type_name::<T>()
                 ))
-                .add_err_locationless(e))
+                .add_err_locationless(e));
         }
         // later errors are probably real network errors
         self.stream
@@ -178,7 +178,7 @@ impl NetMessenger {
                      other side was abruptly terminated",
                     type_name::<T>()
                 ))
-                .add_err_locationless(e))
+                .add_err_locationless(e));
         }
         // later errors are probably real network errors
         if expected_id != actual_id {

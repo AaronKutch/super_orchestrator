@@ -65,13 +65,13 @@ async fn main() -> Result<()> {
             std::io::stderr().write_all(chunk).stack().unwrap();
         }
 
-        return Ok(())
+        return Ok(());
     }
 
     if args.print {
         print!("{}", args.to_stdout);
         eprint!("{}", args.to_stderr);
-        return Ok(())
+        return Ok(());
     }
 
     remove_files_in_dir("./logs/", &["stdout.log", "stderr.log"])
