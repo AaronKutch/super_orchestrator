@@ -128,14 +128,6 @@ impl ContainerState {
 /// `ContainerNetworks` from the same base to run concurrently. By default these
 /// are not applied, but it is recommended to enable them if possible (which may
 /// require passing around the UUID parameter for hostnames).
-///
-/// # Note
-///
-/// If a CTRL-C/sigterm signal is sent while containers are running, and
-/// [ctrlc_init](crate::ctrlc_init) has not been set up, the containers may
-/// continue to run in the background and will have to be manually stopped. If
-/// the handlers are set, then one of the runners will trigger an error or a
-/// check for `CTRLC_ISSUED` will terminate all.
 #[derive(Debug)]
 pub struct ContainerNetwork {
     uuid: Uuid,
@@ -664,10 +656,10 @@ impl ContainerNetwork {
             let (stdout_log, stderr_log) = if state.container.log {
                 (
                     Some(state.container.stdout_log.clone().unwrap_or_else(|| {
-                        FileOptions::write2(&self.log_dir, format!("{}_stdout.log", name))
+                        FileOptions::write2(&self.log_dir, format!("{name}_stdout.log"))
                     })),
                     Some(state.container.stderr_log.clone().unwrap_or_else(|| {
-                        FileOptions::write2(&self.log_dir, format!("{}_stderr.log", name))
+                        FileOptions::write2(&self.log_dir, format!("{name}_stderr.log"))
                     })),
                 )
             } else {
@@ -849,11 +841,10 @@ impl ContainerNetwork {
     /// `terminate_on_failure`. This can be changed by setting the
     /// `allow_unsuccessful` flag on the desired `Container`s.
     ///
-    /// Note that if a CTRL-C/sigterm signal is sent and
-    /// [ctrlc_init](crate::ctrlc_init) has been run, then an internal
-    /// [CTRLC_ISSUED] check will trigger
-    /// [terminate_all](ContainerNetwork::terminate_all). Otherwise,
-    /// containers may continue to run in the background.
+    /// Note that if a CTRL+C/sigterm signal is sent, then
+    /// [terminate_all](ContainerNetwork::terminate_all) will be triggered
+    /// internally, to prevent containers from continuing to run in the
+    /// background.
     ///
     /// If called with `Duration::ZERO`, this will always complete successfully
     /// if all containers were terminated before this call.

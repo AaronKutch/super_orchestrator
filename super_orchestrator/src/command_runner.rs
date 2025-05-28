@@ -194,8 +194,7 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             }
             Ok(Err(e)) => {
                 panic!(
-                    "`super_orchestrator::Command` stdout or stderr recording failed on read: {}",
-                    e
+                    "`super_orchestrator::Command` stdout or stderr recording failed on read: {e}"
                 )
             }
             // timeout
