@@ -2,7 +2,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     mem,
     net::IpAddr,
-    sync::atomic::Ordering,
     time::Duration,
 };
 
@@ -13,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     cli_docker::{wait_get_ip_addr, Container, Dockerfile},
-    Command, CommandResult, CommandRunner, FileOptions, CTRLC_ISSUED,
+    Command, CommandResult, CommandRunner, CtrlCTask, FileOptions,
 };
 
 // TODO reintroduce UUID capability
@@ -45,7 +44,7 @@ impl Drop for ContainerState {
     fn drop(&mut self) {
         if self.already_tried_drop {
             // avoid recursive panics if something goes wrong in the `Command`
-            return
+            return;
         }
         self.already_tried_drop = true;
         if let Some(id) = self.active_container_id.take() {
@@ -129,14 +128,6 @@ impl ContainerState {
 /// `ContainerNetworks` from the same base to run concurrently. By default these
 /// are not applied, but it is recommended to enable them if possible (which may
 /// require passing around the UUID parameter for hostnames).
-///
-/// # Note
-///
-/// If a CTRL-C/sigterm signal is sent while containers are running, and
-/// [ctrlc_init](crate::ctrlc_init) has not been set up, the containers may
-/// continue to run in the background and will have to be manually stopped. If
-/// the handlers are set, then one of the runners will trigger an error or a
-/// check for `CTRLC_ISSUED` will terminate all.
 #[derive(Debug)]
 pub struct ContainerNetwork {
     uuid: Uuid,
@@ -161,7 +152,7 @@ impl Drop for ContainerNetwork {
     fn drop(&mut self) {
         // in case something panics recursively
         if self.already_tried_drop {
-            return
+            return;
         }
         self.already_tried_drop = true;
         // here we are only concerned with logically active containers in a non
@@ -176,7 +167,7 @@ impl Drop for ContainerNetwork {
                     "A `ContainerNetwork` was dropped without all active containers being \
                      properly terminated"
                 );
-                break
+                break;
             }
         }
         for (_, state) in removed_set {
@@ -665,10 +656,10 @@ impl ContainerNetwork {
             let (stdout_log, stderr_log) = if state.container.log {
                 (
                     Some(state.container.stdout_log.clone().unwrap_or_else(|| {
-                        FileOptions::write2(&self.log_dir, format!("{}_stdout.log", name))
+                        FileOptions::write2(&self.log_dir, format!("{name}_stdout.log"))
                     })),
                     Some(state.container.stderr_log.clone().unwrap_or_else(|| {
-                        FileOptions::write2(&self.log_dir, format!("{}_stderr.log", name))
+                        FileOptions::write2(&self.log_dir, format!("{name}_stderr.log"))
                     })),
                 )
             } else {
@@ -692,7 +683,7 @@ impl ContainerNetwork {
                     for name in names.iter() {
                         let _ = self.set.get_mut(name).unwrap().terminate().await;
                     }
-                    return Err(e)
+                    return Err(e);
                 }
             }
         }
@@ -850,11 +841,10 @@ impl ContainerNetwork {
     /// `terminate_on_failure`. This can be changed by setting the
     /// `allow_unsuccessful` flag on the desired `Container`s.
     ///
-    /// Note that if a CTRL-C/sigterm signal is sent and
-    /// [ctrlc_init](crate::ctrlc_init) has been run, then an internal
-    /// [CTRLC_ISSUED] check will trigger
-    /// [terminate_all](ContainerNetwork::terminate_all). Otherwise,
-    /// containers may continue to run in the background.
+    /// Note that if a CTRL+C/sigterm signal is sent, then
+    /// [terminate_all](ContainerNetwork::terminate_all) will be triggered
+    /// internally, to prevent containers from continuing to run in the
+    /// background.
     ///
     /// If called with `Duration::ZERO`, this will always complete successfully
     /// if all containers were terminated before this call.
@@ -913,12 +903,13 @@ impl ContainerNetwork {
         }
 
         let start = Instant::now();
+        let ctrlc = CtrlCTask::spawn();
         let mut skip_fail = true;
         // we will check in a loop so that if a container has failed in the meantime, we
         // terminate all
         let mut i = 0;
         loop {
-            if CTRLC_ISSUED.load(Ordering::SeqCst) {
+            if ctrlc.is_complete() {
                 // most of the time, a terminating runner will cause a stop before this, but
                 // still check
                 self.terminate_all().await;
@@ -927,7 +918,7 @@ impl ContainerNetwork {
                 )
             }
             if target_names.is_empty() {
-                break
+                break;
             }
             if i >= names.len() {
                 i = 0;
@@ -948,7 +939,7 @@ impl ContainerNetwork {
                         return Err(Error::timeout().add_err_locationless(format!(
                             "ContainerNetwork::wait_with_timeout timeout waiting for container \
                              names {target_names:?} to complete"
-                        )))
+                        )));
                     }
                 } else {
                     sleep(Duration::from_millis(256)).await;
@@ -983,7 +974,7 @@ impl ContainerNetwork {
                             return self.error_compilation().stack_err_locationless(
                                 "ContainerNetwork::wait_with_timeout error compilation (check \
                                  logs for more):\n",
-                            )
+                            );
                         }
                         let name = names.remove(i);
                         target_names.remove(&name);
@@ -1005,7 +996,7 @@ impl ContainerNetwork {
                                 .stack_err_locationless(
                                     "ContainerNetwork::wait_with_timeout error compilation (check \
                                      logs for more):\n",
-                                )
+                                );
                         }
                         i += 1;
                     }

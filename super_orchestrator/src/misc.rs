@@ -5,7 +5,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -16,29 +16,56 @@ use tokio::{
     io::AsyncWriteExt,
     time::sleep,
 };
+use tracing::warn;
 
 use crate::{acquire_dir_path, Command};
 
-/// Used by [crate::ctrlc_init] and [crate::ctrlc_issued_reset]
-pub static CTRLC_ISSUED: AtomicBool = AtomicBool::new(false);
+/// A convenience wrapper around the functionality of [tokio::signal::ctrl_c]
+pub struct CtrlCTask {
+    cancel: tokio::task::AbortHandle,
+    complete: Arc<Mutex<bool>>,
+}
+
+impl Drop for CtrlCTask {
+    fn drop(&mut self) {
+        self.cancel.abort();
+    }
+}
+
+impl CtrlCTask {
+    /// This spawns a task that sets a `Arc<Mutex<bool>>` to true when
+    /// `tokio::signal::ctrl_c().await` completes. This task is cancelled when
+    /// the struct is dropped.
+    pub fn spawn() -> Self {
+        let complete = Arc::new(Mutex::new(false));
+        let complete1 = complete.clone();
+        let handle = tokio::task::spawn(async move {
+            // do not panic and do nothing on errors
+            let res = tokio::signal::ctrl_c().await;
+            match res {
+                Ok(()) => {
+                    *complete1.lock().unwrap() = true;
+                }
+                Err(e) => warn!(
+                    "super_orchestrator CtrlCTask got an error from ctrl_c, doing nothing: {e:?}"
+                ),
+            }
+        });
+        CtrlCTask {
+            cancel: handle.abort_handle(),
+            complete,
+        }
+    }
+
+    /// If the `ctrl_c` has been triggered
+    pub fn is_complete(&self) -> bool {
+        *self.complete.lock().unwrap()
+    }
+}
 
 pub fn random_name(name: impl std::fmt::Display) -> String {
     // lazy programming at its finest
     format!("{name}-{}", &uuid::Uuid::new_v4().to_string()[..6])
-}
-
-/// Sets up the ctrl-c handler
-pub fn ctrlc_init() -> Result<()> {
-    ctrlc::set_handler(move || {
-        CTRLC_ISSUED.store(true, Ordering::SeqCst);
-    })
-    .stack_err("ctrlc_init() -> `ctrlc::set_handler` failed")?;
-    Ok(())
-}
-
-/// Returns if `CTRLC_ISSUED` has been set, and resets it to `false`
-pub fn ctrlc_issued_reset() -> bool {
-    CTRLC_ISSUED.swap(false, Ordering::SeqCst)
 }
 
 /// Takes the hash of the type name of `T` and returns it. Has the
@@ -166,7 +193,7 @@ pub async fn wait_for_ok<F: FnMut() -> Fut, Fut: Future<Output = Result<T>>, T>(
                             "wait_for_ok(num_retries: {num_retries}, delay: {delay:?}) timeout, \
                              last error stack was:"
                         ),
-                    )
+                    );
                 }
                 i -= 1;
             }
@@ -353,7 +380,7 @@ where
 
                         if extension_set.contains(&suffix) {
                             rm_file = true;
-                            break
+                            break;
                         }
 
                         // remove very last extension as we add on extensions fo `suffix
@@ -372,7 +399,7 @@ where
                 }
             }
         } else {
-            break
+            break;
         }
     }
     Ok(())

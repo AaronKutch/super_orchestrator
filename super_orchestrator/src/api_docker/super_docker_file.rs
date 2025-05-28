@@ -280,6 +280,7 @@ impl SuperDockerfile {
     #[tracing::instrument(skip_all, fields(
         image.name = ?self.image_name
     ))]
+    #[allow(clippy::obfuscated_if_else)]
     pub async fn with_entrypoint(
         mut self,
         entrypoint: (impl ToString, impl ToString),

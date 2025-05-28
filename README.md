@@ -24,34 +24,54 @@ use cross compilation will not work on straight Windows. However, it is possible
 compile inside a container and still keep build artifacts for fast recompilation by voluming
 `CARGO_HOME`. An example of what this looks like is
 ```
-if cfg!(windows) {
-    Container::new(
-            "builder",
-            Dockerfile::contents(/* build container definition */),
-        )
-        .volume(
-            home::cargo_home().stack()?.to_str().stack()?, // using the `home` crate
-            "/root/.cargo", // if building in a typical Linux container
-        )
-        .volume(/* base directory */, "/needs_build")
-        .workdir("/needs_build")
-        .entrypoint_args(["sh", "-c", &format!("cargo -vV && {build_cmd}",)])
-        .run(
-            Some(/* dockerfiles_dir */),
-            Duration::from_secs(3600),
-            /* logs_dir */,
-            true,
-        )
-        .await
-        .stack()?
-        .assert_success()
-        .stack()?;
-}
+Container::new("builder", Dockerfile::contents(/* build container definition */))
+    // volume in cargo's registry using the `home` crate
+    .volume(
+        home::cargo_home()
+            .stack()?
+            .join("registry")
+            .to_string_lossy(),
+        "/root/.cargo/registry",
+    )
+    .volume(cwd.to_string_lossy(), "/app")
+    .workdir("/app")
+    // Use a target directry separate from the main one so that it doesn't conflict,
+    // note there is a rust-analyzer setting to do a similar thing. Also, if building
+    // multiple binaries it is better to pass them all to the same call.
+    .entrypoint(
+        "cargo",
+        ["build", "--release", "--target-dir", "target/isolated"]
+            .into_iter()
+            .chain(bins.iter().flat_map(|bin| ["--bin", bin]))
+            .chain(features.iter().flat_map(|feature| ["--feature", feature])),
+    )
+    // where there should be a dockerfiles directory and logs directory under `cwd`
+    .run(
+        Some(&cwd.join("dockerfiles").to_string_lossy()),
+        Duration::from_secs(3600),
+        &cwd.join("logs").to_string_lossy(),
+        true,
+    )
+    .await
+    .stack()?
+    .assert_success()
+    .stack()?;
 ```
 I would include functions to do this in `super_orchestrator` itself, but at this level we are just
 making too many environmental assumptions. If the cargo version used locally and in the build
 container are too incompatible, there may be problems. This ultimately must be automated per-repo
 and the `dockerfile_entrypoint_pattern` is just a starter example.
+
+`x86_64-unknown-linux-musl` on an Alpine container is the best way to cross compile, because MUSL is
+static and the same binary can usually work in any environment supporting it. This means that, with
+the right setup, you can compile in release mode once and be able to run it locally, but also have
+containers volume the binary into themselves to also run at the same time. As of writing however, if
+you have dependencies involving the `aws-lc-sys` crate (with its dependent `aws-lc-rs` being a
+replacement for the `ring` crate), it is impossible to use MUSL because it does not have the
+necessary symbols yet. `x86_64-unknown-linux-gnu` and other targets needing dynamic compilation are
+very difficult to get working in the same way as MUSL. You may need to use the same trick as the
+workaround for Windows above, where you compile in the same base container that will be used later
+for running the binary, ensuring the binary has the correct links.
 
 ## Docker inconsistencies
 

@@ -4,7 +4,7 @@ use stacked_errors::{bail, stacked_get, Result, StackableErr};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::{ctrlc_issued_reset, sh, wait_for_ok, Command};
+use crate::{sh, wait_for_ok, Command, CtrlCTask};
 
 const STD_DELAY: Duration = Duration::from_millis(300);
 const IP_RETRIES: u64 = 10;
@@ -77,9 +77,10 @@ where
         .map(|s| s.as_ref().to_string())
         .collect();
     info!("running auto_exec({exec_args:?} {container_name} {container_args:?})");
+    let ctrlc = CtrlCTask::spawn();
     loop {
-        if ctrlc_issued_reset() {
-            break
+        if ctrlc.is_complete() {
+            break;
         }
         let comres = Command::new("docker ps")
             .run_to_completion()
@@ -97,7 +98,7 @@ where
                     if name_id.is_some() {
                         warn!("Found multiple containers with same {name} prefix");
                         name_id = None;
-                        break
+                        break;
                     }
                     name_id = Some((name.to_owned(), id.to_owned()));
                 }
@@ -132,17 +133,18 @@ where
         .run_with_stdin(Stdio::inherit())
         .await
         .stack()?;
+    let ctrlc = CtrlCTask::spawn();
     loop {
-        if ctrlc_issued_reset() {
+        if ctrlc.is_complete() {
             runner.terminate().await.stack()?;
-            break
+            break;
         }
         match runner.wait_with_timeout(Duration::ZERO).await {
             Ok(()) => break,
             Err(e) => {
                 if !e.is_timeout() {
                     runner.terminate().await.stack()?;
-                    return e.stack()
+                    return e.stack();
                 }
             }
         }

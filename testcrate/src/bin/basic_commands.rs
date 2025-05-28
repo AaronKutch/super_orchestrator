@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
 
     if Command::new("grep").run_to_completion().await.is_err() {
         println!("grep not found, last example cannot be run");
-        return Ok(())
+        return Ok(());
     }
 
     // Now suppose we want to pipe input to the "grep" command. The `echo

@@ -1,8 +1,5 @@
 [workspace]
 resolver = "2"
-members = [
-    "super_orchestrator",
-    "testcrate",
-]
+members = ["super_orchestrator", "testcrate"]
 
 [patch.crates-io]

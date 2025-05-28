@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0] - 2025-05-28
+### Crate
+- Updated to `nix` 0.30
+
+### Changes
+- Removed the old Ctrl+C interface in favor of `tokio`'s built in `ctrl_c` and added a convenient
+  `CtrlCTask` wrapper for this
+
 ## [0.16.2] - 2025-04-15
 ### Fixes
 - Fixed some issues with port binding in API docker

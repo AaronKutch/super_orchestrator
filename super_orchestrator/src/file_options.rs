@@ -133,7 +133,7 @@ impl FileOptions {
             ReadOrWrite::Read => (),
             ReadOrWrite::Write(WriteOptions { create, .. }) => {
                 if create {
-                    return Ok(path)
+                    return Ok(path);
                 }
             }
         }

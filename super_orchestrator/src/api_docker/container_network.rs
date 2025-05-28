@@ -95,9 +95,6 @@ pub struct ExtraAddContainerOptions {
     pub ipv6_addr: Option<Ipv6Addr>,
 }
 
-// TODO make the rest of `super_orchestrator` use tokio::signal::ctrl_c instead,
-// but check if multiple `ctrl_c` can be used in parallel
-
 // TODO make `cli_docker::ContainerNetwork` use more of the style used here
 
 impl ContainerNetwork {
@@ -472,7 +469,7 @@ impl ContainerNetwork {
         let mut i = 0;
         loop {
             if names.is_empty() {
-                break
+                break;
             }
             if i >= names.len() {
                 i = 0;
@@ -493,7 +490,7 @@ impl ContainerNetwork {
                         return Err(Error::timeout().add_err_locationless(format!(
                             "ContainerNetwork::wait_with_timeout timeout waiting for container \
                              names {names:?} to complete"
-                        )))
+                        )));
                     }
                 } else {
                     sleep(Duration::from_millis(200)).await;

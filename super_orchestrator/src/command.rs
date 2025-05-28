@@ -414,11 +414,11 @@ impl Debug for CommandResult {
         // move the commas out of the way of the stdout and stderr
         let stdout = self.stdout_as_utf8_lossy();
         if !stdout.is_empty() {
-            f.write_fmt(format_args!("stdout: {}\n,", stdout))?;
+            f.write_fmt(format_args!("stdout: {stdout}\n,"))?;
         }
         let stderr = self.stderr_as_utf8_lossy();
         if !stderr.is_empty() {
-            f.write_fmt(format_args!("stderr: {}\n,", stderr))?;
+            f.write_fmt(format_args!("stderr: {stderr}\n,"))?;
         }
         f.write_fmt(format_args!("}}"))
     }
@@ -426,7 +426,7 @@ impl Debug for CommandResult {
 
 impl Display for CommandResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#?}", self))
+        f.write_fmt(format_args!("{self:#?}"))
     }
 }
 
@@ -520,7 +520,7 @@ impl Debug for CommandResultNoDebug {
 
 impl Display for CommandResultNoDebug {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#?}", self))
+        f.write_fmt(format_args!("{self:#?}"))
     }
 }
 

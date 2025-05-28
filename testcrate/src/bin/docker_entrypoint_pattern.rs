@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use stacked_errors::{bail, ensure_eq, Result, StackableErr};
 use super_orchestrator::{
     cli_docker::{Container, ContainerNetwork, Dockerfile},
-    ctrlc_init,
     net_message::NetMessenger,
     sh, FileOptions,
 };
@@ -199,15 +198,9 @@ async fn container_runner(args: &Args) -> Result<()> {
     // debug the build step
     cn.debug_build(true);
 
-    // Whenever using the docker entrypoint pattern or similar setup where there is
-    // a dedicated container runner function that is just calling
-    // `wait_with_timeout` before `terminate_all` and exiting, `ctrlc_init`
-    // should be used just before the `run_all`. This will then allow
-    // `wait_with_timeout` the time to stop all containers before returning an
-    // error, if a Ctrl+C or sigterm signal is issued. This may take a few moments.
-    // Ctrl-C will work like intended in other cases and times.
-
-    ctrlc_init().unwrap();
+    // `run_all` has Ctrl+C handler logic that automatically terminates all
+    // containers when Ctrl+C is triggered so that they don't continue to run
+    // detached in the background
 
     cn.run_all().await.stack()?;
 
