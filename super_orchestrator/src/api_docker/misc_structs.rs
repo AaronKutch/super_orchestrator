@@ -144,26 +144,26 @@ pub(crate) fn port_bindings_to_bollard_args(
     Option<HashMap<String, HashMap<(), ()>>>,
     Option<HashMap<String, Option<Vec<bollard::secret::PortBinding>>>>,
 ) {
-    Some(
-        pbs.iter()
-            .map(|pb| {
-                let port_proto = format!("{}/{}", pb.container_port, pb.protocol);
-                (
-                    (port_proto.clone(), HashMap::new()),
-                    (
-                        port_proto.clone(),
-                        Some(vec![bollard::secret::PortBinding {
-                            host_port: pb
-                                .host_port
-                                .or(Some(pb.container_port))
-                                .as_ref()
-                                .map(ToString::to_string),
-                            host_ip: pb.host_ip.as_ref().map(ToString::to_string),
-                        }]),
-                    ),
-                )
-            })
-            .unzip(),
-    )
-    .unzip()
+    let mut port_map =
+        HashMap::<String, Option<Vec<bollard::secret::PortBinding>>>::with_capacity(pbs.len());
+    let mut open_ports = HashMap::<String, HashMap<(), ()>>::with_capacity(pbs.len());
+
+    for pb in pbs {
+        let key = format!("{}/{}", pb.container_port, pb.protocol);
+        let entry = port_map.entry(key.clone()).or_insert_with(|| Some(vec![]));
+        if let Some(entry) = entry {
+            // always matches, just more ergonomic
+            entry.push(bollard::secret::PortBinding {
+                host_port: pb
+                    .host_port
+                    .or(Some(pb.container_port))
+                    .as_ref()
+                    .map(ToString::to_string),
+                host_ip: pb.host_ip.as_ref().map(ToString::to_string),
+            });
+        }
+        open_ports.entry(key).or_default();
+    }
+
+    (Some(open_ports), Some(port_map))
 }
