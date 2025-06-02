@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.17.0] - 2025-06-02
+### Fixes
+- Allow multiple bindings to same container in API docker
+
 ## [0.17.0] - 2025-05-28
 ### Crate
 - Updated to `nix` 0.30
