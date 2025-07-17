@@ -213,7 +213,7 @@ impl ContainerNetwork {
             return Err("Name for container can't be empty").stack();
         }
 
-        self.add_container_unchecked(add_opts, network_opts, container)
+        self.add_container_inner(add_opts, network_opts, container)
             .await
             .stack()
     }
@@ -230,13 +230,20 @@ impl ContainerNetwork {
             return Err(format!("{} isn't an existing container", &container.name)).stack();
         }
 
-        self.add_container_unchecked(add_opts, network_opts, container)
+        let docker = get_or_init_default_docker_instance().await.stack()?;
+        docker
+            .remove_container(&container.name, None)
+            .await
+            .stack()?;
+
+        self.add_container_inner(add_opts, network_opts, container)
             .await
             .stack()
     }
 
-    /// Add or replace a container, don't check if it already exists
-    pub async fn add_container_unchecked(
+    /// Relies on the checks of add or replace container. Will cause a runtime
+    /// error if the container exists
+    async fn add_container_inner(
         &mut self,
         mut add_opts: AddContainerOptions,
         network_opts: ExtraAddContainerOptions,
@@ -350,7 +357,7 @@ impl ContainerNetwork {
                             .await
                             .stack()
                             .map(|res| {
-                                res.is_some_and(|status| {
+                                res.is_none_or(|status| {
                                     if let Some(exit_code) = status.exit_code {
                                         if exit_code != 0 {
                                             tracing::warn!(
