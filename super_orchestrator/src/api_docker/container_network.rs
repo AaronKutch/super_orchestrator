@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bollard::container::StopContainerOptions;
+use bollard::container::{RemoveContainerOptions, StopContainerOptions};
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
 use futures::{future::try_join_all, StreamExt};
@@ -230,9 +230,14 @@ impl ContainerNetwork {
             return Err(format!("{} isn't an existing container", &container.name)).stack();
         }
 
+        let remove_options = RemoveContainerOptions{
+            v: false,
+            force: true,
+            link: true,
+        };
         let docker = get_or_init_default_docker_instance().await.stack()?;
         docker
-            .remove_container(&container.name, None)
+            .remove_container(&container.name, Some(remove_options))
             .await
             .stack()?;
 
@@ -243,6 +248,7 @@ impl ContainerNetwork {
 
     /// Relies on the checks of add or replace container. Will cause a runtime
     /// error if the container exists
+    #[inline(always)]
     async fn add_container_inner(
         &mut self,
         mut add_opts: AddContainerOptions,
