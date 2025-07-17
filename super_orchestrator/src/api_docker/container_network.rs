@@ -213,7 +213,7 @@ impl ContainerNetwork {
             return Err("Name for container can't be empty").stack();
         }
 
-        self.add_container_inner(add_opts, network_opts, container)
+        self.add_container_unchecked(add_opts, network_opts, container)
             .await
             .stack()
     }
@@ -230,12 +230,13 @@ impl ContainerNetwork {
             return Err(format!("{} isn't an existing container", &container.name)).stack();
         }
 
-        self.add_container_inner(add_opts, network_opts, container)
+        self.add_container_unchecked(add_opts, network_opts, container)
             .await
             .stack()
     }
 
-    async fn add_container_inner(
+    /// Add or replace a container, don't check if it already exists
+    pub async fn add_container_unchecked(
         &mut self,
         mut add_opts: AddContainerOptions,
         network_opts: ExtraAddContainerOptions,
