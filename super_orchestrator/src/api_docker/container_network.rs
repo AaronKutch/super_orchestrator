@@ -233,7 +233,7 @@ impl ContainerNetwork {
         let remove_options = RemoveContainerOptions{
             v: false,
             force: true,
-            link: true,
+            link: false,
         };
         let docker = get_or_init_default_docker_instance().await.stack()?;
         docker
