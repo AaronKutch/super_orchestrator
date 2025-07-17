@@ -231,15 +231,15 @@ impl ContainerNetwork {
         }
 
         let remove_options = RemoveContainerOptions{
-            v: false,
             force: true,
-            link: false,
+            ..Default::default()
         };
         let docker = get_or_init_default_docker_instance().await.stack()?;
-        docker
+        
+        let _ = docker
             .remove_container(&container.name, Some(remove_options))
-            .await
-            .stack()?;
+            .await;
+            
 
         self.add_container_inner(add_opts, network_opts, container)
             .await
