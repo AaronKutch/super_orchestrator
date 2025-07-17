@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bollard::container::StopContainerOptions;
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
 use futures::{future::try_join_all, StreamExt};
@@ -200,7 +201,7 @@ impl ContainerNetwork {
     )]
     pub async fn add_container(
         &mut self,
-        mut add_opts: AddContainerOptions,
+        add_opts: AddContainerOptions,
         network_opts: ExtraAddContainerOptions,
         container: ContainerCreateOptions,
     ) -> Result<()> {
@@ -212,6 +213,34 @@ impl ContainerNetwork {
             return Err("Name for container can't be empty").stack();
         }
 
+        self.add_container_inner(add_opts, network_opts, container)
+            .await
+            .stack()
+    }
+
+    /// Replace an existing container
+    pub async fn replace_container(
+        &mut self,
+        add_opts: AddContainerOptions,
+        network_opts: ExtraAddContainerOptions,
+        container: ContainerCreateOptions,
+    ) -> Result<()> {
+        //todo check if the container is running and stop it if so
+        if !self.containers.contains_key(&container.name) {
+            return Err(format!("{} isn't an existing container", &container.name)).stack();
+        }
+
+        self.add_container_inner(add_opts, network_opts, container)
+            .await
+            .stack()
+    }
+
+    async fn add_container_inner(
+        &mut self,
+        mut add_opts: AddContainerOptions,
+        network_opts: ExtraAddContainerOptions,
+        container: ContainerCreateOptions,
+    ) -> Result<()> {
         let std_log = if let Some(ref output_config) = self.opts.output_dir_config {
             add_opts = AddContainerOptions::DockerFile(match add_opts {
                 AddContainerOptions::Container(image) => image.to_docker_file(),
@@ -267,6 +296,86 @@ impl ContainerNetwork {
                 std_log,
                 debug: self.opts.debug,
             });
+        Ok(())
+    }
+
+    pub async fn stop_container(
+        &mut self,
+        container_name: &str,
+        stop_opts: Option<StopContainerOptions>,
+    ) -> Result<()> {
+        let Some(container_runner) = self.containers.get_mut(container_name) else {
+            return Err(format!("Container with name {container_name} not found")).stack();
+        };
+
+        container_runner.stop_container(stop_opts).await.stack()
+    }
+
+    pub async fn stop_containers(
+        &mut self,
+        container_names: impl IntoIterator<Item = impl ToString>,
+        stop_opts: Option<StopContainerOptions>,
+    ) -> Result<()> {
+        let futs = container_names
+            .into_iter()
+            .map(async |container_name| -> Result<()> {
+                let docker = get_or_init_default_docker_instance().await.stack()?;
+                docker
+                    .stop_container(&container_name.to_string(), stop_opts)
+                    .await
+                    .stack()?;
+                Ok(())
+            })
+            .collect::<Vec<_>>();
+
+        try_join_all(futs).await.stack()?;
+
+        Ok(())
+    }
+
+    /// wait on a group of containers to complete
+    pub async fn wait_to_complete(
+        &self,
+        container_names: impl IntoIterator<Item = impl ToString>,
+    ) -> Result<()> {
+        let futs = container_names
+            .into_iter()
+            .map(|container_name| {
+                let container_name = container_name.to_string();
+
+                || {
+                    Box::pin(async move {
+                        Self::inspect_container(&container_name)
+                            .await
+                            .stack()
+                            .map(|res| {
+                                res.is_some_and(|status| {
+                                    if let Some(exit_code) = status.exit_code {
+                                        if exit_code != 0 {
+                                            tracing::warn!(
+                                                "non-zero exit code for container \
+                                                 {container_name}, exit code {exit_code}"
+                                            );
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                })
+                            })
+                    })
+                }
+            })
+            .collect::<Vec<_>>();
+
+        while try_join_all(futs.clone().into_iter().map(|x| x()))
+            .await
+            .stack()?
+            .into_iter()
+            .any(|exited| !exited)
+        {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
 
         Ok(())
     }

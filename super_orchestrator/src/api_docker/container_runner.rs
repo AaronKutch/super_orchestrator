@@ -324,6 +324,24 @@ impl ContainerRunner {
 
         Ok(())
     }
+
+    pub async fn stop_container(
+        &mut self,
+        options: Option<bollard::container::StopContainerOptions>,
+    ) -> Result<()> {
+        if !self.should_be_started {
+            return Ok(());
+        }
+
+        let docker = get_or_init_default_docker_instance().await.stack()?;
+        docker
+            .stop_container(&self.container_opts.name, options)
+            .await
+            .stack()?;
+        //only after confirming stopped
+        self.should_be_started = false;
+        Ok(())
+    }
 }
 
 /// Tears down a docker network and all of its containers
