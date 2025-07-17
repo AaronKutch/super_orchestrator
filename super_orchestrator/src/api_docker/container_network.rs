@@ -365,6 +365,7 @@ impl ContainerNetwork {
                             .map(|res| {
                                 res.is_none_or(|status| {
                                     if let Some(exit_code) = status.exit_code {
+                                        tracing::info!("exit code for container {:?}", exit_code);
                                         if exit_code != 0 {
                                             tracing::warn!(
                                                 "non-zero exit code for container \
@@ -373,6 +374,7 @@ impl ContainerNetwork {
                                         }
                                         true
                                     } else {
+                                        tracing::info!("waiting on container {}",container_name);
                                         false
                                     }
                                 })
