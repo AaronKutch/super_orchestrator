@@ -239,6 +239,18 @@ impl ContainerNetwork {
         let _ = docker
             .remove_container(&container.name, Some(remove_options))
             .await;
+        
+        let mut still_exists = true;
+        while still_exists {
+            match docker.inspect_container(&container.name, None).await.stack() {
+                Ok(x) => {
+                    tracing::warn!("{:?}",x.state);
+                },
+                Err(e) => {
+                    tracing::error!("got error {e}");
+                },
+            }
+        }
             
 
         self.add_container_inner(add_opts, network_opts, container)
