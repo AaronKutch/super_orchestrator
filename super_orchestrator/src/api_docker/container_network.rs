@@ -240,16 +240,9 @@ impl ContainerNetwork {
             .remove_container(&container.name, Some(remove_options))
             .await;
         
-        let mut still_exists = true;
-        while still_exists {
-            match docker.inspect_container(&container.name, None).await.stack() {
-                Ok(x) => {
-                    tracing::warn!("{:?}",x.state);
-                },
-                Err(e) => {
-                    tracing::error!("got error {e}");
-                },
-            }
+        while docker.inspect_container(&container.name, None).await.stack().is_ok() {
+            tracing::info!("waiting for {} to be removed", &container.name);
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
             
 
