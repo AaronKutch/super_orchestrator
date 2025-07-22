@@ -6,9 +6,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bollard::container::{RemoveContainerOptions, StopContainerOptions};
 // reexports from bollard. `IpamConfig` is reexported because it is part of `Ipam`
 pub use bollard::secret::{ContainerState, Ipam, IpamConfig};
+use bollard::{
+    container::{RemoveContainerOptions, StopContainerOptions},
+    secret::ContainerStateStatusEnum,
+};
 use futures::{future::try_join_all, StreamExt};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{select, time::sleep};
@@ -230,21 +233,25 @@ impl ContainerNetwork {
             return Err(format!("{} isn't an existing container", &container.name)).stack();
         }
 
-        let remove_options = RemoveContainerOptions{
+        let remove_options = RemoveContainerOptions {
             force: true,
             ..Default::default()
         };
+
         let docker = get_or_init_default_docker_instance().await.stack()?;
-        
+
         let _ = docker
             .remove_container(&container.name, Some(remove_options))
             .await;
-        
-        while docker.inspect_container(&container.name, None).await.stack().is_ok() {
+
+        while docker
+            .inspect_container(&container.name, None)
+            .await
+            .is_ok()
+        {
             tracing::info!("waiting for {} to be removed", &container.name);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-            
 
         self.add_container_inner(add_opts, network_opts, container)
             .await
@@ -369,18 +376,25 @@ impl ContainerNetwork {
                             .stack()
                             .map(|res| {
                                 res.is_none_or(|status| {
-                                    if let Some(exit_code) = status.exit_code {
-                                        tracing::info!("exit code for container {:?}", exit_code);
-                                        if exit_code != 0 {
-                                            tracing::warn!(
-                                                "non-zero exit code for container \
-                                                 {container_name}, exit code {exit_code}"
-                                            );
+                                    if let Some(status) = status.status {
+                                        use ContainerStateStatusEnum::*;
+                                        match status {
+                                            CREATED | RUNNING | PAUSED | RESTARTING => false,
+                                            REMOVING | EXITED | DEAD => true,
+                                            EMPTY => {
+                                                //According to the docs this variant should never
+                                                // be returned
+                                                tracing::debug!(
+                                                    "Reached supposedly unreachable container \
+                                                     state: empty"
+                                                );
+                                                true
+                                            }
                                         }
-                                        true
                                     } else {
-                                        tracing::info!("waiting on container {}",container_name);
-                                        false
+                                        // when will status be some but status.status be none?
+                                        tracing::info!("waiting on container status");
+                                        true
                                     }
                                 })
                             })
