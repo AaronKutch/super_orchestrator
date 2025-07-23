@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.17.1"
+version = "0.17.2"
 edition = "2021"
 authors = ["Aaron Kutch <aaronkutch@att.net>"]
 license = "MIT OR Apache-2.0"

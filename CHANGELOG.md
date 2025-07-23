@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.17.0] - 2025-06-02
+## [0.17.2] - 2025-07-23
+### Additions
+- Added some more methods to the experimental bollard module
+
+## [0.17.1] - 2025-06-02
 ### Fixes
 - Allow multiple bindings to same container in API docker
 
