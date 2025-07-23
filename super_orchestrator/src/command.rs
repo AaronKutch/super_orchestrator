@@ -488,12 +488,12 @@ impl CommandResult {
     }
 
     /// Returns `String::from_utf8_lossy(&self.stdout)`
-    pub fn stdout_as_utf8_lossy(&self) -> Cow<str> {
+    pub fn stdout_as_utf8_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.stdout)
     }
 
     /// Returns `String::from_utf8_lossy(&self.stderr)`
-    pub fn stderr_as_utf8_lossy(&self) -> Cow<str> {
+    pub fn stderr_as_utf8_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.stderr)
     }
 }
@@ -581,12 +581,12 @@ impl CommandResultNoDebug {
     }
 
     /// Returns `String::from_utf8_lossy(&self.stdout)`
-    pub fn stdout_as_utf8_lossy(&self) -> Cow<str> {
+    pub fn stdout_as_utf8_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.stdout)
     }
 
     /// Returns `String::from_utf8_lossy(&self.stderr)`
-    pub fn stderr_as_utf8_lossy(&self) -> Cow<str> {
+    pub fn stderr_as_utf8_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.stderr)
     }
 }
