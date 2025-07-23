@@ -228,7 +228,7 @@ impl ContainerNetwork {
         network_opts: ExtraAddContainerOptions,
         container: ContainerCreateOptions,
     ) -> Result<()> {
-        //todo check if the container is running and stop it if so
+        // TODO check if the container is running and stop it if so
         if !self.containers.contains_key(&container.name) {
             return Err(format!("{} isn't an existing container", &container.name)).stack();
         }
@@ -359,7 +359,7 @@ impl ContainerNetwork {
         Ok(())
     }
 
-    /// wait on a group of containers to complete
+    /// Wait on a group of containers to complete
     pub async fn wait_to_complete(
         &self,
         container_names: impl IntoIterator<Item = impl ToString>,
@@ -382,7 +382,7 @@ impl ContainerNetwork {
                                             CREATED | RUNNING | PAUSED | RESTARTING => false,
                                             REMOVING | EXITED | DEAD => true,
                                             EMPTY => {
-                                                //According to the docs this variant should never
+                                                // According to the docs this variant should never
                                                 // be returned
                                                 tracing::debug!(
                                                     "Reached supposedly unreachable container \

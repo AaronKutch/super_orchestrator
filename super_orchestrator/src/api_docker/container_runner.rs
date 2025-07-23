@@ -338,7 +338,7 @@ impl ContainerRunner {
             .stop_container(&self.container_opts.name, options)
             .await
             .stack()?;
-        //only after confirming stopped
+        // only after confirming stopped
         self.should_be_started = false;
         Ok(())
     }
