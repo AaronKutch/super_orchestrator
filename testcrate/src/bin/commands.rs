@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
         bytes.extend("\u{1f60a}".as_bytes());
         for i in 0..=u8::MAX {
             bytes.push(i);
-            if i % 20 == 0 {
+            if i.is_multiple_of(20) {
                 bytes.push(b'\n');
             }
         }
