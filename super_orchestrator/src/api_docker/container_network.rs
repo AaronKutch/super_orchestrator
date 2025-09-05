@@ -346,11 +346,20 @@ impl ContainerNetwork {
             .into_iter()
             .map(async |container_name| -> Result<()> {
                 let docker = get_or_init_default_docker_instance().await.stack()?;
-                docker
+                match docker
                     .stop_container(&container_name.to_string(), stop_opts)
                     .await
-                    .stack()?;
-                Ok(())
+                {
+                    Ok(_) => Ok(()),
+                    Err(bollard::errors::Error::DockerResponseServerError {
+                        status_code: 404,
+                        ..
+                    }) => {
+                        // already stopped
+                        Ok(())
+                    }
+                    Err(e) => Err(e).stack(),
+                }
             })
             .collect::<Vec<_>>();
 
