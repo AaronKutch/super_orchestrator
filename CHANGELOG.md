@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.17.3] - 2025-09-05
+### Fixes
+- Fixed that `api_docker` `stop_containers` fails if container does not start in time or never starts
+
 ## [0.17.2] - 2025-07-23
 ### Additions
 - Added some more methods to the experimental bollard module
