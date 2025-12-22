@@ -101,6 +101,7 @@ pub struct Container {
     /// Passed as `--volume string0:string1` to the create args, but these have
     /// the advantage of being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
+    pub copied_contents: Vec<(String, String)>,
     /// Working directory inside the container
     pub workdir: Option<String>,
     /// Environment variable mappings passed to docker
@@ -163,6 +164,7 @@ impl Container {
             build_args: vec![],
             create_args: vec![],
             volumes: vec![],
+            copied_contents: vec![],
             workdir: None,
             environment_vars: vec![],
             entrypoint_file: None,
@@ -207,6 +209,38 @@ impl Container {
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
         self.entrypoint_file = Some(entrypoint_file.clone());
         self.volumes.push((
+            binary_path.as_os_str().to_str().unwrap().to_owned(),
+            entrypoint_file,
+        ));
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
+        Ok(self)
+    }
+
+    pub async fn copy_entrypoint<I, S>(
+        mut self,
+        entrypoint_host_path: impl AsRef<str>,
+        entrypoint_args: I,
+    ) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
+            .await
+            .stack_err_locationless(
+                "Container::external_entrypoint could not acquire the external entrypoint binary",
+            )?;
+        let binary_file_name = binary_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let uuid = Uuid::new_v4();
+        let entrypoint_file = format!("/{binary_file_name}_{uuid}");
+        self.entrypoint_file = Some(entrypoint_file.clone());
+        self.copied_contents.push((
             binary_path.as_os_str().to_str().unwrap().to_owned(),
             entrypoint_file,
         ));
@@ -399,7 +433,14 @@ impl Container {
                 }
             }
         }
-
+        for (local_content, _) in &mut self.copied_contents {
+            let path = acquire_path(&local_content).await.stack_err_locationless(
+                "Container::precheck -> could not acquire_path to local part of volume argument",
+            )?;
+            path.to_str()
+                .stack_err_locationless("Container::precheck -> path was not UTF-8")?
+                .clone_into(local_content);
+        }
         for (local_volume, _) in &mut self.volumes {
             let path = acquire_path(&local_volume).await.stack_err_locationless(
                 "Container::precheck -> could not acquire_path to local part of volume argument",
@@ -591,7 +632,7 @@ impl Container {
         if debug_create {
             debug!("Container::create command: {command:#?}");
         }
-        match command.run_to_completion().await {
+        let res = match command.run_to_completion().await {
             Ok(output) => {
                 match output.assert_success() {
                     Ok(_) => {
@@ -609,8 +650,25 @@ impl Container {
             Err(e) => {
                 Err(e).stack_err_locationless("Container::create -> when creating the container")
             }
+        };
+        
+            
+        for (local_path, virtual_path) in &self.copied_contents {
+            //pretty sure that this cannot be run as an array
+            let command = apply_debug(Command::new("docker").args(vec![
+                "cp", 
+                local_path.as_str(),
+                virtual_path.as_str(),
+            ]), &self.name, debug_create).log(log_file);
+            match command.run_to_completion().await {
+                Ok(_) => {},
+                Err(_) => todo!(),
+            };
+            
         }
-    }
+        res
+        }
+    
 
     /// Runs `docker start` on a `container_id` (preferably from
     /// [Container::create]), setting up a `CommandRunner` based on `self`.
