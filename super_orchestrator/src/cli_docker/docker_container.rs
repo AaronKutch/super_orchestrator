@@ -651,24 +651,31 @@ impl Container {
                 Err(e).stack_err_locationless("Container::create -> when creating the container")
             }
         };
-        
-            
+
+        let Ok(docker_id) = res else { return res };
         for (local_path, virtual_path) in &self.copied_contents {
-            //pretty sure that this cannot be run as an array
-            let command = apply_debug(Command::new("docker").args(vec![
-                "cp", 
-                local_path.as_str(),
-                virtual_path.as_str(),
-            ]), &self.name, debug_create).log(log_file);
+            //so the docker syntax is source <container>:dest
+            let command = apply_debug(
+                Command::new("docker").args(vec![
+                    "cp",
+                    local_path.as_str(),
+                    &format!("{}:{}", docker_id, virtual_path.as_str()),
+                ]),
+                &self.name,
+                debug_create,
+            )
+            .log(log_file);
             match command.run_to_completion().await {
-                Ok(_) => {},
-                Err(_) => todo!(),
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(e).stack_err_locationless(
+                        "Container::copy -> when copying contents to container after creation",
+                    )
+                }
             };
-            
         }
-        res
-        }
-    
+        Ok(docker_id)
+    }
 
     /// Runs `docker start` on a `container_id` (preferably from
     /// [Container::create]), setting up a `CommandRunner` based on `self`.
