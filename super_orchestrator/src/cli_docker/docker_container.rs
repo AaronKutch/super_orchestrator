@@ -229,7 +229,7 @@ impl Container {
         let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
             .await
             .stack_err_locationless(
-                "Container::external_entrypoint could not acquire the external entrypoint binary",
+                "Container::copy_entrypoint could not acquire the external entrypoint binary",
             )?;
         let binary_file_name = binary_path
             .file_name()
