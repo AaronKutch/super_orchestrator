@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{fs::read_to_string, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use stacked_errors::{bail_locationless, Error, Result, StackableErr};
@@ -47,6 +47,22 @@ impl Dockerfile {
     /// Returns `Self::Contents` with the argument
     pub fn contents(contents_of_dockerfile: impl AsRef<str>) -> Self {
         Self::Contents(contents_of_dockerfile.as_ref().to_owned())
+    }
+
+    pub fn add_build_steps<I, S>(mut self, build_steps: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let contents = match self {
+            Dockerfile::NameTag(name_tag) => format!("FROM {}", name_tag),
+            Dockerfile::Path(file_path) => read_to_string(file_path).stack()?,
+            Dockerfile::Contents(contents) => contents,
+        };
+        let contents = build_steps
+            .into_iter()
+            .fold(contents, |out, step| out + "\n" + step.as_ref());
+        Ok(Dockerfile::Contents(contents))
     }
 }
 
@@ -219,14 +235,14 @@ impl Container {
 
     pub async fn copy_entrypoint<I, S>(
         mut self,
-        entrypoint_host_path: impl AsRef<str>,
+        entrypoint_relative_host_path: impl AsRef<str>,
         entrypoint_args: I,
     ) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
+        let binary_path = acquire_file_path(entrypoint_relative_host_path.as_ref())
             .await
             .stack_err_locationless(
                 "Container::copy_entrypoint could not acquire the external entrypoint binary",
@@ -240,10 +256,18 @@ impl Container {
         let uuid = Uuid::new_v4();
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
         self.entrypoint_file = Some(entrypoint_file.clone());
-        self.copied_contents.push((
-            binary_path.as_os_str().to_str().unwrap().to_owned(),
-            entrypoint_file,
-        ));
+        self.dockerfile = self
+            .dockerfile
+            .add_build_steps([
+                format!(
+                    "COPY {} {}",
+                    entrypoint_relative_host_path.as_ref(),
+                    entrypoint_file
+                ),
+                format!("RUN chmod +x {}", entrypoint_file),
+            ])
+            .stack()?;
+
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         Ok(self)
