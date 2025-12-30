@@ -6,7 +6,8 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command, CommandResult, CommandRunner, FileOptions,
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
+    CommandResult, CommandRunner, FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -758,17 +759,11 @@ impl Container {
         stderr_log: Option<&FileOptions>,
     ) -> Result<CommandRunner> {
         let name = &self.name;
-        let mut command = if let Some(EntryKind::PostCreate(ref cmd)) = self.entrypoint_file {
-            let mut command = Command::new("docker run").arg(container_id);
-            command = apply_debug(command, name, self.debug);
-            command.arg(cmd).args(self.entrypoint_args.iter())
-        } else {
-            apply_debug(
-                Command::new("docker start --attach").arg(container_id),
-                name,
-                self.debug,
-            )
-        };
+        let mut command = apply_debug(
+            Command::new("docker start --attach").arg(container_id),
+            name,
+            self.debug,
+        );
 
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
