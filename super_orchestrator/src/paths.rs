@@ -84,6 +84,6 @@ pub async fn verify_file_path(file_path: impl AsRef<Path>) -> Result<PathBuf> {
     if path.is_file() {
         Ok(path.to_path_buf())
     } else {
-        bail!("acquire_file_path(file_path: {:?}) -> is not a file", path)
+        bail!("verify_file_path(file_path: {:?}) -> is not a file", path)
     }
 }

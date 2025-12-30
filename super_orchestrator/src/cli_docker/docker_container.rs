@@ -6,8 +6,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color,
-    verify_file_path, Command, CommandResult, CommandRunner, FileOptions,
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command, CommandResult, CommandRunner, FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -67,12 +66,12 @@ impl Dockerfile {
 }
 /// The type of command run at container start
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum CmdKind {
+pub enum EntryKind {
     ///Defined within the container, starts automatically, path must be present
     /// at container creation
-    Entrypoint(String),
-    ///Passed when starting the container
-    Run(String),
+    PreCreate(String),
+    ///added after creating the initial image
+    PostCreate(String),
 }
 /// Configuration for running a container.
 ///
@@ -132,7 +131,7 @@ pub struct Container {
     pub environment_vars: Vec<(String, String)>,
     /// When set, this indicates that the container should run an entrypoint
     /// using this path to a binary in the container
-    pub entrypoint_file: Option<CmdKind>,
+    pub entrypoint_file: Option<EntryKind>,
     /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
@@ -231,7 +230,7 @@ impl Container {
             .to_owned();
         let uuid = Uuid::new_v4();
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
-        self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.clone()));
+        self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
         self.volumes.push((
             binary_path.as_os_str().to_str().unwrap().to_owned(),
             entrypoint_file,
@@ -260,10 +259,12 @@ impl Container {
     {
         //we can't canonicalize the path because if appending the docker copy command
         // then the path needs to be relative to the docker build context
-        let binary_path = verify_file_path(entrypoint_host_path.as_ref())
+        //TODO: need to fix verify_file_path to work if we are not inside the build
+        // context directory
+        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
             .await
             .stack_err_locationless(
-                "Container::copy_entrypoint could not acquire the external entrypoint binary",
+                "Container::copy_entrypoint could not verify the external entrypoint binary",
             )?;
         let binary_file_name = binary_path
             .file_name()
@@ -274,7 +275,7 @@ impl Container {
 
         let entrypoint_file = format!("/{binary_file_name}");
         if as_build_step {
-            self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.clone()));
+            self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
             self.dockerfile = self
                 .dockerfile
                 .add_build_steps([
@@ -283,7 +284,7 @@ impl Container {
                 ])
                 .stack()?;
         } else {
-            self.entrypoint_file = Some(CmdKind::Run(entrypoint_file.clone()));
+            self.entrypoint_file = Some(EntryKind::PostCreate(entrypoint_file.clone()));
             self.copied_contents.push((
                 binary_path.as_os_str().to_str().unwrap().to_owned(),
                 entrypoint_file,
@@ -301,7 +302,7 @@ impl Container {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.as_ref().to_owned()));
+        self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.as_ref().to_owned()));
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         self
@@ -662,7 +663,7 @@ impl Container {
         }
 
         // the binary
-        if let Some(CmdKind::Entrypoint(s)) = self.entrypoint_file.as_ref() {
+        if let Some(EntryKind::PreCreate(s)) = self.entrypoint_file.as_ref() {
             args.push(s);
             // entrypoint args
             for arg in &self.entrypoint_args {
@@ -717,7 +718,35 @@ impl Container {
                 }
             };
         }
-        Ok(docker_id)
+
+        if let Some(EntryKind::PostCreate(s)) = self.entrypoint_file.as_ref() {
+            let cmd = Command::new("docker commit")
+                .arg(docker_id)
+                .arg("--change ENTRYPOINT")
+                .arg(s)
+                .args(self.entrypoint_args.iter())
+                .arg(container_name);
+            match cmd.run_to_completion().await {
+                Ok(output) => {
+                    match output.assert_success() {
+                        Ok(_) => {
+                            let mut docker_id = output.stdout;
+                            // remove trailing '\n'
+                            docker_id.pop();
+                            match String::from_utf8(docker_id) {
+                                Ok(docker_id) => Ok(docker_id),
+                                Err(e) => Err(Error::from_err_locationless(e)),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e)
+                    .stack_err_locationless("Container::create -> when creating the container"),
+            }
+        } else {
+            Ok(docker_id)
+        }
     }
 
     /// Runs `docker start` on a `container_id` (preferably from
@@ -729,7 +758,7 @@ impl Container {
         stderr_log: Option<&FileOptions>,
     ) -> Result<CommandRunner> {
         let name = &self.name;
-        let mut command = if let Some(CmdKind::Run(ref cmd)) = self.entrypoint_file {
+        let mut command = if let Some(EntryKind::PostCreate(ref cmd)) = self.entrypoint_file {
             let mut command = Command::new("docker run").arg(container_id);
             command = apply_debug(command, name, self.debug);
             command.arg(cmd).args(self.entrypoint_args.iter())
