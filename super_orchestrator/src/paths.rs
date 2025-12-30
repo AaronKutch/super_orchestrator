@@ -69,3 +69,21 @@ pub async fn acquire_dir_path(dir_path: impl AsRef<Path>) -> Result<PathBuf> {
         )
     }
 }
+
+/// checks the existence of a file path. Also adds on better
+/// information to errors.
+///
+/// Note: this does not prevent TOCTOU bugs. See the crate examples for more.
+pub async fn verify_file_path(file_path: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = if cfg!(windows) {
+        &dunce::simplified(file_path.as_ref()).to_owned()
+    } else {
+        file_path.as_ref()
+    };
+
+    if path.is_file() {
+        Ok(path.to_path_buf())
+    } else {
+        bail!("acquire_file_path(file_path: {:?}) -> is not a file", path)
+    }
+}

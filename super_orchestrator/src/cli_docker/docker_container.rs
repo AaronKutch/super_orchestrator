@@ -6,8 +6,8 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
-    CommandResult, CommandRunner, FileOptions,
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color,
+    verify_file_path, Command, CommandResult, CommandRunner, FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -258,7 +258,9 @@ impl Container {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
+        //we can't canonicalize the path because if appending the docker copy command
+        // then the path needs to be relative to the docker build context
+        let binary_path = verify_file_path(entrypoint_host_path.as_ref())
             .await
             .stack_err_locationless(
                 "Container::copy_entrypoint could not acquire the external entrypoint binary",
