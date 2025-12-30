@@ -49,7 +49,7 @@ impl Dockerfile {
         Self::Contents(contents_of_dockerfile.as_ref().to_owned())
     }
 
-    pub fn add_build_steps<I, S>(mut self, build_steps: I) -> Result<Self>
+    pub fn add_build_steps<I, S>(self, build_steps: I) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -65,7 +65,15 @@ impl Dockerfile {
         Ok(Dockerfile::Contents(contents))
     }
 }
-
+/// The type of command run at container start
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum CmdKind {
+    ///Defined within the container, starts automatically, path must be present
+    /// at container creation
+    Entrypoint(String),
+    ///Passed when starting the container
+    Run(String),
+}
 /// Configuration for running a container.
 ///
 /// The `docker run` command can be split into separate `docker build`, `docker
@@ -124,7 +132,7 @@ pub struct Container {
     pub environment_vars: Vec<(String, String)>,
     /// When set, this indicates that the container should run an entrypoint
     /// using this path to a binary in the container
-    pub entrypoint_file: Option<String>,
+    pub entrypoint_file: Option<CmdKind>,
     /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
@@ -223,7 +231,7 @@ impl Container {
             .to_owned();
         let uuid = Uuid::new_v4();
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
-        self.entrypoint_file = Some(entrypoint_file.clone());
+        self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.clone()));
         self.volumes.push((
             binary_path.as_os_str().to_str().unwrap().to_owned(),
             entrypoint_file,
@@ -233,16 +241,24 @@ impl Container {
         Ok(self)
     }
 
+    /// If as_build_step is true, then the entrypoint will be copied by adding a
+    /// COPY step to the dockerfile. If as_build_step is false, then the
+    /// entrypoint will be copied after container creation with docker cp
+    /// and the "entrypoint" will be run with docker run (since entrypoints need
+    /// to be defined at creation) If you are going with the former, the
+    /// entrypoint_host_path needs to be relative to the build root, otherwise
+    /// it can be relative to the current directory or an absolute path
     pub async fn copy_entrypoint<I, S>(
         mut self,
-        entrypoint_relative_host_path: impl AsRef<str>,
+        entrypoint_host_path: impl AsRef<str>,
         entrypoint_args: I,
+        as_build_step: bool,
     ) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let binary_path = acquire_file_path(entrypoint_relative_host_path.as_ref())
+        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
             .await
             .stack_err_locationless(
                 "Container::copy_entrypoint could not acquire the external entrypoint binary",
@@ -253,20 +269,24 @@ impl Container {
             .to_str()
             .unwrap()
             .to_owned();
-        let uuid = Uuid::new_v4();
-        let entrypoint_file = format!("/{binary_file_name}_{uuid}");
-        self.entrypoint_file = Some(entrypoint_file.clone());
-        self.dockerfile = self
-            .dockerfile
-            .add_build_steps([
-                format!(
-                    "COPY {} {}",
-                    entrypoint_relative_host_path.as_ref(),
-                    entrypoint_file
-                ),
-                format!("RUN chmod +x {}", entrypoint_file),
-            ])
-            .stack()?;
+
+        let entrypoint_file = format!("/{binary_file_name}");
+        if as_build_step {
+            self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.clone()));
+            self.dockerfile = self
+                .dockerfile
+                .add_build_steps([
+                    format!("COPY {} {}", entrypoint_host_path.as_ref(), entrypoint_file),
+                    format!("RUN chmod +x {}", entrypoint_file),
+                ])
+                .stack()?;
+        } else {
+            self.entrypoint_file = Some(CmdKind::Run(entrypoint_file.clone()));
+            self.copied_contents.push((
+                binary_path.as_os_str().to_str().unwrap().to_owned(),
+                entrypoint_file,
+            ));
+        }
 
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
@@ -279,7 +299,7 @@ impl Container {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.entrypoint_file = Some(entrypoint_file.as_ref().to_owned());
+        self.entrypoint_file = Some(CmdKind::Entrypoint(entrypoint_file.as_ref().to_owned()));
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         self
@@ -640,17 +660,14 @@ impl Container {
         }
 
         // the binary
-        if let Some(s) = self.entrypoint_file.as_ref() {
+        if let Some(CmdKind::Entrypoint(s)) = self.entrypoint_file.as_ref() {
             args.push(s);
+            // entrypoint args
+            for arg in &self.entrypoint_args {
+                args.push(arg.as_str());
+            }
         }
-        // entrypoint args
-        let mut tmp = vec![];
-        for arg in &self.entrypoint_args {
-            tmp.push(arg.to_owned());
-        }
-        for s in &tmp {
-            args.push(s);
-        }
+
         let command =
             apply_debug(Command::new("docker").args(args), &self.name, debug_create).log(log_file);
         if debug_create {
@@ -711,10 +728,18 @@ impl Container {
     ) -> Result<CommandRunner> {
         let name = &self.name;
         let mut command = apply_debug(
-            Command::new("docker start --attach").arg(container_id),
+            if let Some(CmdKind::Run(ref cmd)) = self.entrypoint_file {
+                Command::new("docker run --attach")
+                    .arg(container_id)
+                    .arg(cmd)
+                    .args(self.entrypoint_args.iter())
+            } else {
+                Command::new("docker start --attach").arg(container_id)
+            },
             name,
             self.debug,
         );
+
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
         }
