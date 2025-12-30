@@ -727,18 +727,17 @@ impl Container {
         stderr_log: Option<&FileOptions>,
     ) -> Result<CommandRunner> {
         let name = &self.name;
-        let mut command = apply_debug(
-            if let Some(CmdKind::Run(ref cmd)) = self.entrypoint_file {
-                Command::new("docker run --attach")
-                    .arg(container_id)
-                    .arg(cmd)
-                    .args(self.entrypoint_args.iter())
-            } else {
-                Command::new("docker start --attach").arg(container_id)
-            },
-            name,
-            self.debug,
-        );
+        let mut command = if let Some(CmdKind::Run(ref cmd)) = self.entrypoint_file {
+            let mut command = Command::new("docker run").arg(container_id);
+            command = apply_debug(command, name, self.debug);
+            command.arg(cmd).args(self.entrypoint_args.iter())
+        } else {
+            apply_debug(
+                Command::new("docker start --attach").arg(container_id),
+                name,
+                self.debug,
+            )
+        };
 
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
