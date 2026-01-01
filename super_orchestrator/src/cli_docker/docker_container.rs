@@ -721,6 +721,10 @@ impl Container {
         }
 
         if let Some(EntryKind::PostCreate(s)) = self.entrypoint_file.as_ref() {
+            //TODO: syntax is 
+            //docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]
+            //current issue is I'm getting no such image sha256:xxxx....
+            //which I guess is the docker id I'm passing
             let cmd = Command::new("docker commit")
                 .arg(docker_id)
                 .arg("--change ENTRYPOINT")
@@ -743,7 +747,7 @@ impl Container {
                     }
                 }
                 Err(e) => Err(e)
-                    .stack_err_locationless("Container::create -> when creating the container"),
+                    .stack_err_locationless("Container::create -> when commiting new entrypoint to image"),
             }
         } else {
             Ok(docker_id)
