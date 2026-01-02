@@ -725,11 +725,14 @@ impl Container {
             //docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]
             //current issue is I'm getting no such image sha256:xxxx....
             //which I guess is the docker id I'm passing
+            let mut e = vec![s.to_owned()];
+            e.extend(self.entrypoint_args.clone().into_iter());
+            
             let cmd = Command::new("docker commit")
-                .arg(docker_id)
-                .arg("--change ENTRYPOINT")
-                .arg(s)
-                .args(self.entrypoint_args.iter())
+                
+                .arg("--change ENTRYPOINT [")
+                .arg(e.join(","))
+                .arg("]")
                 .arg(container_name);
             match cmd.run_to_completion().await {
                 Ok(output) => {
