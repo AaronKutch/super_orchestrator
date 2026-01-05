@@ -6,8 +6,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
-    CommandResult, CommandRunner, FileOptions,
+    Command, CommandResult, CommandRunner, FileOptions, acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, verify_file_path
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -261,13 +260,9 @@ impl Container {
         //we can't canonicalize the path because if appending the docker copy command
         // then the path needs to be relative to the docker build context
         //TODO: need to fix verify_file_path to work if we are not inside the build
-        // context directory
-        let binary_path = acquire_file_path(entrypoint_host_path.as_ref())
-            .await
-            .stack_err_locationless(
-                "Container::copy_entrypoint could not verify the external entrypoint binary",
-            )?;
-        let binary_file_name = binary_path
+        // context directory    
+        let binary_path = PathBuf::from(entrypoint_host_path.as_ref());
+        let binary_file_name = binary_path.as_path()
             .file_name()
             .unwrap()
             .to_str()
@@ -285,6 +280,10 @@ impl Container {
                 ])
                 .stack()?;
         } else {
+            verify_file_path(&binary_path).await
+            .stack_err_locationless(
+                "Container::copy_entrypoint could not verify the external entrypoint binary",
+            )?;
             self.entrypoint_file = Some(EntryKind::PostCreate(entrypoint_file.clone()));
             self.copied_contents.push((
                 binary_path.as_os_str().to_str().unwrap().to_owned(),
