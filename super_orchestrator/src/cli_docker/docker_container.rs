@@ -275,8 +275,7 @@ impl Container {
             self.dockerfile = self
                 .dockerfile
                 .add_build_steps([
-                    format!("COPY {} {}", entrypoint_host_path.as_ref(), entrypoint_file),
-                    format!("RUN chmod +x {}", entrypoint_file),
+                    format!("COPY --chmod=555 {} {}", entrypoint_host_path.as_ref(), entrypoint_file),
                 ])
                 .stack()?;
         } else {
