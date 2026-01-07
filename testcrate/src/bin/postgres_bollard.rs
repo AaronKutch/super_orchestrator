@@ -23,8 +23,8 @@ use tokio::fs;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-const POSTGRES: &str = "postgres:16";
-const BASE_CONTAINER: &str = "fedora:41";
+const POSTGRES: &str = "postgres:18";
+const BASE_CONTAINER: &str = "fedora:43";
 
 fn test_dockerfile() -> String {
     format!(
@@ -151,7 +151,8 @@ async fn container_runner(args: &Args) -> Result<()> {
             name: postgres_name,
             volumes: [(
                 pg_data_path.to_str().stack()?.to_string(),
-                "/var/lib/postgresql/data".to_string(),
+                // note: this is the directory to mount as of Postgres 18+
+                "/var/lib/postgresql".to_string(),
             )]
             .into(),
             priviledged: false,

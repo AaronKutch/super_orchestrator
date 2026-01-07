@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0] - 2025-01-07
+### Fixes
+- Upgraded the container versions for the tests. Note that in postgres 18+, there was a change
+  where "/var/lib/postgresql" should be mounted instead of the old "/var/lib/postgresql/data"
+- Removed some unused dependencies
+
+### Changes
+- added `copied_contents`, `EntryKind`, and `copy_entrypoint` for cases where plain copying is
+  needed instead of volumes
+
 ## [0.17.3] - 2025-09-05
 ### Fixes
 - Fixed that `api_docker` `stop_containers` fails if container does not start in time or never starts

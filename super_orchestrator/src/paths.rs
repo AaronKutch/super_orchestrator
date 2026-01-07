@@ -69,3 +69,21 @@ pub async fn acquire_dir_path(dir_path: impl AsRef<Path>) -> Result<PathBuf> {
         )
     }
 }
+
+/// The same as [acquire_file_path], but does not canonicalize. Some uses of
+/// Docker, for example, require relative paths.
+pub async fn acquire_file_path_without_canonicalization(
+    file_path: impl AsRef<Path>,
+) -> Result<PathBuf> {
+    let path = if cfg!(windows) {
+        &dunce::simplified(file_path.as_ref()).to_owned()
+    } else {
+        file_path.as_ref()
+    };
+
+    if path.is_file() {
+        Ok(path.to_path_buf())
+    } else {
+        bail!("verify_file_path(file_path: {:?}) -> is not a file", path)
+    }
+}

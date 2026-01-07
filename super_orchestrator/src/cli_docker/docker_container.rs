@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{fs::read_to_string, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use stacked_errors::{bail_locationless, Error, Result, StackableErr};
@@ -6,8 +6,9 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, Command,
-    CommandResult, CommandRunner, FileOptions,
+    acquire_file_path, acquire_file_path_without_canonicalization, acquire_path,
+    cli_docker::ContainerNetwork, next_terminal_color, Command, CommandResult, CommandRunner,
+    FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -48,6 +49,35 @@ impl Dockerfile {
     pub fn contents(contents_of_dockerfile: impl AsRef<str>) -> Self {
         Self::Contents(contents_of_dockerfile.as_ref().to_owned())
     }
+
+    /// Converts `self` to [Dockerfile::Contents] and adds on `build_steps`
+    /// lines (automatically includes indent)
+    pub fn add_build_steps<I, S>(self, build_steps: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let contents = match self {
+            Dockerfile::NameTag(name_tag) => format!("FROM {}", name_tag),
+            Dockerfile::Path(file_path) => read_to_string(file_path).stack()?,
+            Dockerfile::Contents(contents) => contents,
+        };
+        let contents = build_steps
+            .into_iter()
+            .fold(contents, |out, step| out + "\n" + step.as_ref());
+        Ok(Dockerfile::Contents(contents))
+    }
+}
+
+/// The type of command run at container start
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum EntryKind {
+    /// Defined within the container, starts automatically, path must be present
+    /// at container creation
+    PreCreate(String),
+    /// Added after creating the initial image. NOTE there is currently an issue
+    /// with this and missing hashes, see "TODO(PostCreate issue)".
+    PostCreate(String),
 }
 
 /// Configuration for running a container.
@@ -101,13 +131,16 @@ pub struct Container {
     /// Passed as `--volume string0:string1` to the create args, but these have
     /// the advantage of being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
+    /// In some cases volumes are not desirable, so this supplies a way to copy
+    /// things instead
+    pub copied_contents: Vec<(String, String)>,
     /// Working directory inside the container
     pub workdir: Option<String>,
     /// Environment variable mappings passed to docker
     pub environment_vars: Vec<(String, String)>,
     /// When set, this indicates that the container should run an entrypoint
     /// using this path to a binary in the container
-    pub entrypoint_file: Option<String>,
+    pub entrypoint_file: Option<EntryKind>,
     /// Passed in as ["arg1", "arg2", ...] with the bracket and quotations being
     /// added
     pub entrypoint_args: Vec<String>,
@@ -163,6 +196,7 @@ impl Container {
             build_args: vec![],
             create_args: vec![],
             volumes: vec![],
+            copied_contents: vec![],
             workdir: None,
             environment_vars: vec![],
             entrypoint_file: None,
@@ -205,11 +239,71 @@ impl Container {
             .to_owned();
         let uuid = Uuid::new_v4();
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
-        self.entrypoint_file = Some(entrypoint_file.clone());
+        self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
         self.volumes.push((
             binary_path.as_os_str().to_str().unwrap().to_owned(),
             entrypoint_file,
         ));
+        self.entrypoint_args
+            .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
+        Ok(self)
+    }
+
+    /// If `as_build_step` is true, then the entrypoint will be copied by adding
+    /// a COPY step to the dockerfile. If `as_build_step` is false, then the
+    /// entrypoint will be copied after container creation with `docker cp`
+    /// and the entrypoint will be run with `docker run` (since entrypoints need
+    /// to be defined at creation). If you are going with the former, the
+    /// `entrypoint_host_path` needs to be relative to the build root (use
+    /// [crate::acquire_file_path_without_canonicalization]), and it needs to be
+    /// within the build context directory (no "../"), otherwise
+    /// it can be anywhere relative to the current directory or an absolute path
+    pub async fn copy_entrypoint<I, S>(
+        mut self,
+        entrypoint_host_path: impl AsRef<str>,
+        entrypoint_args: I,
+        as_build_step: bool,
+    ) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        // If appending the docker copy command, then the path needs to be relative and
+        // it should not be canonicalized.
+        let binary_path = PathBuf::from(entrypoint_host_path.as_ref());
+        let binary_file_name = binary_path
+            .as_path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        let entrypoint_file = format!("/{binary_file_name}");
+        if as_build_step {
+            self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
+            self.dockerfile = self
+                .dockerfile
+                .add_build_steps([format!(
+                    "COPY --chmod=555 {} {}",
+                    entrypoint_host_path.as_ref(),
+                    entrypoint_file
+                )])
+                .stack()?;
+        } else {
+            acquire_file_path_without_canonicalization(&binary_path)
+                .await
+                .stack_err_locationless(
+                    "Container::copy_entrypoint could not verify the external entrypoint binary",
+                )?;
+            self.entrypoint_file = Some(EntryKind::PostCreate(entrypoint_file.clone()));
+            // and copy it
+            self.copied_contents.push((
+                binary_path.as_os_str().to_str().unwrap().to_owned(),
+                entrypoint_file,
+            ));
+        }
+
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         Ok(self)
@@ -221,7 +315,7 @@ impl Container {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.entrypoint_file = Some(entrypoint_file.as_ref().to_owned());
+        self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.as_ref().to_owned()));
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         self
@@ -399,7 +493,15 @@ impl Container {
                 }
             }
         }
-
+        for (local_content, _) in &mut self.copied_contents {
+            let path = acquire_path(&local_content).await.stack_err_locationless(
+                "Container::precheck -> could not acquire_path to local part of `copied_contents`",
+            )?;
+            // I'm not sure if Docker will handle anything else
+            path.to_str()
+                .stack_err_locationless("Container::precheck -> path was not UTF-8")?
+                .clone_into(local_content);
+        }
         for (local_volume, _) in &mut self.volumes {
             let path = acquire_path(&local_volume).await.stack_err_locationless(
                 "Container::precheck -> could not acquire_path to local part of volume argument",
@@ -575,23 +677,20 @@ impl Container {
         }
 
         // the binary
-        if let Some(s) = self.entrypoint_file.as_ref() {
+        if let Some(EntryKind::PreCreate(s)) = self.entrypoint_file.as_ref() {
             args.push(s);
+            // entrypoint args
+            for arg in &self.entrypoint_args {
+                args.push(arg.as_str());
+            }
         }
-        // entrypoint args
-        let mut tmp = vec![];
-        for arg in &self.entrypoint_args {
-            tmp.push(arg.to_owned());
-        }
-        for s in &tmp {
-            args.push(s);
-        }
+
         let command =
             apply_debug(Command::new("docker").args(args), &self.name, debug_create).log(log_file);
         if debug_create {
             debug!("Container::create command: {command:#?}");
         }
-        match command.run_to_completion().await {
+        let res = match command.run_to_completion().await {
             Ok(output) => {
                 match output.assert_success() {
                     Ok(_) => {
@@ -609,6 +708,66 @@ impl Container {
             Err(e) => {
                 Err(e).stack_err_locationless("Container::create -> when creating the container")
             }
+        };
+
+        let Ok(docker_id) = res else { return res };
+
+        for (local_path, virtual_path) in &self.copied_contents {
+            // the docker syntax is `docker cp <source> <container ID>:<destination>`
+            let command = apply_debug(
+                Command::new("docker").args(vec![
+                    "cp",
+                    local_path.as_str(),
+                    &format!("{}:{}", docker_id, virtual_path.as_str()),
+                ]),
+                &self.name,
+                debug_create,
+            )
+            .log(log_file);
+            match command.run_to_completion().await {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(e).stack_err_locationless(
+                        "Container::copy -> when copying contents to container after creation",
+                    )
+                }
+            };
+        }
+
+        if let Some(EntryKind::PostCreate(s)) = self.entrypoint_file.as_ref() {
+            // TODO(PostCreate issue): syntax is
+            // `docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]`
+            // current issue is I'm getting "no such image sha256:xxxx...."
+            // which I guess is the docker id I'm passing
+            let mut e = vec![s.to_owned()];
+            e.extend(self.entrypoint_args.clone().into_iter());
+
+            let cmd = Command::new("docker commit")
+                .arg("--change ENTRYPOINT [")
+                .arg(e.join(","))
+                .arg("]")
+                .arg(container_name);
+            match cmd.run_to_completion().await {
+                Ok(output) => {
+                    match output.assert_success() {
+                        Ok(_) => {
+                            let mut docker_id = output.stdout;
+                            // remove trailing '\n'
+                            docker_id.pop();
+                            match String::from_utf8(docker_id) {
+                                Ok(docker_id) => Ok(docker_id),
+                                Err(e) => Err(Error::from_err_locationless(e)),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e).stack_err_locationless(
+                    "Container::create -> when commiting new entrypoint to image",
+                ),
+            }
+        } else {
+            Ok(docker_id)
         }
     }
 
@@ -626,6 +785,7 @@ impl Container {
             name,
             self.debug,
         );
+
         if self.log {
             command = command.stdout_log(stdout_log).stderr_log(stderr_log);
         }

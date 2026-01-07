@@ -26,7 +26,7 @@ use tokio::time::sleep;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-const BASE_CONTAINER: &str = "alpine:3.21";
+const BASE_CONTAINER: &str = "alpine:3.23";
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const STD_TRIES: u64 = 30;
