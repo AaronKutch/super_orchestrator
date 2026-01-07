@@ -6,7 +6,8 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    Command, CommandResult, CommandRunner, FileOptions, acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color, verify_file_path
+    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color,
+    verify_file_path, Command, CommandResult, CommandRunner, FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -260,9 +261,10 @@ impl Container {
         //we can't canonicalize the path because if appending the docker copy command
         // then the path needs to be relative to the docker build context
         //TODO: need to fix verify_file_path to work if we are not inside the build
-        // context directory    
+        // context directory
         let binary_path = PathBuf::from(entrypoint_host_path.as_ref());
-        let binary_file_name = binary_path.as_path()
+        let binary_file_name = binary_path
+            .as_path()
             .file_name()
             .unwrap()
             .to_str()
@@ -274,15 +276,18 @@ impl Container {
             self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
             self.dockerfile = self
                 .dockerfile
-                .add_build_steps([
-                    format!("COPY --chmod=555 {} {}", entrypoint_host_path.as_ref(), entrypoint_file),
-                ])
+                .add_build_steps([format!(
+                    "COPY --chmod=555 {} {}",
+                    entrypoint_host_path.as_ref(),
+                    entrypoint_file
+                )])
                 .stack()?;
         } else {
-            verify_file_path(&binary_path).await
-            .stack_err_locationless(
-                "Container::copy_entrypoint could not verify the external entrypoint binary",
-            )?;
+            verify_file_path(&binary_path)
+                .await
+                .stack_err_locationless(
+                    "Container::copy_entrypoint could not verify the external entrypoint binary",
+                )?;
             self.entrypoint_file = Some(EntryKind::PostCreate(entrypoint_file.clone()));
             self.copied_contents.push((
                 binary_path.as_os_str().to_str().unwrap().to_owned(),
@@ -719,15 +724,14 @@ impl Container {
         }
 
         if let Some(EntryKind::PostCreate(s)) = self.entrypoint_file.as_ref() {
-            //TODO: syntax is 
+            //TODO: syntax is
             //docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]
             //current issue is I'm getting no such image sha256:xxxx....
             //which I guess is the docker id I'm passing
             let mut e = vec![s.to_owned()];
             e.extend(self.entrypoint_args.clone().into_iter());
-            
+
             let cmd = Command::new("docker commit")
-                
                 .arg("--change ENTRYPOINT [")
                 .arg(e.join(","))
                 .arg("]")
@@ -747,8 +751,9 @@ impl Container {
                         Err(e) => Err(e),
                     }
                 }
-                Err(e) => Err(e)
-                    .stack_err_locationless("Container::create -> when commiting new entrypoint to image"),
+                Err(e) => Err(e).stack_err_locationless(
+                    "Container::create -> when commiting new entrypoint to image",
+                ),
             }
         } else {
             Ok(docker_id)
