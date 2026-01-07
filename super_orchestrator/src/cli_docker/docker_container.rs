@@ -6,8 +6,9 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_path, cli_docker::ContainerNetwork, next_terminal_color,
-    verify_file_path, Command, CommandResult, CommandRunner, FileOptions,
+    acquire_file_path, acquire_file_path_without_canonicalization, acquire_path,
+    cli_docker::ContainerNetwork, next_terminal_color, Command, CommandResult, CommandRunner,
+    FileOptions,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -49,6 +50,8 @@ impl Dockerfile {
         Self::Contents(contents_of_dockerfile.as_ref().to_owned())
     }
 
+    /// Converts `self` to [Dockerfile::Contents] and adds on `build_steps`
+    /// lines (automatically includes indent)
     pub fn add_build_steps<I, S>(self, build_steps: I) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
@@ -65,15 +68,18 @@ impl Dockerfile {
         Ok(Dockerfile::Contents(contents))
     }
 }
+
 /// The type of command run at container start
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EntryKind {
-    ///Defined within the container, starts automatically, path must be present
+    /// Defined within the container, starts automatically, path must be present
     /// at container creation
     PreCreate(String),
-    ///added after creating the initial image
+    /// Added after creating the initial image. NOTE there is currently an issue
+    /// with this and missing hashes, see "TODO(PostCreate issue)".
     PostCreate(String),
 }
+
 /// Configuration for running a container.
 ///
 /// The `docker run` command can be split into separate `docker build`, `docker
@@ -125,6 +131,8 @@ pub struct Container {
     /// Passed as `--volume string0:string1` to the create args, but these have
     /// the advantage of being canonicalized and prechecked
     pub volumes: Vec<(String, String)>,
+    /// In some cases volumes are not desirable, so this supplies a way to copy
+    /// things instead
     pub copied_contents: Vec<(String, String)>,
     /// Working directory inside the container
     pub workdir: Option<String>,
@@ -241,13 +249,15 @@ impl Container {
         Ok(self)
     }
 
-    /// If as_build_step is true, then the entrypoint will be copied by adding a
-    /// COPY step to the dockerfile. If as_build_step is false, then the
-    /// entrypoint will be copied after container creation with docker cp
-    /// and the "entrypoint" will be run with docker run (since entrypoints need
-    /// to be defined at creation) If you are going with the former, the
-    /// entrypoint_host_path needs to be relative to the build root, otherwise
-    /// it can be relative to the current directory or an absolute path
+    /// If `as_build_step` is true, then the entrypoint will be copied by adding
+    /// a COPY step to the dockerfile. If `as_build_step` is false, then the
+    /// entrypoint will be copied after container creation with `docker cp`
+    /// and the entrypoint will be run with `docker run` (since entrypoints need
+    /// to be defined at creation). If you are going with the former, the
+    /// `entrypoint_host_path` needs to be relative to the build root (use
+    /// [crate::acquire_file_path_without_canonicalization]), and it needs to be
+    /// within the build context directory (no "../"), otherwise
+    /// it can be anywhere relative to the current directory or an absolute path
     pub async fn copy_entrypoint<I, S>(
         mut self,
         entrypoint_host_path: impl AsRef<str>,
@@ -258,10 +268,8 @@ impl Container {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        //we can't canonicalize the path because if appending the docker copy command
-        // then the path needs to be relative to the docker build context
-        //TODO: need to fix verify_file_path to work if we are not inside the build
-        // context directory
+        // If appending the docker copy command, then the path needs to be relative and
+        // it should not be canonicalized.
         let binary_path = PathBuf::from(entrypoint_host_path.as_ref());
         let binary_file_name = binary_path
             .as_path()
@@ -283,12 +291,13 @@ impl Container {
                 )])
                 .stack()?;
         } else {
-            verify_file_path(&binary_path)
+            acquire_file_path_without_canonicalization(&binary_path)
                 .await
                 .stack_err_locationless(
                     "Container::copy_entrypoint could not verify the external entrypoint binary",
                 )?;
             self.entrypoint_file = Some(EntryKind::PostCreate(entrypoint_file.clone()));
+            // and copy it
             self.copied_contents.push((
                 binary_path.as_os_str().to_str().unwrap().to_owned(),
                 entrypoint_file,
@@ -486,8 +495,9 @@ impl Container {
         }
         for (local_content, _) in &mut self.copied_contents {
             let path = acquire_path(&local_content).await.stack_err_locationless(
-                "Container::precheck -> could not acquire_path to local part of volume argument",
+                "Container::precheck -> could not acquire_path to local part of `copied_contents`",
             )?;
+            // I'm not sure if Docker will handle anything else
             path.to_str()
                 .stack_err_locationless("Container::precheck -> path was not UTF-8")?
                 .clone_into(local_content);
@@ -701,8 +711,9 @@ impl Container {
         };
 
         let Ok(docker_id) = res else { return res };
+
         for (local_path, virtual_path) in &self.copied_contents {
-            //so the docker syntax is source <container>:dest
+            // the docker syntax is `docker cp <source> <container ID>:<destination>`
             let command = apply_debug(
                 Command::new("docker").args(vec![
                     "cp",
@@ -724,10 +735,10 @@ impl Container {
         }
 
         if let Some(EntryKind::PostCreate(s)) = self.entrypoint_file.as_ref() {
-            //TODO: syntax is
-            //docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]
-            //current issue is I'm getting no such image sha256:xxxx....
-            //which I guess is the docker id I'm passing
+            // TODO(PostCreate issue): syntax is
+            // `docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]`
+            // current issue is I'm getting "no such image sha256:xxxx...."
+            // which I guess is the docker id I'm passing
             let mut e = vec![s.to_owned()];
             e.extend(self.entrypoint_args.clone().into_iter());
 
