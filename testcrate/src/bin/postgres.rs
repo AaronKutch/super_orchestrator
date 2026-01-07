@@ -16,8 +16,8 @@ use super_orchestrator::{
 use tokio::{fs, time::sleep};
 use tracing::info;
 
-const POSTGRES: &str = "postgres:16";
-const BASE_CONTAINER: &str = "fedora:41";
+const POSTGRES: &str = "postgres:18";
+const BASE_CONTAINER: &str = "fedora:43";
 // musl builds are more portable because it's statically linked
 //
 // When testing with x86_64-unknown-linux-gnu, if container had older glibc
@@ -121,7 +121,8 @@ async fn container_runner(args: &Args) -> Result<()> {
         )
         .volume(
             pg_data_path.to_str().stack()?,
-            "/var/lib/postgresql/data",
+            // note: this is the directory to mount as of Postgres 18+
+            "/var/lib/postgresql",
         )
         .environment_vars([
             ("POSTGRES_PASSWORD", "root"),
