@@ -37,8 +37,9 @@ impl std::fmt::Debug for Tarball {
 impl Tarball {
     /// Uses the bytes of an existing tarball, also parsing and checking that
     /// the paths are valid UTF-8
-    pub fn new(tarball: Vec<u8>) -> Result<Self> {
+    pub fn new(mut tarball: Vec<u8>) -> Result<Self> {
         // rebuild paths (useful for debugging)
+
         let mut archive = tar::Archive::new(std::io::Cursor::new(&tarball));
         let mut paths = HashSet::new();
         for entry in archive.entries().stack()? {
@@ -53,6 +54,16 @@ impl Tarball {
                     .to_string(),
             );
         }
+
+        // If the passed in tarball that ends in 2 consecutive 512 byte blocks of 0s (indicating End of archive)
+        // there will be a build error when super orchestrator attempts to add the dockerfile to the tar
+        // Note this may not work if the final file itself is padded with at least 512 zeros
+        let last_nonzero = tarball
+        .iter()
+        .rposition(|&b| b != 0)
+        .map(|i| (i / 512 + 1) * 512) // round up to next 512-byte block
+        .unwrap_or(0);
+        tarball.truncate(last_nonzero);
 
         Ok(Self {
             tar: tar::Builder::new(tarball),
