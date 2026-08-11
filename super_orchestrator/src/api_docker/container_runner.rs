@@ -373,19 +373,18 @@ pub async fn total_teardown(
                 if let Ok(Some(container)) = ContainerNetwork::inspect_container(&container_name)
                     .await
                     .stack()
+                    && container.running.is_some_and(|x| x)
                 {
-                    if container.running.is_some_and(|x| x) {
-                        docker
-                            .stop_container(
-                                &container_name,
-                                Some(bollard::container::StopContainerOptions { t: 0 }),
-                            )
-                            .await
-                            .inspect_err(|err| {
-                                tracing::debug!("failed to shutdown container Err: {err}")
-                            })
-                            .stack()?;
-                    }
+                    docker
+                        .stop_container(
+                            &container_name,
+                            Some(bollard::container::StopContainerOptions { t: 0 }),
+                        )
+                        .await
+                        .inspect_err(|err| {
+                            tracing::debug!("failed to shutdown container Err: {err}")
+                        })
+                        .stack()?;
                 }
 
                 Ok(()) as Result<_>

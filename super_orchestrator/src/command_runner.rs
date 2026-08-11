@@ -55,19 +55,20 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 if bytes_read == 0 {
                     // if there has been nonempty output with no ending newline insert one upon
                     // completion
-                    if (!empty) && (!previous_newline) {
-                        if let Some((ref mut std_forward, _)) = std_forward {
-                            if cut_up.is_some() {
-                                // the outside precondition is always met in case of an incomplete
-                                std_forward
-                                    .write_all("\u{fffd}\n".as_bytes())
-                                    .await
-                                    .expect(FORWARDING_FAILED);
-                            } else {
-                                std_forward.write_all(b"\n").await.expect(FORWARDING_FAILED);
-                            }
-                            std_forward.flush().await.unwrap();
+                    if (!empty)
+                        && (!previous_newline)
+                        && let Some((ref mut std_forward, _)) = std_forward
+                    {
+                        if cut_up.is_some() {
+                            // the outside precondition is always met in case of an incomplete
+                            std_forward
+                                .write_all("\u{fffd}\n".as_bytes())
+                                .await
+                                .expect(FORWARDING_FAILED);
+                        } else {
+                            std_forward.write_all(b"\n").await.expect(FORWARDING_FAILED);
                         }
+                        std_forward.flush().await.unwrap();
                     }
                     break;
                 }
@@ -101,22 +102,22 @@ async fn recorder<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     let mut reset = false;
                     let len = u64::try_from(bytes.len()).unwrap();
                     log_len = log_len.checked_add(len).unwrap();
-                    if let Some(limit) = log_limit {
-                        if log_len > limit {
-                            reset = true;
-                            std_log.set_len(0).await.unwrap();
-                            std_log.seek(std::io::SeekFrom::Start(0)).await.unwrap();
-                            let start = if len > limit {
-                                len.wrapping_sub(limit)
-                            } else {
-                                0
-                            };
-                            std_log
-                                .write_all(&bytes[usize::try_from(start).unwrap()..])
-                                .await
-                                .expect(FORWARDING_FAILED);
-                            log_len = len.wrapping_sub(start);
-                        }
+                    if let Some(limit) = log_limit
+                        && log_len > limit
+                    {
+                        reset = true;
+                        std_log.set_len(0).await.unwrap();
+                        std_log.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+                        let start = if len > limit {
+                            len.wrapping_sub(limit)
+                        } else {
+                            0
+                        };
+                        std_log
+                            .write_all(&bytes[usize::try_from(start).unwrap()..])
+                            .await
+                            .expect(FORWARDING_FAILED);
+                        log_len = len.wrapping_sub(start);
                     }
                     if !reset {
                         std_log.write_all(bytes).await.expect(FORWARDING_FAILED);
@@ -456,10 +457,10 @@ impl CommandRunner {
     /// Returns the `pid` of the child process. Returns `None` if the command
     /// has been terminated or the internal `id` call returned `None`.
     pub fn pid(&self) -> Option<u32> {
-        if let Some(child_process) = self.child_process.as_ref() {
-            if let Some(pid) = child_process.id() {
-                return Some(pid);
-            }
+        if let Some(child_process) = self.child_process.as_ref()
+            && let Some(pid) = child_process.id()
+        {
+            return Some(pid);
         }
         None
     }

@@ -33,11 +33,11 @@ pub fn get_separated_val(
 ) -> Result<String> {
     let mut value = None;
     for line in input.split(separate) {
-        if let Some(x) = line.trim().strip_prefix(key) {
-            if let Some(y) = x.trim().strip_prefix(inter_key_val) {
-                value = Some(y.trim().to_owned());
-                break;
-            }
+        if let Some(x) = line.trim().strip_prefix(key)
+            && let Some(y) = x.trim().strip_prefix(inter_key_val)
+        {
+            value = Some(y.trim().to_owned());
+            break;
         }
     }
     value.stack_err_with(|| format!("get_separated_val() -> key \"{key}\" not found"))
