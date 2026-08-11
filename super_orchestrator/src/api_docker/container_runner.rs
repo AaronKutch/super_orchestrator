@@ -288,7 +288,7 @@ impl ContainerRunner {
                         if log_output {
                             eprintln!(
                                 "{prefix_err}{}",
-                                &String::from_utf8_lossy(&message)
+                                String::from_utf8_lossy(&message)
                                     .lines()
                                     .collect::<Vec<_>>()
                                     .join(&prefix_err_newline)
@@ -304,7 +304,7 @@ impl ContainerRunner {
                         if log_output {
                             eprintln!(
                                 "{prefix_out}{}",
-                                &String::from_utf8_lossy(&message)
+                                String::from_utf8_lossy(&message)
                                     .lines()
                                     .collect::<Vec<_>>()
                                     .join(&prefix_out_newline)

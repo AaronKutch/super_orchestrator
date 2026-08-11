@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.0] - TODO
+### Crate
+- MSRV 1.88
+
+### Changes
+
 ## [0.18.0] - 2025-01-07
 ### Fixes
 - Upgraded the container versions for the tests. Note that in postgres 18+, there was a change

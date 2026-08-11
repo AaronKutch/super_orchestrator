@@ -4,15 +4,16 @@ on: [pull_request]
 
 env:
   RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
   test_suite:
     name: Test suite
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
+      # use latest nightly
       - name: Install Rust components
         run: |
           rustup set profile minimal
@@ -20,9 +21,10 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
       - name: Run test suite
         run: |
-          cargo doc
+          cargo doc --no-deps --all-features
           cargo test --all-features
           cargo test --release --all-features
+          cargo t --doc --all-features
           cargo r --bin paths
           cargo r --bin file_options
           cargo r --bin basic_commands
@@ -34,11 +36,25 @@ jobs:
           cargo r --bin postgres_bollard --features=bollard
           cargo r --bin clean
 
+  msrv_build:
+    name: MSRV build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # reads the `rust-version` of Cargo.toml
+      - name: Install MSRV
+        run: |
+          rustup set profile minimal
+          rustup default "$(sed -n 's/^rust-version = "\(.*\)"/\1/p' super_orchestrator/Cargo.toml)"
+      - name: Check that the crate builds on its MSRV
+        run: |
+          cargo build --all-features
+
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
       # Acquire the most recent nightly with a rustfmt component
       - name: Install most recent Rustfmt
         run: |
@@ -53,7 +69,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v7
       # Acquire the most recent nightly with a clippy component
       - name: Install most recent Clippy
         run: |

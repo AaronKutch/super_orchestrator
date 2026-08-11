@@ -230,7 +230,7 @@ impl ContainerNetwork {
     ) -> Result<()> {
         // TODO check if the container is running and stop it if so
         if !self.containers.contains_key(&container.name) {
-            return Err(format!("{} isn't an existing container", &container.name)).stack();
+            return Err(format!("{} isn't an existing container", container.name)).stack();
         }
 
         let remove_options = RemoveContainerOptions {

@@ -740,7 +740,7 @@ impl Container {
             // current issue is I'm getting "no such image sha256:xxxx...."
             // which I guess is the docker id I'm passing
             let mut e = vec![s.to_owned()];
-            e.extend(self.entrypoint_args.clone().into_iter());
+            e.extend(self.entrypoint_args.clone());
 
             let cmd = Command::new("docker commit")
                 .arg("--change ENTRYPOINT [")
