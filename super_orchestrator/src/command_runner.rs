@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{collections::VecDeque, fmt::Debug, process::Stdio, sync::Arc, time::Duration};
 
-use stacked_errors::{bail_locationless, Error, Result, StackableErr};
+use stacked_errors::{Error, Result, StackableErr, bail_locationless};
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -12,7 +12,7 @@ use tokio::{
 };
 use tracing::warn;
 
-use crate::{acquire_dir_path, next_terminal_color, Command, CommandResult};
+use crate::{Command, CommandResult, acquire_dir_path, next_terminal_color};
 
 // note that most things should use `_locationless`, especially if they are
 // expected to be able to error under normal `Command` running circumstances,
@@ -561,7 +561,7 @@ impl CommandRunner {
                     return Err(Error::from_err_locationless(e)).stack_err_locationless(
                         "CommandRunner::wait_with_timeout failed at `try_wait` before reaching \
                          timeout or completed command",
-                    )
+                    );
                 }
             }
             if elapsed > duration {

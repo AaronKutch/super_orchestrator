@@ -7,11 +7,11 @@
 use std::time::Duration;
 
 use clap::Parser;
-use stacked_errors::{bail, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail};
 use super_orchestrator::{
-    acquire_dir_path,
+    Command, acquire_dir_path,
     cli_docker::{Container, ContainerNetwork, Dockerfile},
-    sh, wait_for_ok, Command,
+    sh, wait_for_ok,
 };
 use tokio::{fs, time::sleep};
 use tracing::info;

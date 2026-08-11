@@ -12,11 +12,12 @@ use std::time::Duration;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use stacked_errors::{bail, ensure_eq, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail, ensure_eq};
 use super_orchestrator::{
+    FileOptions,
     cli_docker::{Container, ContainerNetwork, Dockerfile},
     net_message::NetMessenger,
-    sh, FileOptions,
+    sh,
 };
 use tokio::time::sleep;
 use tracing::info;

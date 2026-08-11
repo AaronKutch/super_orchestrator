@@ -14,9 +14,9 @@ use tokio::{io::AsyncWriteExt, sync::Mutex};
 
 use crate::{
     api_docker::{
-        docker_socket::get_or_init_default_docker_instance, port_bindings_to_bollard_args,
         ContainerNetwork, DockerStdin, ExtraAddContainerOptions, PortBind, SuperImage,
-        WaitContainer,
+        WaitContainer, docker_socket::get_or_init_default_docker_instance,
+        port_bindings_to_bollard_args,
     },
     next_terminal_color,
 };

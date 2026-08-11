@@ -12,14 +12,14 @@ use bollard::{
     container::{RemoveContainerOptions, StopContainerOptions},
     secret::ContainerStateStatusEnum,
 };
-use futures::{future::try_join_all, StreamExt};
+use futures::{StreamExt, future::try_join_all};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{select, time::sleep};
 use tracing::{Instrument, Level};
 
 use crate::api_docker::{
-    docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerCreateOptions,
-    ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
+    ContainerCreateOptions, ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
+    docker_socket::get_or_init_default_docker_instance, total_teardown,
 };
 
 /// Manages a set of containers in a controlled environment.
@@ -534,11 +534,7 @@ impl ContainerNetwork {
             if stderr.contains(ignore) {
                 good = false
             }
-            if good {
-                Some(stderr)
-            } else {
-                None
-            }
+            if good { Some(stderr) } else { None }
         }
 
         let not_root_cause = "ProbablyNotRootCauseError";

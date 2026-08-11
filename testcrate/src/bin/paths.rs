@@ -1,4 +1,4 @@
-use stacked_errors::{ensure, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, ensure};
 use super_orchestrator::{acquire_dir_path, acquire_file_path, acquire_path};
 
 #[rustfmt::skip]

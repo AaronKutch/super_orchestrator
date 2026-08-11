@@ -12,15 +12,14 @@ use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use stacked_errors::{bail, ensure_eq, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail, ensure_eq};
 use super_orchestrator::{
-    acquire_dir_path,
+    FileOptions, acquire_dir_path,
     api_docker::{
         AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
         Dockerfile, NetworkCreateOptions, OutputDirConfig, SuperDockerfile, Tarball,
     },
     net_message::NetMessenger,
-    FileOptions,
 };
 use tokio::time::sleep;
 use tracing::info;

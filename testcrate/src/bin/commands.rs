@@ -1,8 +1,8 @@
 use std::{io::Write, iter, time::Duration};
 
 use clap::Parser;
-use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
-use super_orchestrator::{remove_files_in_dir, Command, FileOptions};
+use stacked_errors::{Result, StackableErr, ensure, ensure_eq};
+use super_orchestrator::{Command, FileOptions, remove_files_in_dir};
 use tokio::time::sleep;
 use tracing::info;
 

@@ -1,5 +1,5 @@
-use stacked_errors::{ensure, Result};
-use super_orchestrator::{acquire_file_path, remove_files_in_dir, FileOptions};
+use stacked_errors::{Result, ensure};
+use super_orchestrator::{FileOptions, acquire_file_path, remove_files_in_dir};
 
 #[tokio::main]
 async fn main() -> Result<()> {

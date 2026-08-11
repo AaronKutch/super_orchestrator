@@ -1,18 +1,18 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     mem,
     net::IpAddr,
     time::Duration,
 };
 
-use stacked_errors::{bail_locationless, Error, Result, StackableErr};
-use tokio::time::{sleep, Instant};
+use stacked_errors::{Error, Result, StackableErr, bail_locationless};
+use tokio::time::{Instant, sleep};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    cli_docker::{wait_get_ip_addr, Container, Dockerfile},
     Command, CommandResult, CommandRunner, CtrlCTask, FileOptions,
+    cli_docker::{Container, Dockerfile, wait_get_ip_addr},
 };
 
 // TODO reintroduce UUID capability
@@ -742,11 +742,7 @@ impl ContainerNetwork {
             if stderr.contains(ignore) {
                 good = false
             }
-            if good {
-                Some(stderr)
-            } else {
-                None
-            }
+            if good { Some(stderr) } else { None }
         }
 
         let not_root_cause = "ProbablyNotRootCauseError";

@@ -10,10 +10,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use stacked_errors::{bail_locationless, DisplayStr, Result, StackableErr};
+use stacked_errors::{DisplayStr, Result, StackableErr, bail_locationless};
 use tokio::io::AsyncWriteExt;
 
-use crate::{command_runner, CommandRunner, FileOptions};
+use crate::{CommandRunner, FileOptions, command_runner};
 
 const DEFAULT_READ_LOOP_TIMEOUT: Duration = Duration::from_millis(300);
 

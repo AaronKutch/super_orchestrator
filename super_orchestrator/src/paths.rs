@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use stacked_errors::{bail, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail};
 use tokio::fs;
 
 // Note: we use `dunce::simplify` because of https://github.com/rust-lang/rust/issues/42869

@@ -1,14 +1,14 @@
 use std::{fs::read_to_string, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use stacked_errors::{bail_locationless, Error, Result, StackableErr};
+use stacked_errors::{Error, Result, StackableErr, bail_locationless};
 use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    acquire_file_path, acquire_file_path_without_canonicalization, acquire_path,
-    cli_docker::ContainerNetwork, next_terminal_color, Command, CommandResult, CommandRunner,
-    FileOptions,
+    Command, CommandResult, CommandRunner, FileOptions, acquire_file_path,
+    acquire_file_path_without_canonicalization, acquire_path, cli_docker::ContainerNetwork,
+    next_terminal_color,
 };
 
 // No `OsString`s or `PathBufs` for these structs, it introduces too many issues
@@ -729,7 +729,7 @@ impl Container {
                 Err(e) => {
                     return Err(e).stack_err_locationless(
                         "Container::copy -> when copying contents to container after creation",
-                    )
+                    );
                 }
             };
         }

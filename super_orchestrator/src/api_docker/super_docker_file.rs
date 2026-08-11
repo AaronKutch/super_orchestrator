@@ -4,12 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use futures::{future::try_join_all, TryStreamExt};
+use futures::{TryStreamExt, future::try_join_all};
 use stacked_errors::{Result, StackableErr};
 
 use crate::{
     api_docker::{
-        docker_socket, resolve_from_to, BootstrapOptions, ImageBuildOptions, SuperImage, Tarball,
+        BootstrapOptions, ImageBuildOptions, SuperImage, Tarball, docker_socket, resolve_from_to,
     },
     cli_docker::Dockerfile,
     sh,
