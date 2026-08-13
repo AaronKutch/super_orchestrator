@@ -80,6 +80,15 @@ pub enum EntryKind {
     PostCreate(String),
 }
 
+/// A volume passed in the CLI as "--volume local:container" or "--volume
+/// local:container:options" if the options are set.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Volume {
+    pub local: String,
+    pub container: String,
+    pub options: Option<String>,
+}
+
 /// Configuration for running a container.
 ///
 /// The `docker run` command can be split into separate `docker build`, `docker
@@ -128,9 +137,9 @@ pub struct Container {
     pub build_tag: Option<String>,
     /// Any flags and args passed to to `docker create`
     pub create_args: Vec<String>,
-    /// Passed as `--volume string0:string1` to the create args, but these have
-    /// the advantage of being canonicalized and prechecked
-    pub volumes: Vec<(String, String)>,
+    /// Passed as `--volume local:container:options` to the create args, but
+    /// these have the advantage of being canonicalized and prechecked
+    pub volumes: Vec<Volume>,
     /// In some cases volumes are not desirable, so this supplies a way to copy
     /// things instead
     pub copied_contents: Vec<(String, String)>,
@@ -240,10 +249,11 @@ impl Container {
         let uuid = Uuid::new_v4();
         let entrypoint_file = format!("/{binary_file_name}_{uuid}");
         self.entrypoint_file = Some(EntryKind::PreCreate(entrypoint_file.clone()));
-        self.volumes.push((
-            binary_path.as_os_str().to_str().unwrap().to_owned(),
-            entrypoint_file,
-        ));
+        self.volumes.push(Volume {
+            local: binary_path.as_os_str().to_str().unwrap().to_owned(),
+            container: entrypoint_file,
+            options: None,
+        });
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));
         Ok(self)
@@ -330,8 +340,11 @@ impl Container {
 
     /// Adds a volume to map a local path to a path in the container
     pub fn volume(mut self, local: impl AsRef<str>, container: impl AsRef<str>) -> Self {
-        self.volumes
-            .push((local.as_ref().to_owned(), container.as_ref().to_owned()));
+        self.volumes.push(Volume {
+            local: local.as_ref().to_owned(),
+            container: container.as_ref().to_owned(),
+            options: None,
+        });
         self
     }
 
@@ -342,11 +355,28 @@ impl Container {
         K: AsRef<str>,
         V: AsRef<str>,
     {
-        self.volumes.extend(
-            volumes
-                .into_iter()
-                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
-        );
+        self.volumes
+            .extend(volumes.into_iter().map(|(k, v)| Volume {
+                local: k.as_ref().to_string(),
+                container: v.as_ref().to_string(),
+                options: None,
+            }));
+        self
+    }
+
+    /// Same as [Container::volume] but adding options for things like read-only
+    /// and SELinux options
+    pub fn volume_with(
+        mut self,
+        local: impl AsRef<str>,
+        container: impl AsRef<str>,
+        options: impl AsRef<str>,
+    ) -> Self {
+        self.volumes.push(Volume {
+            local: local.as_ref().to_owned(),
+            container: container.as_ref().to_owned(),
+            options: Some(options.as_ref().to_owned()),
+        });
         self
     }
 
@@ -502,15 +532,14 @@ impl Container {
                 .stack_err_locationless("Container::precheck -> path was not UTF-8")?
                 .clone_into(local_content);
         }
-        for (local_volume, _) in &mut self.volumes {
-            let path = acquire_path(&local_volume).await.stack_err_locationless(
+        for volume in &mut self.volumes {
+            let path = acquire_path(&volume.local).await.stack_err_locationless(
                 "Container::precheck -> could not acquire_path to local part of volume argument",
             )?;
             path.to_str()
                 .stack_err_locationless("Container::precheck -> path was not UTF-8")?
-                .clone_into(local_volume);
+                .clone_into(&mut volume.local);
         }
-
         Ok(())
     }
 
@@ -646,10 +675,14 @@ impl Container {
         }
 
         // volumes
-        let mut combined_volumes = vec![];
-        for (local_volume, virtual_volume) in &self.volumes {
+        let mut combined_volumes: Vec<String> = vec![];
+        for volume in &self.volumes {
             // assumes normalization from `precheck_and_normalize`
-            combined_volumes.push(format!("{local_volume}:{virtual_volume}",));
+            if let Some(options) = &volume.options {
+                combined_volumes.push(format!("{}:{}:{}", volume.local, volume.container, options));
+            } else {
+                combined_volumes.push(format!("{}:{}", volume.local, volume.container));
+            }
         }
         for volume in &combined_volumes {
             args.push("--volume");

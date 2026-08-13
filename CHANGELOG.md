@@ -5,6 +5,7 @@
 - MSRV 1.88
 
 ### Changes
+- Added a new `Volume` struct and `volume_with` function that can include options
 
 ## [0.18.0] - 2025-01-07
 ### Fixes

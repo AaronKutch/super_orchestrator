@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     Command, CommandResult, CommandRunner, CtrlCTask, FileOptions,
-    cli_docker::{Container, Dockerfile, wait_get_ip_addr},
+    cli_docker::{Container, Dockerfile, Volume, wait_get_ip_addr},
 };
 
 // TODO reintroduce UUID capability
@@ -327,9 +327,13 @@ impl ContainerNetwork {
         K: AsRef<str>,
         V: AsRef<str>,
     {
-        let volumes: Vec<(String, String)> = volumes
+        let volumes: Vec<Volume> = volumes
             .into_iter()
-            .map(|x| (x.0.as_ref().to_string(), x.1.as_ref().to_string()))
+            .map(|x| Volume {
+                local: x.0.as_ref().to_string(),
+                container: x.1.as_ref().to_string(),
+                options: None,
+            })
             .collect();
         for state in self.set.values_mut() {
             state

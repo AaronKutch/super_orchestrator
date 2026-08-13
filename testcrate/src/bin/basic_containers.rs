@@ -74,13 +74,14 @@ async fn main() -> Result<()> {
 
     info!("\n\nexample 4\n");
 
-    // read from a local folder that is mapped to the container's filesystem with a
-    // volume
+    // Read from a local folder that is mapped to the container's filesystem with a
+    // volume. It is volumed as read-only and with SELinux shared relabeling.
     let comres = Container::new("example4", Dockerfile::name_tag(BASE_CONTAINER))
         .entrypoint("/usr/bin/cat", ["/dockerfile_resources/example.txt"])
-        .volume(
+        .volume_with(
             "./dockerfiles/dockerfile_resources/",
             "/dockerfile_resources/",
+            "ro,z",
         )
         .run(None, TIMEOUT, logs_dir, false)
         .await
