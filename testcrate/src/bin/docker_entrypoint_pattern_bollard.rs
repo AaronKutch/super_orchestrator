@@ -205,10 +205,10 @@ async fn container_runner(args: &Args) -> Result<()> {
     // just writing them out
 
     // Container entrypoint binaries have no arguments passed to them by default. To
-    // propogate all of the same arguments automatically, we clone the `Args` make
+    // propagate all of the same arguments automatically, we clone the `Args` make
     // any changes we need, and serialize it to be sent through the `--json-args`
     // option. If we pass "--pass-along-example" when calling the container runner
-    // subprocess, it will get propogated to all the containers as well.
+    // subprocess, it will get propagated to all the containers as well.
     let mut container2_args = args.clone();
     // pass a different `entry_name` to each of them to tell them what to specialize
     // into, so that the whole system can be described by one file and one
