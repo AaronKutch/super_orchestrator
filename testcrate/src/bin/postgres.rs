@@ -17,7 +17,7 @@ use tokio::{fs, time::sleep};
 use tracing::info;
 
 const POSTGRES: &str = "postgres:18";
-const BASE_CONTAINER: &str = "fedora:43";
+const BASE_CONTAINER: &str = "fedora:44";
 // musl builds are more portable because it's statically linked
 //
 // When testing with x86_64-unknown-linux-gnu, if container had older glibc
@@ -119,10 +119,11 @@ async fn container_runner(args: &Args) -> Result<()> {
             "postgres",
             Dockerfile::name_tag(POSTGRES),
         )
-        .volume(
+        .volume_with(
             pg_data_path.to_str().stack()?,
             // note: this is the directory to mount as of Postgres 18+
             "/var/lib/postgresql",
+            "z",
         )
         .environment_vars([
             ("POSTGRES_PASSWORD", "root"),

@@ -24,7 +24,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 const POSTGRES: &str = "postgres:18";
-const BASE_CONTAINER: &str = "fedora:43";
+const BASE_CONTAINER: &str = "fedora:44";
 
 fn test_dockerfile() -> String {
     format!(

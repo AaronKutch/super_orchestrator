@@ -7,7 +7,7 @@ use super_orchestrator::{
 };
 use tracing::info;
 
-const BASE_CONTAINER: &str = "fedora:43";
+const BASE_CONTAINER: &str = "fedora:44";
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[tokio::main]

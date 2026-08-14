@@ -15,7 +15,8 @@ use crate::{
     cli_docker::{Container, Dockerfile, Volume, wait_get_ip_addr},
 };
 
-// TODO reintroduce UUID capability
+// TODO reintroduce UUID capability, note we may want to use sha256 given by
+// docker instead
 
 #[derive(Debug, Default)]
 #[allow(clippy::large_enum_variant)]
@@ -333,6 +334,36 @@ impl ContainerNetwork {
                 local: x.0.as_ref().to_string(),
                 container: x.1.as_ref().to_string(),
                 options: None,
+            })
+            .collect();
+        for state in self.set.values_mut() {
+            state
+                .container_mut()
+                .volumes
+                .extend(volumes.iter().cloned());
+        }
+        self
+    }
+
+    /// Adds the volumes to every container currently in the network, and with
+    /// options added to all
+    pub fn add_common_volumes_with<I, K, V>(
+        &mut self,
+        volumes: I,
+        options: impl AsRef<str>,
+    ) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let options = options.as_ref().to_owned();
+        let volumes: Vec<Volume> = volumes
+            .into_iter()
+            .map(|x| Volume {
+                local: x.0.as_ref().to_string(),
+                container: x.1.as_ref().to_string(),
+                options: Some(options.clone()),
             })
             .collect();
         for state in self.set.values_mut() {

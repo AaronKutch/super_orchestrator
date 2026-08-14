@@ -252,7 +252,7 @@ impl Container {
         self.volumes.push(Volume {
             local: binary_path.as_os_str().to_str().unwrap().to_owned(),
             container: entrypoint_file,
-            options: None,
+            options: Some("ro,z".to_owned()),
         });
         self.entrypoint_args
             .extend(entrypoint_args.into_iter().map(|s| s.as_ref().to_string()));

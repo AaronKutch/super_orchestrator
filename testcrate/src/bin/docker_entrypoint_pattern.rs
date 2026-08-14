@@ -22,7 +22,7 @@ use super_orchestrator::{
 use tokio::time::sleep;
 use tracing::info;
 
-const BASE_CONTAINER: &str = "alpine:3.23";
+const BASE_CONTAINER: &str = "alpine:3.24";
 // need this for Alpine
 const TARGET: &str = "x86_64-unknown-linux-musl";
 
