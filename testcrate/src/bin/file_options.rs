@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         .await
         .stack()
         .unwrap_err();
-    debug!("{:?}", e);
+    debug!("{e}");
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
         .await
         .stack()
         .unwrap_err();
-    debug!("{:?}", e);
+    debug!("{e}");
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
