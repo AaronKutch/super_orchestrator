@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # reads the `rust-version` of Cargo.toml
+      # reads the `rust-version` of super_orchestrator/Cargo.toml
       - name: Install MSRV
         run: |
           rustup set profile minimal
