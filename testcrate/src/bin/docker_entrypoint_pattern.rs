@@ -153,6 +153,8 @@ async fn container_runner(args: &Args) -> Result<()> {
                 "/root/.cargo/registry",
             )*/
             .volume(cwd, "/app/repo")
+            // If doing it without relabeling on SELinux
+            //.create_args(["--security-opt", "label=disable"])
             .workdir("/app/repo")
             // Use a target directory separate from the main one so that it doesn't conflict,
             // note there is a rust-analyzer setting to do a similar thing. Also, if building
