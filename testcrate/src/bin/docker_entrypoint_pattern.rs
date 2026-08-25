@@ -25,6 +25,8 @@ use tracing::info;
 const BASE_CONTAINER: &str = "alpine:3.24";
 // need this for Alpine
 const TARGET: &str = "x86_64-unknown-linux-musl";
+// the toolchain installed into the builder container
+const TOOLCHAIN: &str = "1.98.0";
 
 const TIMEOUT: Duration = Duration::from_secs(300);
 const STD_TRIES: u64 = 300;
@@ -107,7 +109,22 @@ ENV ARG_FROM_ENV="environment var from dockerfile"
     )
 }
 
+// For avoiding needing WSL2 on Windows
+fn windows_build_dockerfile() -> String {
+    format!(
+        r##"
+FROM {BASE_CONTAINER}
+
+RUN apk add --no-cache rustup gcc musl-dev
+RUN rustup-init -y --no-modify-path --profile minimal --default-toolchain {TOOLCHAIN}
+ENV PATH="/root/.cargo/bin:$PATH"
+RUN rustup target add {TARGET}
+"##
+    )
+}
+
 async fn container_runner(args: &Args) -> Result<()> {
+    let cwd = "./";
     let logs_dir = "./logs";
     let dockerfiles_dir = "./dockerfiles";
     // note: some operating systems have incredibly bad error reporting when
@@ -117,18 +134,65 @@ async fn container_runner(args: &Args) -> Result<()> {
     // binary is used on a system that expects MUSL compiled binaries, then it will
     // say "no such file or directory" even though some file exists.
     let bin_entrypoint = "docker_entrypoint_pattern";
+    let bins = [bin_entrypoint];
+    let features = Vec::<String>::new();
     let container_target = TARGET;
 
-    // build internal runner with `--release`
-    sh([
-        "cargo build --release --bin",
-        bin_entrypoint,
-        "--target",
-        container_target,
-    ])
-    .await
-    .stack()?;
-    let entrypoint = &format!("./target/{container_target}/release/{bin_entrypoint}");
+    let entrypoint = &if cfg!(windows) {
+        Container::new("builder", Dockerfile::contents(windows_build_dockerfile()))
+            // Volume in cargo's registry using the `home` crate, so that the dependencies do
+            // not have to be redownloaded on every run. Note on SELinux that the container runs as
+            // root and will leave root owned files behind in the host's registry, which
+            // is why this is not enabled by default.
+            /*.volume(
+                home::cargo_home()
+                    .stack()?
+                    .join("registry")
+                    .display()
+                    .to_string(),
+                "/root/.cargo/registry",
+            )*/
+            .volume(cwd, "/app/repo")
+            .workdir("/app/repo")
+            // Use a target directory separate from the main one so that it doesn't conflict,
+            // note there is a rust-analyzer setting to do a similar thing. Also, if building
+            // multiple binaries it is better to pass them all to the same call.
+            .entrypoint(
+                "cargo",
+                [
+                    "build",
+                    "--release",
+                    "--target",
+                    container_target,
+                    "--target-dir",
+                    "target/isolated",
+                ]
+                .into_iter()
+                .chain(bins.iter().flat_map(|bin| ["--bin", bin]))
+                .chain(features.iter().flat_map(|feature| ["--features", feature])),
+            )
+            .run(
+                Some(dockerfiles_dir),
+                Duration::from_secs(3600),
+                logs_dir,
+                true,
+            )
+            .await
+            .stack()?
+            .assert_success()
+            .stack()?;
+        format!("./target/isolated/{container_target}/release/{bin_entrypoint}")
+    } else {
+        sh([
+            "cargo build --release --bin",
+            bin_entrypoint,
+            "--target",
+            container_target,
+        ])
+        .await
+        .stack()?;
+        format!("./target/{container_target}/release/{bin_entrypoint}")
+    };
 
     let mut cn = ContainerNetwork::new("test", Some(dockerfiles_dir), logs_dir);
 
@@ -191,7 +255,7 @@ async fn container_runner(args: &Args) -> Result<()> {
 
     // check the local "./logs" directory, this gets mapped to "/logs" inside the
     // containers
-    cn.add_common_volumes([(logs_dir, "/logs")]);
+    cn.add_common_volumes_with([(logs_dir, "/logs")], "z");
     let uuid = cn.uuid_as_string();
     // passing UUID information through common arguments
     cn.add_common_entrypoint_args(["--uuid", &uuid]);

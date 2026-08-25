@@ -24,38 +24,49 @@ use cross compilation will not work on straight Windows. However, it is possible
 compile inside a container and still keep build artifacts for fast recompilation by voluming
 `CARGO_HOME`. An example of what this looks like is
 ```
-Container::new("builder", Dockerfile::contents(/* build container definition */))
-    // volume in cargo's registry using the `home` crate
-    .volume(
+Container::new("builder", Dockerfile::contents(windows_build_dockerfile()))
+    // Volume in cargo's registry using the `home` crate, so that the dependencies do
+    // not have to be redownloaded on every run.
+    /*.volume(
         home::cargo_home()
             .stack()?
             .join("registry")
-            .to_string_lossy(),
+            .display()
+            .to_string(),
         "/root/.cargo/registry",
-    )
-    .volume(cwd.to_string_lossy(), "/app")
-    .workdir("/app")
-    // Use a target directry separate from the main one so that it doesn't conflict,
+    )*/
+    .volume(cwd, "/app/repo")
+    // If doing it without relabeling on SELinux
+    //.create_args(["--security-opt", "label=disable"])
+    .workdir("/app/repo")
+    // Use a target directory separate from the main one so that it doesn't conflict,
     // note there is a rust-analyzer setting to do a similar thing. Also, if building
     // multiple binaries it is better to pass them all to the same call.
     .entrypoint(
         "cargo",
-        ["build", "--release", "--target-dir", "target/isolated"]
-            .into_iter()
-            .chain(bins.iter().flat_map(|bin| ["--bin", bin]))
-            .chain(features.iter().flat_map(|feature| ["--feature", feature])),
+        [
+            "build",
+            "--release",
+            "--target",
+            container_target,
+            "--target-dir",
+            "target/isolated",
+        ]
+        .into_iter()
+        .chain(bins.iter().flat_map(|bin| ["--bin", bin]))
+        .chain(features.iter().flat_map(|feature| ["--features", feature])),
     )
-    // where there should be a dockerfiles directory and logs directory under `cwd`
     .run(
-        Some(&cwd.join("dockerfiles").to_string_lossy()),
+        Some(dockerfiles_dir),
         Duration::from_secs(3600),
-        &cwd.join("logs").to_string_lossy(),
+        logs_dir,
         true,
     )
     .await
     .stack()?
     .assert_success()
     .stack()?;
+let entrypoint = format!("./target/isolated/{container_target}/release/{bin_entrypoint}");
 ```
 I would include functions to do this in `super_orchestrator` itself, but at this level we are just
 making too many environmental assumptions. If the cargo version used locally and in the build
