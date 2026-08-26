@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0] - 2026-08-26
+### Crate
+- MSRV 1.88
+- `stacked_errors` 0.8
+- `nix` 0.31
+
+### Changes
+- Added a new `Volume` struct and `volume_with` function that can include options,
+  mainly for the purpose of working on SELinux systems
+- Added the "ro,z" options to the volumed binary of `external_entrypoint`, for SELinux compatibility
+  and safety
+
 ## [0.18.0] - 2025-01-07
 ### Fixes
 - Upgraded the container versions for the tests. Note that in postgres 18+, there was a change

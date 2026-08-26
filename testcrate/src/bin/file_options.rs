@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
-use super_orchestrator::{close_file, remove_files_in_dir, FileOptions, ReadOrWrite};
+use stacked_errors::{Result, StackableErr, ensure, ensure_eq};
+use super_orchestrator::{FileOptions, ReadOrWrite, close_file, remove_files_in_dir};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         .await
         .stack()
         .unwrap_err();
-    debug!("{:?}", e);
+    debug!("{e}");
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(
@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
         .await
         .stack()
         .unwrap_err();
-    debug!("{:?}", e);
+    debug!("{e}");
     // (omitting the line number and OS error from the test, but see the printed
     // result)
     ensure!(

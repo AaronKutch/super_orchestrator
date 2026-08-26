@@ -12,14 +12,14 @@ use bollard::{
     container::{RemoveContainerOptions, StopContainerOptions},
     secret::ContainerStateStatusEnum,
 };
-use futures::{future::try_join_all, StreamExt};
+use futures::{StreamExt, future::try_join_all};
 use stacked_errors::{Error, Result, StackableErr};
 use tokio::{select, time::sleep};
 use tracing::{Instrument, Level};
 
 use crate::api_docker::{
-    docker_socket::get_or_init_default_docker_instance, total_teardown, ContainerCreateOptions,
-    ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
+    ContainerCreateOptions, ContainerRunner, DockerStdin, SuperDockerfile, SuperImage,
+    docker_socket::get_or_init_default_docker_instance, total_teardown,
 };
 
 /// Manages a set of containers in a controlled environment.
@@ -230,7 +230,7 @@ impl ContainerNetwork {
     ) -> Result<()> {
         // TODO check if the container is running and stop it if so
         if !self.containers.contains_key(&container.name) {
-            return Err(format!("{} isn't an existing container", &container.name)).stack();
+            return Err(format!("{} isn't an existing container", container.name)).stack();
         }
 
         let remove_options = RemoveContainerOptions {
@@ -534,11 +534,7 @@ impl ContainerNetwork {
             if stderr.contains(ignore) {
                 good = false
             }
-            if good {
-                Some(stderr)
-            } else {
-                None
-            }
+            if good { Some(stderr) } else { None }
         }
 
         let not_root_cause = "ProbablyNotRootCauseError";
@@ -549,60 +545,52 @@ impl ContainerNetwork {
             // check if a caller had already gotten the final wait or check ourselves if
             // there was a failure
             let mut failed = state.had_error;
-            if !failed {
-                if let Some(wait_container) = state.wait_container.as_mut() {
-                    select! {
-                        item = wait_container.next() => {
-                            if let Some(item) = item {
-                                match item {
-                                    Ok(response) => {
-                                        if response.status_code != 0 {
-                                            failed = true;
-                                        }
-                                    },
-                                    Err(_bollard_err) => {
+            if !failed && let Some(wait_container) = state.wait_container.as_mut() {
+                select! {
+                    item = wait_container.next() => {
+                        if let Some(item) = item {
+                            match item {
+                                Ok(response) => {
+                                    if response.status_code != 0 {
                                         failed = true;
-                                    },
-                                }
+                                    }
+                                },
+                                Err(_bollard_err) => {
+                                    failed = true;
+                                },
                             }
                         }
-                        _ = sleep(Duration::from_millis(10)) => ()
                     }
+                    _ = sleep(Duration::from_millis(10)) => ()
                 }
             }
 
-            if failed {
-                if let Some(std_record) = state.std_record.as_ref() {
-                    let std_record =
-                        String::from_utf8_lossy(std_record.lock().await.make_contiguous())
-                            .into_owned();
+            if failed && let Some(std_record) = state.std_record.as_ref() {
+                let std_record =
+                    String::from_utf8_lossy(std_record.lock().await.make_contiguous()).into_owned();
 
-                    let mut encountered = false;
+                let mut encountered = false;
 
-                    if let Some(std_record) =
-                        contains(&std_record, error_marker, not_root_cause, false)
-                    {
-                        encountered = true;
-                        res = res.add_err_locationless(format!(
-                            "Error from container \"{name}\" std_record:\n{std_record}\n"
-                        ));
-                    }
+                if let Some(std_record) = contains(&std_record, error_marker, not_root_cause, false)
+                {
+                    encountered = true;
+                    res = res.add_err_locationless(format!(
+                        "Error from container \"{name}\" std_record:\n{std_record}\n"
+                    ));
+                }
 
-                    if let Some(std_record) =
-                        contains(&std_record, panicked_at, not_root_cause, true)
-                    {
-                        encountered = true;
-                        res = res.add_err_locationless(format!(
-                            "Panic message from container \"{name}\" std_record:\n{std_record}\n"
-                        ));
-                    }
+                if let Some(std_record) = contains(&std_record, panicked_at, not_root_cause, true) {
+                    encountered = true;
+                    res = res.add_err_locationless(format!(
+                        "Panic message from container \"{name}\" std_record:\n{std_record}\n"
+                    ));
+                }
 
-                    if !encountered {
-                        res = res.add_err_locationless(format!(
-                            "Error: Container \"{name}\" was unsuccessful but does not seem to \
-                             have an error or panic message\n"
-                        ));
-                    }
+                if !encountered {
+                    res = res.add_err_locationless(format!(
+                        "Error: Container \"{name}\" was unsuccessful but does not seem to have \
+                         an error or panic message\n"
+                    ));
                 }
             }
         }

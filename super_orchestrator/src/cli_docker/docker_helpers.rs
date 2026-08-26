@@ -1,10 +1,10 @@
 use std::{net::IpAddr, process::Stdio, time::Duration};
 
-use stacked_errors::{bail, stacked_get, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail, stacked_get};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::{sh, wait_for_ok, Command, CtrlCTask};
+use crate::{Command, CtrlCTask, sh, wait_for_ok};
 
 const STD_DELAY: Duration = Duration::from_millis(300);
 const IP_RETRIES: u64 = 10;

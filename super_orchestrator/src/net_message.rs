@@ -1,10 +1,10 @@
 use std::{any::type_name, cmp::max, net::SocketAddr, time::Duration};
 
-use serde::{de::DeserializeOwned, Serialize};
-use stacked_errors::{bail, Error, Result, StackableErr};
+use serde::{Serialize, de::DeserializeOwned};
+use stacked_errors::{Error, Result, StackableErr, bail};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{lookup_host, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, lookup_host},
     select,
     time::sleep,
 };
@@ -135,7 +135,7 @@ impl NetMessenger {
                 }
                 Err(e) => {
                     return Err(Error::from_err(e))
-                        .stack_err_locationless("failed to serialize message")?
+                        .stack_err_locationless("failed to serialize message")?;
                 }
             }
             break;

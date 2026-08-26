@@ -10,15 +10,15 @@ use std::{
 };
 
 pub(crate) use color_cycle::next_terminal_color;
-use stacked_errors::{bail_locationless, Result, StackableErr, TimeoutError};
+use stacked_errors::{Result, StackableErr, TimeoutError, bail_locationless};
 use tokio::{
-    fs::{read_dir, remove_file, File},
+    fs::{File, read_dir, remove_file},
     io::AsyncWriteExt,
     time::sleep,
 };
 use tracing::warn;
 
-use crate::{acquire_dir_path, Command};
+use crate::{Command, acquire_dir_path};
 
 /// A convenience wrapper around the functionality of [tokio::signal::ctrl_c]
 pub struct CtrlCTask {
@@ -222,8 +222,8 @@ pub async fn close_file(mut file: File) -> Result<()> {
 /// # Example
 ///
 /// ```no_run
-/// use stacked_errors::{ensure, Result};
-/// use super_orchestrator::{acquire_file_path, remove_files_in_dir, FileOptions};
+/// use stacked_errors::{Result, ensure};
+/// use super_orchestrator::{FileOptions, acquire_file_path, remove_files_in_dir};
 /// async fn ex() -> Result<()> {
 ///     // note: in regular use you would use `.await.stack()?` on the ends
 ///     // to tell what lines are failing

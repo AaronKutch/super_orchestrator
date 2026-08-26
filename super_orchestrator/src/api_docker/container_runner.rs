@@ -14,9 +14,9 @@ use tokio::{io::AsyncWriteExt, sync::Mutex};
 
 use crate::{
     api_docker::{
-        docker_socket::get_or_init_default_docker_instance, port_bindings_to_bollard_args,
         ContainerNetwork, DockerStdin, ExtraAddContainerOptions, PortBind, SuperImage,
-        WaitContainer,
+        WaitContainer, docker_socket::get_or_init_default_docker_instance,
+        port_bindings_to_bollard_args,
     },
     next_terminal_color,
 };
@@ -288,7 +288,7 @@ impl ContainerRunner {
                         if log_output {
                             eprintln!(
                                 "{prefix_err}{}",
-                                &String::from_utf8_lossy(&message)
+                                String::from_utf8_lossy(&message)
                                     .lines()
                                     .collect::<Vec<_>>()
                                     .join(&prefix_err_newline)
@@ -304,7 +304,7 @@ impl ContainerRunner {
                         if log_output {
                             eprintln!(
                                 "{prefix_out}{}",
-                                &String::from_utf8_lossy(&message)
+                                String::from_utf8_lossy(&message)
                                     .lines()
                                     .collect::<Vec<_>>()
                                     .join(&prefix_out_newline)
@@ -373,19 +373,18 @@ pub async fn total_teardown(
                 if let Ok(Some(container)) = ContainerNetwork::inspect_container(&container_name)
                     .await
                     .stack()
+                    && container.running.is_some_and(|x| x)
                 {
-                    if container.running.is_some_and(|x| x) {
-                        docker
-                            .stop_container(
-                                &container_name,
-                                Some(bollard::container::StopContainerOptions { t: 0 }),
-                            )
-                            .await
-                            .inspect_err(|err| {
-                                tracing::debug!("failed to shutdown container Err: {err}")
-                            })
-                            .stack()?;
-                    }
+                    docker
+                        .stop_container(
+                            &container_name,
+                            Some(bollard::container::StopContainerOptions { t: 0 }),
+                        )
+                        .await
+                        .inspect_err(|err| {
+                            tracing::debug!("failed to shutdown container Err: {err}")
+                        })
+                        .stack()?;
                 }
 
                 Ok(()) as Result<_>

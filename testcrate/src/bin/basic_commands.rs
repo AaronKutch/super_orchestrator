@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
-use super_orchestrator::{sh, Command, CommandResult, CommandResultNoDebug, FileOptions};
+use stacked_errors::{Result, StackableErr, ensure, ensure_eq};
+use super_orchestrator::{Command, CommandResult, CommandResultNoDebug, FileOptions, sh};
 use tokio::time::sleep;
 use tracing::info;
 

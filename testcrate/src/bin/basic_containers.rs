@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use stacked_errors::{ensure, ensure_eq, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, ensure, ensure_eq};
 use super_orchestrator::{
     cli_docker::{Container, ContainerNetwork, Dockerfile},
     net_message::wait_for_ok_lookup_host,
 };
 use tracing::info;
 
-const BASE_CONTAINER: &str = "fedora:43";
+const BASE_CONTAINER: &str = "fedora:44";
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[tokio::main]
@@ -74,13 +74,14 @@ async fn main() -> Result<()> {
 
     info!("\n\nexample 4\n");
 
-    // read from a local folder that is mapped to the container's filesystem with a
-    // volume
+    // Read from a local folder that is mapped to the container's filesystem with a
+    // volume. It is volumed as read-only and with SELinux shared relabeling.
     let comres = Container::new("example4", Dockerfile::name_tag(BASE_CONTAINER))
         .entrypoint("/usr/bin/cat", ["/dockerfile_resources/example.txt"])
-        .volume(
+        .volume_with(
             "./dockerfiles/dockerfile_resources/",
             "/dockerfile_resources/",
+            "ro,z",
         )
         .run(None, TIMEOUT, logs_dir, false)
         .await

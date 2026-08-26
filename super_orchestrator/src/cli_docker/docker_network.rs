@@ -1,21 +1,22 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     mem,
     net::IpAddr,
     time::Duration,
 };
 
-use stacked_errors::{bail_locationless, Error, Result, StackableErr};
-use tokio::time::{sleep, Instant};
+use stacked_errors::{Error, Result, StackableErr, bail_locationless};
+use tokio::time::{Instant, sleep};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    cli_docker::{wait_get_ip_addr, Container, Dockerfile},
     Command, CommandResult, CommandRunner, CtrlCTask, FileOptions,
+    cli_docker::{Container, Dockerfile, Volume, wait_get_ip_addr},
 };
 
-// TODO reintroduce UUID capability
+// TODO reintroduce UUID capability, note we may want to use sha256 given by
+// docker instead
 
 #[derive(Debug, Default)]
 #[allow(clippy::large_enum_variant)]
@@ -327,9 +328,43 @@ impl ContainerNetwork {
         K: AsRef<str>,
         V: AsRef<str>,
     {
-        let volumes: Vec<(String, String)> = volumes
+        let volumes: Vec<Volume> = volumes
             .into_iter()
-            .map(|x| (x.0.as_ref().to_string(), x.1.as_ref().to_string()))
+            .map(|x| Volume {
+                local: x.0.as_ref().to_string(),
+                container: x.1.as_ref().to_string(),
+                options: None,
+            })
+            .collect();
+        for state in self.set.values_mut() {
+            state
+                .container_mut()
+                .volumes
+                .extend(volumes.iter().cloned());
+        }
+        self
+    }
+
+    /// Adds the volumes to every container currently in the network, and with
+    /// options added to all
+    pub fn add_common_volumes_with<I, K, V>(
+        &mut self,
+        volumes: I,
+        options: impl AsRef<str>,
+    ) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let options = options.as_ref().to_owned();
+        let volumes: Vec<Volume> = volumes
+            .into_iter()
+            .map(|x| Volume {
+                local: x.0.as_ref().to_string(),
+                container: x.1.as_ref().to_string(),
+                options: Some(options.clone()),
+            })
             .collect();
         for state in self.set.values_mut() {
             state
@@ -742,11 +777,7 @@ impl ContainerNetwork {
             if stderr.contains(ignore) {
                 good = false
             }
-            if good {
-                Some(stderr)
-            } else {
-                None
-            }
+            if good { Some(stderr) } else { None }
         }
 
         let not_root_cause = "ProbablyNotRootCauseError";

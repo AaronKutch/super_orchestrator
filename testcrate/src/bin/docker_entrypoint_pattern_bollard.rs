@@ -12,21 +12,20 @@ use std::{str::FromStr, time::Duration};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use stacked_errors::{bail, ensure_eq, Result, StackableErr};
+use stacked_errors::{Result, StackableErr, bail, ensure_eq};
 use super_orchestrator::{
-    acquire_dir_path,
+    FileOptions, acquire_dir_path,
     api_docker::{
         AddContainerOptions, BootstrapOptions, ContainerCreateOptions, ContainerNetwork,
         Dockerfile, NetworkCreateOptions, OutputDirConfig, SuperDockerfile, Tarball,
     },
     net_message::NetMessenger,
-    FileOptions,
 };
 use tokio::time::sleep;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-const BASE_CONTAINER: &str = "alpine:3.23";
+const BASE_CONTAINER: &str = "alpine:3.24";
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const STD_TRIES: u64 = 30;
@@ -206,10 +205,10 @@ async fn container_runner(args: &Args) -> Result<()> {
     // just writing them out
 
     // Container entrypoint binaries have no arguments passed to them by default. To
-    // propogate all of the same arguments automatically, we clone the `Args` make
+    // propagate all of the same arguments automatically, we clone the `Args` make
     // any changes we need, and serialize it to be sent through the `--json-args`
     // option. If we pass "--pass-along-example" when calling the container runner
-    // subprocess, it will get propogated to all the containers as well.
+    // subprocess, it will get propagated to all the containers as well.
     let mut container2_args = args.clone();
     // pass a different `entry_name` to each of them to tell them what to specialize
     // into, so that the whole system can be described by one file and one
