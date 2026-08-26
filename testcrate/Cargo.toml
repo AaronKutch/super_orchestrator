@@ -8,11 +8,11 @@ publish = false
 # because it changes the locations in target directories from what is usual
 
 [dependencies]
-clap = { version = "4", features = ["derive", "env"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
-stacked_errors = { path = "../../stacked_errors", features = ["supports-color"] }
-super_orchestrator = { path = "../super_orchestrator", features = ["bollard"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+stacked_errors = { workspace = true }
+super_orchestrator = { workspace = true, features = ["bollard"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
