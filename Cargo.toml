@@ -8,12 +8,12 @@ bstr = "1"
 clap = { version = "4", features = ["derive", "env"] }
 dunce = "1.0"
 futures = { version = "0.3.31" }
-nix = { version = "0.30", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["signal"] }
 owo-colors = { version = "4.1", default-features = false }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
-sha3 = "0.10"
+sha3 = "0.12"
 stacked_errors = { version = "0.8", features = ["supports-color"] }
 super_orchestrator = { path = "./super_orchestrator" }
 tar = { version = "0.4.42" }

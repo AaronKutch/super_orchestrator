@@ -1,6 +1,6 @@
 [package]
 name = "super_orchestrator"
-version = "0.18.0"
+version = "0.19.0"
 edition = "2024"
 # `flake.nix` and `ci.yml` read this automatically, but run `nix flake update`
 # and fix any hashes. The pinned toolchain in `pinned-toolchain.toml` is

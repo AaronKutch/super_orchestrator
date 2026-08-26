@@ -1,8 +1,10 @@
 # Changelog
 
-## [0.19.0] - TODO
+## [0.19.0] - 2026-08-26
 ### Crate
 - MSRV 1.88
+- `stacked_errors` 0.8
+- `nix` 0.31
 
 ### Changes
 - Added a new `Volume` struct and `volume_with` function that can include options
